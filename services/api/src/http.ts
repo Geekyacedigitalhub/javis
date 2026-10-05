@@ -21,37 +21,77 @@ const server = Bun.serve({
         return Response.json(await postChat(body));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Request failed";
-        return Response.json({ error: message }, { status: message === "message is required" ? 400 : 500 });
+        return Response.json(
+          { error: message },
+          { status: message === "message is required" ? 400 : 500 },
+        );
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
+      try {
+        const body = await request.json();
+        const goal = typeof body?.goal === "string" ? body.goal.trim() : "";
+        const message =
+          typeof body?.message === "string" && body.message.trim()
+            ? body.message.trim()
+            : goal;
+
+        if (!goal) {
+          return Response.json({ error: "goal is required" }, { status: 400 });
+        }
+
+        const run = await codingSessions.start({
+          goal,
+          conversationId:
+            typeof body?.conversationId === "string" ? body.conversationId : undefined,
+          messages: [{ role: "user", content: message }],
+        });
+
+        return Response.json(run, { status: 201 });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Agent run failed";
+        return Response.json({ error: message }, { status: 500 });
       }
     }
 
     const runMatch = url.pathname.match(/^\/v1\/agent-runs\/([^/]+)$/);
     if (runMatch && request.method === "GET") {
       const run = await agentRunStore.get(runMatch[1]);
-      return run ? Response.json(run) : Response.json({ error: "Agent run not found" }, { status: 404 });
+      return run
+        ? Response.json(run)
+        : Response.json({ error: "Agent run not found" }, { status: 404 });
     }
 
     const approvalMatch = url.pathname.match(/^\/v1\/approvals\/([^/]+)$/);
     if (approvalMatch && request.method === "GET") {
       const approval = await approvalStore.get(approvalMatch[1]);
-      return approval ? Response.json(approval) : Response.json({ error: "Approval not found" }, { status: 404 });
+      return approval
+        ? Response.json(approval)
+        : Response.json({ error: "Approval not found" }, { status: 404 });
     }
 
     if (approvalMatch && request.method === "POST") {
       try {
         const body = await request.json();
         if (body?.status !== "approved" && body?.status !== "rejected") {
-          return Response.json({ error: "status must be approved or rejected" }, { status: 400 });
+          return Response.json(
+            { error: "status must be approved or rejected" },
+            { status: 400 },
+          );
         }
 
         const approval = await approvalStore.get(approvalMatch[1]);
-        if (!approval) return Response.json({ error: "Approval not found" }, { status: 404 });
+        if (!approval) {
+          return Response.json({ error: "Approval not found" }, { status: 404 });
+        }
 
-        const result = body.status === "approved"
-          ? await codingSessions.approveAndResume(approvalMatch[1], [])
-          : await codingSessions.reject(approvalMatch[1]);
+        const run =
+          body.status === "approved"
+            ? await codingSessions.approveAndResume(approvalMatch[1])
+            : await codingSessions.reject(approvalMatch[1]);
 
-        return Response.json({ approvalId: approvalMatch[1], run: result });
+        return Response.json({ approvalId: approvalMatch[1], run });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Approval failed";
         return Response.json({ error: message }, { status: 400 });
