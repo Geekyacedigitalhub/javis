@@ -8,6 +8,7 @@ export interface FroshInstalledApp {
 type NativeApps = {
   listApps(): FroshInstalledApp[];
   openApp(packageName: string): { accepted: boolean; message: string; packageName?: string };
+  listMessagingApps(): Array<{ provider: string; packageName: string; name: string }>;
 };
 
 const native = requireNativeModule<NativeApps>("FroshApps");
@@ -43,4 +44,8 @@ export function launchAppByName(query: string) {
     return { accepted: false, message: "I couldn't uniquely identify an installed app with that name." };
   }
   return native.openApp(app.packageName);
+}
+
+export function listInstalledMessagingApps() {
+  return native.listMessagingApps();
 }
