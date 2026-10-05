@@ -17,6 +17,13 @@ export class PostgresMissionStore implements FroshMissionStore {
     return rows[0]??null;
   }
 
+  async renewLease(id:string,userId:string){
+    const mission=await this.get(id,userId);
+    if(!mission||mission.status!=="running")return null;
+    const next={...mission,leaseUntil:new Date(Date.now()+120000).toISOString(),updatedAt:new Date().toISOString()};
+    this.items.set(id,next);
+    return next;
+  }
   async listResumable(userId:string){
     return (await this.list(userId)).filter((mission)=>mission.status==="running"||mission.status==="waiting_approval"||mission.status==="planning");
   }
