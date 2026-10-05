@@ -41,3 +41,7 @@ High-risk capabilities remain behind explicit Android permissions and FROSH auth
 6. screen/accessibility bridge
 7. location/maps
 8. phone-to-Windows control
+
+## Media architecture
+
+FROSH exposes provider-neutral media commands: play, pause, toggle, next, previous, stop, volume up/down, plus current-media state. The Android MediaSession bridge will connect these commands to whichever compatible media session is active on the phone.
