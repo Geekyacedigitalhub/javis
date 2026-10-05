@@ -942,6 +942,8 @@ const server = Bun.serve({
           }
 
           const continuationStartedAt=Date.now();
+          const continuationBaseRun=mission.activeRunId?await agentRunStore.get(mission.activeRunId):null;
+          const continuationBaseToolCount=continuationBaseRun?.toolCalls.length??0;
           let run;
           try {
             run=await codingSessions.approveAndResume(mission.pendingApprovalId);
@@ -963,7 +965,8 @@ const server = Bun.serve({
 
           const continuationDurationMs=Date.now()-continuationStartedAt;
           const executionDurationMs=existingDurationMs+continuationDurationMs;
-          const toolCallsUsed=existingToolCount+run.toolCalls.length;
+          const continuationToolCalls=Math.max(0,run.toolCalls.length-continuationBaseToolCount);
+          const toolCallsUsed=existingToolCount+continuationToolCalls;
           const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
           const completed=steps.filter(step=>step.status==="completed").length;
           const progress=steps.length?completed/steps.length:0;
