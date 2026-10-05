@@ -1,4 +1,5 @@
 import type { FroshDevice, FroshDeviceRegistration } from "../../../packages/types/src/device";
+import type { FroshCapabilityStatus } from "../../../packages/types/src/capabilities";
 
 const devices = new Map<string, FroshDevice>();
 const credentials = new Map<string, { token: string; expiresAt: number }>();
@@ -53,4 +54,21 @@ export function authenticateDevice(deviceId: string, token: string) {
   if (!device) return false;
   devices.set(deviceId, { ...device, status: "online", lastSeenAt: new Date().toISOString() });
   return true;
+}
+
+export function updateDeviceCapabilities(deviceId: string, capabilities: FroshCapabilityStatus[]) {
+  const device = devices.get(deviceId);
+  if (!device) return null;
+
+  const updated = {
+    ...device,
+    capabilities: capabilities
+      .filter((item) => item.availability === "available")
+      .map((item) => item.capability),
+    lastSeenAt: new Date().toISOString(),
+    status: "online" as const,
+  };
+
+  devices.set(deviceId, updated);
+  return updated;
 }
