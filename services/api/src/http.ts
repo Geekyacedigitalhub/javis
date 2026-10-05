@@ -722,6 +722,12 @@ const server = Bun.serve({
           }
           await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Reconciled "+reconciled.size+" interrupted run(s); reset "+interrupted.length+" unfinished step(s).",metadata:{reconciledStepIds:[...reconciled],resetStepIds:interrupted.map(step=>step.id)}});
         }
+        if(steps.length>0 && steps.every(step=>step.status==="completed")){
+          const recoveredResult=steps[steps.length-1]?.result??mission.result;
+          const completedMission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:mission.activeRunId,pendingApprovalId:undefined,result:recoveredResult,leaseUntil:undefined,leaseOwner:undefined});
+          await store.addEvent({missionId:id,userId,type:"mission.completed",message:"Mission completed during recovery reconciliation."});
+          return Response.json({mission:completedMission});
+        }
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
         let lastResult=mission.result;
