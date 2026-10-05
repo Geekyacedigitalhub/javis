@@ -19,10 +19,12 @@ export function startMissionRunner(){
         try{
           const claimed=await store.claim(mission.id,userId,workerId);
           if(!claimed)return;
-          const heartbeat=setInterval(()=>void store.renewLease(mission.id,userId,workerId),60_000);
+          let leaseLost=false;
+          const heartbeat=setInterval(()=>void store.renewLease(mission.id,userId,workerId).then((renewed)=>{if(!renewed)leaseLost=true;}).catch(()=>{leaseLost=true;}),30_000);
           try{
             const response=await fetch("http://localhost:"+String(process.env.PORT??3001)+"/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(mission.id)+"/recover",{method:"POST",headers:{"x-frosh-web-token":process.env.FROSH_WEB_TOKEN??"","x-frosh-mission-worker-id":workerId}});
             if(!response.ok)console.error("FROSH mission worker failed",mission.id,response.status);
+            if(leaseLost)console.warn("FROSH mission worker lost its lease",mission.id);
           } finally {
             clearInterval(heartbeat);
           }
