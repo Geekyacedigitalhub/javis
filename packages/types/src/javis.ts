@@ -1,34 +1,41 @@
-export type JavisRole = "user" | "assistant" | "system" | "tool";
+export type FroshRole = "user" | "assistant" | "system" | "tool";
+export type JavisRole = FroshRole;
 
-export interface JavisMessage {
-  role: JavisRole;
+export interface FroshMessage {
+  role: FroshRole;
   content: string;
   name?: string;
   toolCallId?: string;
 }
+export type JavisMessage = FroshMessage;
 
-export interface JavisRequest {
+export interface FroshRequest {
   message: string;
   conversationId?: string;
   userId?: string;
 }
+export type JavisRequest = FroshRequest;
 
-export interface JavisResponse {
-  conversationId: string;
-  message: string;
-  toolCalls: JavisToolCall[];
-}
-
-export interface JavisToolCall {
+export interface FroshToolCall {
   id: string;
   name: string;
   arguments: Record<string, unknown>;
   status: "planned" | "completed" | "failed";
 }
+export type JavisToolCall = FroshToolCall;
 
-export interface JavisToolDefinition {
+export interface FroshToolDefinition {
   name: string;
   description: string;
   permission: "safe" | "confirm" | "restricted";
+  parameters?: Record<string, unknown>;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
+export type JavisToolDefinition = FroshToolDefinition;
+
+export interface FroshResponse {
+  conversationId: string;
+  message: string;
+  toolCalls: FroshToolCall[];
+}
+export type JavisResponse = FroshResponse;
