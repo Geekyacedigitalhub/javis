@@ -2,6 +2,7 @@ export type FroshApprovalStatus = "pending" | "approved" | "rejected" | "expired
 
 export interface FroshApprovalRequest {
   id: string;
+  runId?: string;
   toolName: string;
   arguments: Record<string, unknown>;
   reason: string;
