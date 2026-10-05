@@ -528,6 +528,8 @@ const server = Bun.serve({
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
         let lastResult=mission.result;
+        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.recovered"|"mission.completed"|"mission.failed",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+        await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
           const index=steps.findIndex(step=>step.status==="pending");
@@ -536,13 +538,16 @@ const server = Bun.serve({
           const now=new Date().toISOString();
           steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
           const step=steps[index];
+          await emit("mission.step.started","Started: "+step.title,step.id);
           const run=await codingSessions.start({
             goal:step.title+"\nOverall objective: "+mission.goal,
             messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
           });
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
           steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
-          if(stepStatus==="failed") steps.push(createRecoveryStep(step.title,run.result));
+          if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
+          if(stepStatus==="failed"){ await emit("mission.step.failed","Failed: "+step.title,step.id,run.id); steps.push(createRecoveryStep(step.title,run.result)); await emit("mission.recovered","Added recovery work for: "+step.title,step.id,run.id); }
+          if(run.status==="waiting_approval") await emit("mission.approval.required","Approval required to continue: "+step.title,step.id,run.id);
 
           lastRunId=run.id;
           lastApproval=run.pendingApprovalId;
@@ -575,7 +580,8 @@ const server = Bun.serve({
             return Response.json({mission});
           }
           if(progress>=1){
-            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult});
+            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,leaseUntil:undefined});
+            await emit("mission.completed","Mission completed.");
             return Response.json({mission});
           }
         }
