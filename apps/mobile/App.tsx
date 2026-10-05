@@ -3,7 +3,9 @@ import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Tex
 import { StatusBar } from "expo-status-bar";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { listDevices, sendMessage, startAgentRun } from "./src/api";
+import { listDevices, resolveApproval, sendMessage, startAgentRun } from "./src/api";
+import { connectFroshRealtime } from "./src/realtime";
+import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -11,9 +13,15 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [devices, setDevices] = useState<FroshDevice[]>([]);
   const [run, setRun] = useState<FroshAgentRun | null>(null);
+  const [approval, setApproval] = useState<FroshApprovalRequest | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<"connecting" | "open" | "closed">("connecting");
 
   useEffect(() => {
     listDevices().then((result) => setDevices(result.devices)).catch(() => undefined);
+    return connectFroshRealtime((event) => {
+      if (event.type === "run.updated") setRun(event.run);
+      if (event.type === "approval.created") setApproval(event.approval);
+    }, setRealtimeStatus);
   }, []);
 
   async function ask() {
@@ -53,7 +61,7 @@ export default function App() {
       <ScrollView contentContainerStyle={styles.container}>
         <Text style={styles.eyebrow}>PERSONAL AI OPERATING SYSTEM</Text>
         <Text style={styles.title}>FROSH</Text>
-        <Text style={styles.status}>● ONLINE</Text>
+        <Text style={styles.status}>● {realtimeStatus === "open" ? "LIVE" : realtimeStatus.toUpperCase()}</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Ask FROSH</Text>
@@ -75,6 +83,18 @@ export default function App() {
             </Pressable>
           </View>
         </View>
+
+        {approval ? (
+          <View style={styles.approvalCard}>
+            <Text style={styles.cardTitle}>Approval Required</Text>
+            <Text style={styles.reply}>{approval.reason}</Text>
+            <Text style={styles.muted}>Action: {approval.toolName}</Text>
+            <View style={styles.actions}>
+              <Pressable style={styles.primary} onPress={async () => { const result = await resolveApproval(approval.id, "approved"); setRun(result.run); setApproval(null); }}><Text style={styles.primaryText}>APPROVE</Text></Pressable>
+              <Pressable style={styles.secondary} onPress={async () => { const result = await resolveApproval(approval.id, "rejected"); setRun(result.run); setApproval(null); }}><Text style={styles.secondaryText}>REJECT</Text></Pressable>
+            </View>
+          </View>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Current Task</Text>
@@ -105,6 +125,7 @@ const styles = StyleSheet.create({
   eyebrow: { color: "#6ee7b7", fontSize: 11, fontWeight: "800", letterSpacing: 2 },
   title: { color: "#f0fdf4", fontSize: 48, fontWeight: "900", letterSpacing: 4 },
   status: { color: "#4ade80", fontWeight: "800" },
+  approvalCard: { backgroundColor: "#211a08", borderWidth: 1, borderColor: "#854d0e", borderRadius: 18, padding: 18, gap: 12 },
   card: { backgroundColor: "#0d1b13", borderWidth: 1, borderColor: "#173524", borderRadius: 18, padding: 18, gap: 12 },
   cardTitle: { color: "#dcfce7", fontSize: 17, fontWeight: "800" },
   reply: { color: "#d1d5db", fontSize: 15, lineHeight: 22 },
