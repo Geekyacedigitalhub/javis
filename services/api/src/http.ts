@@ -389,6 +389,62 @@ const server = Bun.serve({
         : Response.json({ error: "Device not found" }, { status: 404 });
     }
 
+    const automationUsers = url.pathname.match(/^\/v1\/automations\/users\/([^/]+)$/);
+    if (automationUsers && request.method === "GET") {
+      const { getAutomationStore } = await import("../../automation/src");
+      return Response.json({ automations: await getAutomationStore().list(decodeURIComponent(automationUsers[1])) });
+    }
+
+    if (automationUsers && request.method === "POST") {
+      try {
+        const userId = decodeURIComponent(automationUsers[1]);
+        const body = await request.json();
+        const name = typeof body?.name === "string" ? body.name.trim() : "";
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
+        const schedule = body?.schedule;
+        if (!name || !prompt || !schedule?.type) return Response.json({ error: "name, prompt and schedule are required" }, { status: 400 });
+
+        const { calculateNextRun, getAutomationStore } = await import("../../automation/src");
+        const valid =
+          schedule.type === "once" && typeof schedule.runAt === "string" ||
+          schedule.type === "daily" && Number.isInteger(schedule.hour) && Number.isInteger(schedule.minute) ||
+          schedule.type === "weekly" && Number.isInteger(schedule.dayOfWeek) && Number.isInteger(schedule.hour) && Number.isInteger(schedule.minute) ||
+          schedule.type === "interval" && Number.isInteger(schedule.minutes) && schedule.minutes >= 60;
+        if (!valid) return Response.json({ error: "Invalid schedule. Interval must be at least 60 minutes." }, { status: 400 });
+
+        const nextRunAt = calculateNextRun(schedule);
+        const automation = await getAutomationStore().create({ userId, name, prompt, schedule, status: "active", nextRunAt });
+        return Response.json({ automation }, { status: 201 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Automation creation failed" }, { status: 400 });
+      }
+    }
+
+    const automationMatch = url.pathname.match(/^\/v1\/automations\/users\/([^/]+)\/([^/]+)$/);
+    if (automationMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeURIComponent(automationMatch[1]);
+        const id = decodeURIComponent(automationMatch[2]);
+        const body = await request.json();
+        const patch: Record<string, unknown> = {};
+        if (typeof body?.name === "string") patch.name = body.name.trim();
+        if (typeof body?.prompt === "string") patch.prompt = body.prompt.trim();
+        if (body?.status === "active" || body?.status === "paused" || body?.status === "completed") patch.status = body.status;
+        if (body?.schedule?.type) patch.schedule = body.schedule;
+        const { calculateNextRun, getAutomationStore } = await import("../../automation/src");
+        if (patch.schedule) patch.nextRunAt = calculateNextRun(patch.schedule as any);
+        const automation = await getAutomationStore().update(id, userId, patch as any);
+        return Response.json({ automation });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Automation update failed" }, { status: 400 });
+      }
+    }
+
+    if (automationMatch && request.method === "DELETE") {
+      const deleted = await (await import("../../automation/src")).getAutomationStore().delete(decodeURIComponent(automationMatch[2]), decodeURIComponent(automationMatch[1]));
+      return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Automation not found" }, { status: 404 });
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
       try {
         const body = await request.json();
