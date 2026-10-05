@@ -12,6 +12,10 @@ export function setDeviceCredential(value: FroshDeviceCredential | null) {
   credential = value;
 }
 
+export function hasDeviceCredential() {
+  return credential !== null;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${FROSH_API_URL}${path}`, {
     ...init,
