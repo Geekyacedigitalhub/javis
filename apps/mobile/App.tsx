@@ -7,6 +7,7 @@ import { hasDeviceCredential, listDevices, registerDevice, resolveApproval, send
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
+import { runNativePhoneAction } from "./src/native-bridge";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -19,6 +20,7 @@ export default function App() {
   const [paired, setPaired] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [deviceName, setDeviceName] = useState("My Android Phone");
+  const [phoneNumber, setPhoneNumber] = useState("");
 
   useEffect(() => {
     loadDeviceCredential().then((saved) => {
@@ -109,6 +111,18 @@ export default function App() {
         <Text style={styles.eyebrow}>PERSONAL AI OPERATING SYSTEM</Text>
         <Text style={styles.title}>FROSH</Text>
         <Text style={styles.status}>● {realtimeStatus === "open" ? "LIVE" : realtimeStatus.toUpperCase()}</Text>
+
+        {paired ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Phone Actions</Text>
+            <TextInput value={phoneNumber} onChangeText={setPhoneNumber} placeholder="Phone number" placeholderTextColor="#6b7280" keyboardType="phone-pad" style={styles.inputSingle} />
+            <View style={styles.actions}>
+              <Pressable style={styles.secondary} onPress={() => runNativePhoneAction({ action: "open_dialer" }).then((result) => setReply(result.message)).catch((error) => setReply(String(error)))}><Text style={styles.secondaryText}>DIALER</Text></Pressable>
+              <Pressable style={styles.primary} onPress={() => runNativePhoneAction({ action: "call_number", value: phoneNumber }).then((result) => setReply(result.message)).catch((error) => setReply(String(error)))}><Text style={styles.primaryText}>CALL</Text></Pressable>
+            </View>
+            <Pressable style={styles.secondary} onPress={() => runNativePhoneAction({ action: "compose_message", value: phoneNumber }).then((result) => setReply(result.message)).catch((error) => setReply(String(error)))}><Text style={styles.secondaryText}>MESSAGE</Text></Pressable>
+          </View>
+        ) : null}
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Ask FROSH</Text>
