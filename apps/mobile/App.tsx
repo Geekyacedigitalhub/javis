@@ -8,6 +8,7 @@ import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
+import { controlMedia, readMediaState } from "./src/media-bridge";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -21,6 +22,7 @@ export default function App() {
   const [pairing, setPairing] = useState(false);
   const [deviceName, setDeviceName] = useState("My Android Phone");
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [mediaMessage, setMediaMessage] = useState("Media controls unavailable until Android MediaSession access is connected.");
 
   useEffect(() => {
     loadDeviceCredential().then((saved) => {
@@ -111,6 +113,19 @@ export default function App() {
         <Text style={styles.eyebrow}>PERSONAL AI OPERATING SYSTEM</Text>
         <Text style={styles.title}>FROSH</Text>
         <Text style={styles.status}>● {realtimeStatus === "open" ? "LIVE" : realtimeStatus.toUpperCase()}</Text>
+
+        {paired ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Media</Text>
+            <Text style={styles.reply}>{mediaMessage}</Text>
+            <View style={styles.actions}>
+              <Pressable style={styles.secondary} onPress={() => controlMedia({ action: "previous" }).then((r) => setMediaMessage(r.message))}><Text style={styles.secondaryText}>PREV</Text></Pressable>
+              <Pressable style={styles.primary} onPress={() => controlMedia({ action: "toggle" }).then((r) => setMediaMessage(r.message))}><Text style={styles.primaryText}>PLAY / PAUSE</Text></Pressable>
+              <Pressable style={styles.secondary} onPress={() => controlMedia({ action: "next" }).then((r) => setMediaMessage(r.message))}><Text style={styles.secondaryText}>NEXT</Text></Pressable>
+            </View>
+            <Pressable style={styles.secondary} onPress={() => readMediaState().then((r) => setMediaMessage(r.message ?? (r.title ? `${r.title} — ${r.artist ?? "Unknown artist"}` : "No active media.")))}><Text style={styles.secondaryText}>READ CURRENT MEDIA</Text></Pressable>
+          </View>
+        ) : null}
 
         {paired ? (
           <View style={styles.card}>
