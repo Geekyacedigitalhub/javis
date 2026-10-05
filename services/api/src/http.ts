@@ -695,7 +695,7 @@ const server = Bun.serve({
             return Response.json({error:"Mission lease is missing or expired"},{status:409});
           }
         }else{
-          const claimed=await store.claim(id,userId,executionOwner);
+          const claimed=await store.claimApprovalContinuation(id,userId,executionOwner);
           if(!claimed)return Response.json({error:"Mission is already being executed by another worker"},{status:409});
           mission=claimed;
         }
