@@ -820,7 +820,7 @@ const server = Bun.serve({
             return Response.json({mission});
           }
           if(run.status==="failed"){
-            mission=await store.update(id,userId,{status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult});
+            mission=await store.update(id,userId,{status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission});
           }
           if(progress>=1){
@@ -895,14 +895,27 @@ const server = Bun.serve({
           const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
           const completed=steps.filter(step=>step.status==="completed").length;
           const progress=steps.length?completed/steps.length:0;
+          const continuationStatus=run.status==="failed"
+            ?"failed"
+            :run.status==="waiting_approval"
+              ?"waiting_approval"
+              :progress===1
+                ?"completed"
+                :"running";
           const updated=await getMissionStore().update(id,userId,{
-            status:run.status==="failed"?"failed":progress===1?"completed":"running",
+            status:continuationStatus,
             progress,
             steps,
             pendingApprovalId:run.pendingApprovalId,
             activeRunId:run.id,
-            result:run.result
+            result:run.result,
+            leaseUntil:continuationStatus==="waiting_approval"||continuationStatus==="completed"||continuationStatus==="failed"?undefined:undefined,
+            leaseOwner:undefined
           });
+          if(updated.status==="waiting_approval"){
+            await getMissionStore().addEvent({missionId:id,userId,type:"mission.approval.required",message:"Another approval is required to continue the mission.",runId:run.id});
+            return Response.json({mission:updated,run});
+          }
           if(updated.status==="running"){
             return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
           }
