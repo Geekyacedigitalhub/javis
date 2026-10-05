@@ -26,3 +26,20 @@ registerTool({
     return sendDeviceCommand(device.id, "media_control", action);
   }
 });
+
+
+registerTool({
+  name: "get_android_media_state",
+  description: "Read the current media session state from the paired Android FROSH device.",
+  permission: "safe",
+  parameters: {
+    type: "object",
+    properties: {},
+    additionalProperties: false
+  },
+  async execute() {
+    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    if (!device) return { available: false, message: "No paired Android FROSH device is online." };
+    return sendDeviceCommand(device.id, "media_state");
+  }
+});
