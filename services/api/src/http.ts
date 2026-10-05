@@ -97,6 +97,29 @@ const server = Bun.serve({
       }
     }
 
+    const capabilityMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/capabilities$/);
+    if (capabilityMatch && request.method === "POST") {
+      try {
+        const body = await request.json();
+        if (!Array.isArray(body?.capabilities)) {
+          return Response.json({ error: "capabilities must be an array" }, { status: 400 });
+        }
+        const device = updateDeviceCapabilities(
+          capabilityMatch[1],
+          body.capabilities.filter((item: unknown): item is { capability: string; availability: "available" | "permission_required" | "unsupported"; detail?: string } =>
+            typeof item === "object" && item !== null &&
+            typeof (item as { capability?: unknown }).capability === "string" &&
+            ["available", "permission_required", "unsupported"].includes(String((item as { availability?: unknown }).availability)),
+          ),
+        );
+        return device
+          ? Response.json(device)
+          : Response.json({ error: "Device not found" }, { status: 404 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Capability update failed" }, { status: 400 });
+      }
+    }
+
     const deviceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)$/);
     if (deviceMatch && request.method === "GET") {
       const device = getDevice(deviceMatch[1]);
