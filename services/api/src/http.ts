@@ -87,11 +87,19 @@ const server = Bun.serve({
     }
 
     if (request.method === "GET" && url.pathname === "/v1/missions/budgets") {
-      return Response.json({
-        maxSteps: Math.max(1,Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12),
-        maxToolCalls: Math.max(1,Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40),
-        maxDurationMs: Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)
-      });
+      const maxSteps = Math.max(1, Number(process.env.FROSH_MISSION_MAX_STEPS ?? 12) || 12);
+      const maxToolCalls = Math.max(1, Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS ?? 40) || 40);
+      const maxDurationMs = Math.max(60000, Number(process.env.FROSH_MISSION_MAX_DURATION_MS ?? 1800000) || 1800000);
+      const multipliers = { standard: 1, extended: 1.5, intensive: 2 };
+      const profiles = Object.fromEntries(Object.entries(multipliers).map(([name, multiplier]) => [
+        name,
+        {
+          maxSteps: Math.min(24, Math.ceil(maxSteps * multiplier)),
+          maxToolCalls: Math.min(80, Math.ceil(maxToolCalls * multiplier)),
+          maxDurationMs: Math.min(3600000, Math.ceil(maxDurationMs * multiplier))
+        }
+      ]));
+      return Response.json({ maxSteps, maxToolCalls, maxDurationMs, profiles });
     }
 
     if (request.method === "GET" && url.pathname === "/health") {
