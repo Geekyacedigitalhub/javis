@@ -1,6 +1,6 @@
 import { FroshOrchestrator } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { buildConversationContext, createMemoryStore, getConversationMemoryStore } from "../../memory/src";
+import { buildConversationContext, createMemoryStore, getConversationMemoryStore, getUserMemoryStore } from "../../memory/src";
 
 const provider = new OpenAIProvider();
 const orchestrator = new FroshOrchestrator(provider);
@@ -39,6 +39,20 @@ export async function handleFroshRequest(input: FroshHttpRequest) {
     currentConversation.id,
     input.userId,
   );
+
+  if (input.userId) {
+    const userMemories = await getUserMemoryStore().list(input.userId, 30);
+    if (userMemories.length) {
+      context.unshift({
+        role: "system",
+        content: [
+          "Approved long-term user memory:",
+          ...userMemories.map((memory) => "- [" + memory.kind + "] " + memory.statement),
+          "Use these memories only when relevant to the current request."
+        ].join("\n")
+      });
+    }
+  }
 
   const conversationMemory = await getConversationMemoryStore().get(currentConversation.id);
   if (conversationMemory && (conversationMemory.summary || conversationMemory.keyFacts.length)) {
