@@ -118,7 +118,7 @@ export async function resolveMemoryCandidate(id: string, status: "approved" | "r
     });
     await store.upsert(memory);
 
-    const userId = candidate.sourceConversationId?.startsWith("user:") ? candidate.sourceConversationId.slice(5) : "";
+    const userId = candidate.userId?.trim() ?? "";
     if (userId) {
       await getUserMemoryStore().upsert({
         userId,
