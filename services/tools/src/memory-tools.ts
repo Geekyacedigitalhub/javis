@@ -48,3 +48,49 @@ registerTool({
     return { accepted: true, message: "Memory fact removed.", memory: updated };
   }
 });
+
+
+registerTool({
+  name: "get_my_memory",
+  description: "Show the approved long-term memories FROSH has stored for the current user.",
+  permission: "safe",
+  parameters: {
+    type: "object",
+    properties: {
+      userId: { type: "string" },
+      limit: { type: "number" }
+    },
+    required: ["userId"],
+    additionalProperties: false
+  },
+  async execute(args) {
+    const userId = typeof args.userId === "string" ? args.userId.trim() : "";
+    const limit = typeof args.limit === "number" ? args.limit : 50;
+    if (!userId) return { accepted: false, message: "A user ID is required." };
+    const { getUserMemoryStore } = await import("../../memory/src/user-memory-factory");
+    return getUserMemoryStore().list(userId, limit);
+  }
+});
+
+registerTool({
+  name: "forget_my_memory",
+  description: "Delete one approved long-term memory belonging to the current user.",
+  permission: "confirm",
+  parameters: {
+    type: "object",
+    properties: {
+      userId: { type: "string" },
+      memoryId: { type: "string" }
+    },
+    required: ["userId", "memoryId"],
+    additionalProperties: false
+  },
+  async execute(args) {
+    const userId = typeof args.userId === "string" ? args.userId.trim() : "";
+    const memoryId = typeof args.memoryId === "string" ? args.memoryId.trim() : "";
+    if (!userId || !memoryId) return { accepted: false, message: "User ID and memory ID are required." };
+    const { getUserMemoryStore } = await import("../../memory/src/user-memory-factory");
+    const deleted = await getUserMemoryStore().delete(memoryId, userId);
+    return { accepted: deleted, message: deleted ? "Long-term memory deleted." : "Memory not found for this user." };
+  }
+});
