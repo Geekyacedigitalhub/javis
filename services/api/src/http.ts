@@ -749,6 +749,10 @@ const server = Bun.serve({
           if(!renewed){
             return Response.json({error:"Mission execution lease was lost"},{status:409});
           }
+          const leaseCheck=await store.get(id,userId);
+          if(!leaseCheck || leaseCheck.leaseOwner!==executionOwner || !leaseCheck.leaseUntil || Date.parse(leaseCheck.leaseUntil)<=Date.now()){
+            return Response.json({error:"Mission execution lease was lost before agent execution"},{status:409});
+          }
           if(steps.length>maxSteps||initialDurationMs+(Date.now()-missionStartedAt)>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
             mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
