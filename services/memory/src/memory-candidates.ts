@@ -98,6 +98,12 @@ export async function listMemoryCandidates(status?: FroshMemoryCandidateStatus):
   return rows.map(normalize);
 }
 
+export async function resolveUserMemoryCandidate(userId: string, id: string, status: "approved" | "rejected") {
+  const candidates = await listUserMemoryCandidates(userId, "pending");
+  if (!candidates.some((item) => item.id === id)) throw new Error("Memory candidate not found for this user.");
+  return resolveMemoryCandidate(id, status);
+}
+
 export async function resolveMemoryCandidate(id: string, status: "approved" | "rejected") {
   const sql = sqlClient();
   let candidate: FroshMemoryCandidateRecord | undefined;
