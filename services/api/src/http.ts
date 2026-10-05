@@ -595,6 +595,7 @@ const server = Bun.serve({
         let lastResult=mission.result;
         const maxSteps=Math.max(1,Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12);
         const maxRetries=Math.max(0,Number(process.env.FROSH_MISSION_MAX_RETRIES??2)||2);
+        const retryPollMs=Math.max(5000,Number(process.env.FROSH_MISSION_RETRY_POLL_MS??10000)||10000);
         const maxTools=Math.max(1,Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40);
         const maxDurationMs=Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000);
         const missionStartedAt=Date.now();
@@ -632,7 +633,7 @@ const server = Bun.serve({
             await emit("mission.step.failed","Failed: "+step.title,step.id,run.id);
             const retries=step.retryCount??0;
             if(retries<maxRetries){
-              const retryDelayMs=Math.min(60000,5000*Math.pow(2,retries));
+              const retryDelayMs=Math.min(60000,Math.max(5000,retryPollMs/2)*Math.pow(2,retries));
               const retryAt=new Date(Date.now()+retryDelayMs).toISOString();
               steps=steps.map(item=>item.id===step.id?{...item,status:"pending",retryCount:retries+1,nextRetryAt:retryAt,updatedAt:new Date().toISOString()}:item);
               await emit("mission.recovered","Automatic retry scheduled in "+Math.ceil(retryDelayMs/1000)+"s: "+step.title,step.id,run.id);
