@@ -1,9 +1,9 @@
 import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/javis";
 import { executeToolCall, listTools } from "../../tools/src";
 import type { ProviderClient } from "./provider";
-import { InMemoryAgentRunStore } from "./run-store";
+import { createAgentRunStore } from "./run-store-factory";
 
-export const agentRunStore = new InMemoryAgentRunStore();
+export const agentRunStore = createAgentRunStore();
 
 export class CodingSessionManager {
   constructor(private readonly model: ProviderClient) {}
