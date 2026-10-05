@@ -38,7 +38,6 @@ export class OpenAIProvider {
     }));
 
     const executedCalls: FroshToolCall[] = [];
-
     let previousResponseId: string | undefined;
     let continuationInput: any[] | undefined;
 
