@@ -6,6 +6,7 @@ export interface FroshMessage {
   content: string;
   name?: string;
   toolCallId?: string;
+  durationMs?: number;
 }
 export type JavisMessage = FroshMessage;
 
