@@ -490,6 +490,35 @@ const server = Bun.serve({
     }
 
     const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
+    const missionEventStreamMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events\/stream$/);
+    if(missionEventStreamMatch && request.method==="GET"){
+      const userId=decodeURIComponent(missionEventStreamMatch[1]);
+      const id=decodeURIComponent(missionEventStreamMatch[2]);
+      const {getMissionStore}=await import("../../missions/src");
+      const mission=await getMissionStore().get(id,userId);
+      if(!mission)return Response.json({error:"Mission not found"},{status:404});
+      const encoder=new TextEncoder();
+      const stream=new ReadableStream({
+        async start(controller){
+          let closed=false;
+          const send=(event:unknown)=>{if(!closed)controller.enqueue(encoder.encode("data: "+JSON.stringify(event)+"\n\n"));};
+          const initial=await getMissionStore().listEvents(id,userId,20);
+          for(const event of initial.reverse())send(event);
+          let seen=new Set(initial.map((event)=>event.id));
+          const timer=setInterval(async()=>{
+            try{
+              const latest=await getMissionStore().listEvents(id,userId,50);
+              for(const event of latest.reverse())if(!seen.has(event.id)){seen.add(event.id);send(event);}
+              if(seen.size>200)seen=new Set(latest.map((event)=>event.id));
+            }catch{}
+          },2000);
+          const heartbeat=setInterval(()=>send({type:"heartbeat",createdAt:new Date().toISOString()}),15000);
+          request.signal.addEventListener("abort",()=>{closed=true;clearInterval(timer);clearInterval(heartbeat);controller.close();},{once:true});
+        }
+      });
+      return new Response(stream,{headers:{"content-type":"text/event-stream","cache-control":"no-cache","connection":"keep-alive"}});
+    }
+
     const missionEventsMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events$/);
     if(missionEventsMatch && request.method==="GET"){
       const {getMissionStore}=await import("../../missions/src");
