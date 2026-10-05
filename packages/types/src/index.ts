@@ -8,3 +8,4 @@ export * from "./phone-actions";
 export * from "./media";
 export * from "./notifications";
 export * from "./contacts";
+export * from "./messaging";
