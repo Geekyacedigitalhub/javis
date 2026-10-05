@@ -216,6 +216,29 @@ const server = Bun.serve({
         : Response.json({ error: "Memory not found for this user" }, { status: 404 });
     }
 
+    const messagesMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages$/);
+    if (messagesMatch && request.method === "GET") {
+      try {
+        const { requestMessageInbox } = await import("./realtime");
+        return Response.json(await requestMessageInbox(messagesMatch[1]));
+      } catch (error) {
+        return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message inbox failed" }, { status: 400 });
+      }
+    }
+
+    const messageReplyMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/([^/]+)\/reply$/);
+    if (messageReplyMatch && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const message = typeof body?.message === "string" ? body.message.trim() : "";
+        if (!message) return Response.json({ error: "message is required" }, { status: 400 });
+        const { replyToMessageCommand } = await import("./realtime");
+        return Response.json(await replyToMessageCommand(messagesMatch?.[1] ?? messageReplyMatch[1], decodeURIComponent(messageReplyMatch[2]), message));
+      } catch (error) {
+        return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message reply failed" }, { status: 400 });
+      }
+    }
+
     const commandMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/command$/);
     if (commandMatch && request.method === "POST") {
       try {
