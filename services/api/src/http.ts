@@ -483,6 +483,7 @@ const server = Bun.serve({
         const userId=decodeURIComponent(missionMatch[1]);
         const id=decodeURIComponent(missionMatch[2]);
         const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
+        const missionEvaluator=new OpenAIProvider();
         const store=getMissionStore();
         let mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -513,6 +514,22 @@ const server = Bun.serve({
           lastResult=run.result;
           const completed=steps.filter(item=>item.status==="completed").length;
           const progress=steps.length?completed/steps.length:0;
+
+          if(run.status==="completed"){
+            const evaluation=await missionEvaluator.evaluateMission({
+              goal:mission.goal,
+              step:step.title,
+              result:run.result??""
+            });
+            if(evaluation.nextAction==="finish"||evaluation.complete){
+              steps=steps.map((item,i)=>i===index?{...item,status:"completed",result:(run.result??"")+"\nEvaluation: "+evaluation.reason,updatedAt:new Date().toISOString()}:item);
+            }else if(evaluation.nextAction==="recover"){
+              steps.push(createRecoveryStep(step.title,evaluation.reason));
+            }else if(evaluation.nextStep?.trim()){
+              const timestamp=new Date().toISOString();
+              steps.push({id:crypto.randomUUID(),title:evaluation.nextStep.trim(),status:"pending",createdAt:timestamp,updatedAt:timestamp});
+            }
+          }
 
           if(run.status==="waiting_approval"){
             mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
