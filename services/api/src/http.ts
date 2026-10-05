@@ -492,7 +492,8 @@ const server = Bun.serve({
         if(!goal)return Response.json({error:"goal is required"},{status:400});
         const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
-        const mission=await getMissionStore().create({userId,goal,status:"planning",priority,progress:0,steps:[]});
+      const budgetProfile=body?.budgetProfile==="extended"||body?.budgetProfile==="intensive"?body.budgetProfile:"standard";
+        const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
       await getMissionStore().addEvent({missionId:mission.id,userId,type:"mission.created",message:"Mission created: "+goal});
         return Response.json({mission},{status:201});
       } catch(error){return Response.json({error:error instanceof Error?error.message:"Mission creation failed"},{status:400});}
@@ -611,11 +612,12 @@ const server = Bun.serve({
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
         let lastResult=mission.result;
-        const maxSteps=Math.max(1,Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12);
+        const profileMultiplier=mission.budgetProfile==="extended"?1.5:mission.budgetProfile==="intensive"?2:1;
+        const maxSteps=Math.min(24,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12)*profileMultiplier)));
         const maxRetries=Math.max(0,Number(process.env.FROSH_MISSION_MAX_RETRIES??2)||2);
         const retryPollMs=Math.max(5000,Number(process.env.FROSH_MISSION_RETRY_POLL_MS??10000)||10000);
-        const maxTools=Math.max(1,Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40);
-        const maxDurationMs=Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000);
+        const maxTools=Math.min(80,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40)*profileMultiplier)));
+        const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
         const missionStartedAt=Date.now();
         let toolCount=0;
         const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
