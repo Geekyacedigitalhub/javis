@@ -50,7 +50,8 @@ const server = Bun.serve({
     const deviceToken = request.headers.get("x-frosh-device-token");
     const publicPath =
       url.pathname === "/health" ||
-      (request.method === "POST" && url.pathname === "/v1/devices");
+      (request.method === "POST" && url.pathname === "/v1/devices") ||
+      url.pathname === "/v1/realtime";
     if (!publicPath && (!deviceId || !deviceToken || !authenticateDevice(deviceId, deviceToken))) {
       return Response.json({ error: "FROSH device authentication required" }, { status: 401 });
     }
