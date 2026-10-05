@@ -550,6 +550,20 @@ const server = Bun.serve({
         return Response.json({mission});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
     }
+    const missionRecoveryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/recover$/);
+    if(missionRecoveryMatch && request.method==="POST"){
+      try{
+        const userId=decodeURIComponent(missionRecoveryMatch[1]);
+        const id=decodeURIComponent(missionRecoveryMatch[2]);
+        const {getMissionStore}=await import("../../missions/src");
+        const mission=await getMissionStore().get(id,userId);
+        if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        if(mission.status==="completed")return Response.json({mission});
+        const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
+        return next;
+      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission recovery failed"},{status:400});}
+    }
+
     const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
     if(missionContinueMatch && request.method==="POST"){
       try{
