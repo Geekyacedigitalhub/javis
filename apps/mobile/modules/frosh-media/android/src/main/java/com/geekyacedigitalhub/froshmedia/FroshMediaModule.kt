@@ -5,6 +5,8 @@ import android.media.AudioManager
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.os.Build
+import android.content.Intent
+import android.provider.Settings
 import androidx.annotation.RequiresApi
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
@@ -24,6 +26,14 @@ class FroshMediaModule : Module() {
   @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
   override fun definition() = ModuleDefinition {
     Name("FroshMedia")
+
+    Function("openMediaAccessSettings") {
+      val context = appContext.reactContext ?: return@Function false
+      val intent = Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+      intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      context.startActivity(intent)
+      true
+    }
 
     Function("getPermissionStatus") {
       val context = appContext.reactContext ?: return@Function "unavailable"
