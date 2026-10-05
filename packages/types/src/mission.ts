@@ -20,6 +20,7 @@ export interface FroshMission {
   steps: FroshMissionStep[];
   activeRunId?: string;
   pendingApprovalId?: string;
+  leaseUntil?: string;
   result?: string;
   createdAt: string;
   updatedAt: string;
