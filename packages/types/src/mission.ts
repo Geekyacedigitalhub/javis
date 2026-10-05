@@ -28,6 +28,30 @@ export interface FroshMission {
   updatedAt: string;
 }
 
+
+export type FroshMissionEventType =
+  | "mission.created"
+  | "mission.claimed"
+  | "mission.step.started"
+  | "mission.step.completed"
+  | "mission.step.failed"
+  | "mission.approval.required"
+  | "mission.recovered"
+  | "mission.completed"
+  | "mission.failed";
+
+export interface FroshMissionEvent {
+  id: string;
+  missionId: string;
+  userId: string;
+  type: FroshMissionEventType;
+  message: string;
+  stepId?: string;
+  runId?: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
 export interface FroshMissionStore {
   list(userId: string): Promise<FroshMission[]>;
   get(id: string, userId: string): Promise<FroshMission | null>;
@@ -36,4 +60,6 @@ export interface FroshMissionStore {
   delete(id: string, userId: string): Promise<boolean>;
   claim(id: string, userId: string): Promise<FroshMission | null>;
   renewLease(id: string, userId: string): Promise<FroshMission | null>;
+  addEvent(input: Omit<FroshMissionEvent, "id" | "createdAt">): Promise<FroshMissionEvent>;
+  listEvents(missionId: string, userId: string, limit?: number): Promise<FroshMissionEvent[]>;
 }
