@@ -117,6 +117,7 @@ export default function Home() {
           <Link className="nav-active" href="/">Chat</Link>
           <Link href="/memory">Memory</Link>
           <Link href="/devices">Devices</Link>
+          <Link href="/messages">Messages</Link>
         </nav>
         <div className="sidebar-status">
           <span className="status-dot" />
