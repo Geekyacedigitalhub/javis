@@ -86,6 +86,14 @@ const server = Bun.serve({
       return Response.json({ error: "FROSH authentication required" }, { status: 401 });
     }
 
+    if (request.method === "GET" && url.pathname === "/v1/missions/budgets") {
+      return Response.json({
+        maxSteps: Math.max(1,Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12),
+        maxToolCalls: Math.max(1,Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40),
+        maxDurationMs: Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)
+      });
+    }
+
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "frosh-api", realtimeClients: realtimeClientCount() });
     }
