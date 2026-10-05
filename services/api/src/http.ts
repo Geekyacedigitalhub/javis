@@ -698,6 +698,7 @@ const server = Bun.serve({
         if(mission.status==="completed")return Response.json({mission});
         const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
         const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
+        const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await updateOwned(patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
         if(requestedWorkerId){
           if(mission.leaseOwner!==requestedWorkerId || !mission.leaseUntil || Date.parse(mission.leaseUntil)<=Date.now()){
             return Response.json({error:"Mission lease is missing or expired"},{status:409});
@@ -719,7 +720,7 @@ const server = Bun.serve({
               steps=steps.map(step=>step.id===staleStep.id?{...step,status:"completed",result:savedRun.result??step.result,context:[step.context??"",savedRun.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:step);
               reconciled.add(staleStep.id);
             }else if(savedRun?.status==="waiting_approval" && savedRun.pendingApprovalId){
-              await store.updateOwned(id,userId,executionOwner,{status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
+              await updateOwned({status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
               await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
               return Response.json({mission:await store.get(id,userId)});
             }
@@ -732,7 +733,7 @@ const server = Bun.serve({
         }
         if(steps.length>0 && steps.every(step=>step.status==="completed")){
           const recoveredResult=steps[steps.length-1]?.result??mission.result;
-          const completedMission=await store.updateOwned(id,userId,executionOwner,{status:"completed",progress:1,steps,activeRunId:mission.activeRunId,pendingApprovalId:undefined,result:recoveredResult,leaseUntil:undefined,leaseOwner:undefined});
+          const completedMission=await updateOwned({status:"completed",progress:1,steps,activeRunId:mission.activeRunId,pendingApprovalId:undefined,result:recoveredResult,leaseUntil:undefined,leaseOwner:undefined});
           await store.addEvent({missionId:id,userId,type:"mission.completed",message:"Mission completed during recovery reconciliation."});
           return Response.json({mission:completedMission});
         }
@@ -763,7 +764,7 @@ const server = Bun.serve({
           }
           if(steps.length>maxSteps||initialDurationMs+(Date.now()-missionStartedAt)>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
-            mission=await store.updateOwned(id,userId,executionOwner,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
+            mission=await updateOwned({status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
           const index=steps.findIndex(step=>step.status==="pending" && (!step.nextRetryAt || Date.parse(step.nextRetryAt)<=Date.now()));
@@ -772,7 +773,7 @@ const server = Bun.serve({
           const now=new Date().toISOString();
           steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
           const step=steps[index];
-          await store.updateOwned(id,userId,executionOwner,{status:"running",steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
+          await updateOwned({status:"running",steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
           await emit("mission.step.started","Started: "+step.title,step.id);
           const runStartedAt=Date.now();
           const run=await codingSessions.start({
@@ -790,7 +791,7 @@ const server = Bun.serve({
           if(toolCount>maxTools || executionDurationMs>maxDurationMs){
             const reason=toolCount>maxTools?"Mission tool-call budget was exceeded.":"Mission execution time budget was exceeded.";
             await emit("mission.budget.exceeded",reason,step.id,run.id,{toolCount,maxTools,executionDurationMs,maxDurationMs});
-            mission=await store.updateOwned(id,userId,executionOwner,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,toolCallsUsed:toolCount,executionDurationMs,leaseUntil:undefined,leaseOwner:undefined});
+            mission=await updateOwned({status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,toolCallsUsed:toolCount,executionDurationMs,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
 
@@ -833,28 +834,28 @@ const server = Bun.serve({
           const progress=steps.length?completed/steps.length:0;
 
           if(run.status==="waiting_approval"){
-            mission=await store.updateOwned(id,userId,executionOwner,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
+            mission=await updateOwned({status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission});
           }
           if(run.status==="failed"){
-            mission=await store.updateOwned(id,userId,executionOwner,{status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
+            mission=await updateOwned({status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission});
           }
           if(progress>=1){
-            mission=await store.updateOwned(id,userId,executionOwner,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
+            mission=await updateOwned({status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             await emit("mission.completed","Mission completed.");
             return Response.json({mission});
           }
         }
 
         const completed=steps.filter(item=>item.status==="completed").length;
-        mission=await store.updateOwned(id,userId,executionOwner,{status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt)});
+        mission=await updateOwned({status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt)});
         return Response.json({mission});
       }catch(error){
         try{
           const current=await store.get(id,userId);
           if(current && current.status==="running" && current.leaseOwner===executionOwner){
-            await store.updateOwned(id,userId,executionOwner,{leaseUntil:undefined,leaseOwner:undefined});
+            await updateOwned({leaseUntil:undefined,leaseOwner:undefined});
           }
         }catch{}
         return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});
