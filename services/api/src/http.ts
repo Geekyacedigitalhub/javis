@@ -926,9 +926,14 @@ const server = Bun.serve({
         if(!claimed)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         const now=new Date().toISOString();
         const steps=claimed.steps.map(item=>item.id===stepId?{...item,status:"pending",runId:undefined,result:undefined,retryCount:0,nextRetryAt:undefined,updatedAt:now}:item);
-        const updated=await store.update(id,userId,{status:"running",steps,pendingApprovalId:undefined});
+        const updated=await store.updateOwned(id,userId,executionOwner,{status:"running",steps,pendingApprovalId:undefined});
+        if(!updated){
+          await store.releaseLeaseIfOwned(id,userId,executionOwner);
+          return Response.json({error:"Mission retry lease was lost before the retry could be recorded"},{status:409});
+        }
         await store.addEvent({missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
-        return Response.json({mission:updated});
+        await store.releaseLeaseIfOwned(id,userId,executionOwner);
+        return Response.json({mission:await store.get(id,userId)});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission retry failed"},{status:400});}
     }
 
