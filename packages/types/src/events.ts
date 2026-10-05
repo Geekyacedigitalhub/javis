@@ -8,3 +8,7 @@ export type FroshEvent =
   | { type: "approval.created"; approval: FroshApprovalRequest }
   | { type: "device.updated"; device: FroshDevice }
   | { type: "error"; message: string };
+
+export type FroshDeviceCommand =
+  | { type: "device.command"; requestId: string; deviceId: string; command: "open_app"; appName: string }
+  | { type: "device.command.result"; requestId: string; deviceId: string; accepted: boolean; message: string };
