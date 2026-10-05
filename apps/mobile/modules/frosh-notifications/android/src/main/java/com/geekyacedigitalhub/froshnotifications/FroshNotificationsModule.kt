@@ -33,5 +33,16 @@ class FroshNotificationsModule : Module() {
     Function("getRecent") {
       FroshNotificationStore.list()
     }
+
+    Function("reply") { notificationId: String, message: String ->
+      if (notificationId.isBlank() || message.isBlank()) {
+        return@Function mapOf("accepted" to false, "message" to "Notification ID and reply text are required.")
+      }
+      val sent = FroshNotificationStore.reply(notificationId, message)
+      mapOf(
+        "accepted" to sent,
+        "message" to if (sent) "Reply action sent." else "This notification no longer has a usable reply action."
+      )
+    }
   }
 }
