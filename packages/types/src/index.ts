@@ -4,3 +4,4 @@ export * from "./agent-run";
 export * from "./device";
 export * from "./events";
 export * from "./capabilities";
+export * from "./phone-actions";
