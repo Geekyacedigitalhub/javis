@@ -1,5 +1,6 @@
 import { Linking, Platform } from "react-native";
 import type { FroshPhoneActionRequest, FroshPhoneActionResult } from "../../../packages/types/src/phone-actions";
+import { launchApp } from "../modules/frosh-apps/src";
 
 export async function executePhoneAction(
   request: FroshPhoneActionRequest,
@@ -33,10 +34,11 @@ export async function executePhoneAction(
     if (!request.packageName) {
       return { action: request.action, accepted: false, message: "An Android package name is required." };
     }
+    const result = launchApp(request.packageName);
     return {
       action: request.action,
-      accepted: false,
-      message: "Direct package launching requires the native Android app registry bridge and is not enabled by the JavaScript-only client yet.",
+      accepted: result.accepted,
+      message: result.message,
     };
   }
 
