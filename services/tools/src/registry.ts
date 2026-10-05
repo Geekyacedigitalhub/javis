@@ -1,12 +1,9 @@
-import type { JavisToolDefinition } from "../../../packages/types/src/javis";
+import type { FroshToolDefinition } from "../../../packages/types/src/javis";
 
-const tools = new Map<string, JavisToolDefinition>();
+const tools = new Map<string, FroshToolDefinition>();
 
-export function registerTool(tool: JavisToolDefinition) {
-  if (tools.has(tool.name)) {
-    throw new Error(`Tool already registered: ${tool.name}`);
-  }
-
+export function registerTool(tool: FroshToolDefinition) {
+  if (tools.has(tool.name)) throw new Error(`Tool already registered: ${tool.name}`);
   tools.set(tool.name, tool);
 }
 
