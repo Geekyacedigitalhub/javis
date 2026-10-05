@@ -12,6 +12,27 @@ const port = Number(process.env.PORT ?? 3001);
 import { startAutomationRunner } from "../../automation/src";
 startAutomationRunner();
 
+async function recoverMissionsOnStartup(){
+  const userId=process.env.FROSH_AUTOMATION_USER_ID?.trim();
+  if(!userId) return;
+  try{
+    const {getMissionStore}=await import("../../missions/src");
+    const store=getMissionStore();
+    const missions=await store.list(userId);
+    for(const mission of missions){
+      if(mission.status==="waiting_approval"||mission.status==="completed"||mission.status==="paused") continue;
+      try{
+        const url="http://localhost:"+String(port)+"/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(mission.id)+"/recover";
+        await fetch(url,{method:"POST",headers:{"x-frosh-web-token":process.env.FROSH_WEB_TOKEN??""}});
+      }catch{}
+    }
+  }catch(error){
+    console.error("FROSH mission startup recovery failed:",error);
+  }
+}
+setTimeout(()=>void recoverMissionsOnStartup(),2000);
+
+
 const server = Bun.serve({
   port,
   websocket: {
