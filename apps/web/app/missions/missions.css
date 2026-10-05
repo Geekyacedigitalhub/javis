@@ -47,3 +47,14 @@
 
 .mission-live-tool{display:flex;flex-direction:column;gap:4px;margin:12px 0;padding:12px 14px;border:1px solid rgba(22,163,74,.2);border-radius:12px;background:rgba(22,163,74,.04)}
 .mission-live-tool strong{font-size:13px}.mission-live-tool span{font-size:12px;opacity:.72}
+
+.mission-timeline{display:flex;flex-direction:column;gap:0}
+.timeline-event{display:grid;grid-template-columns:20px 1fr;gap:10px;position:relative;padding:9px 0}
+.timeline-event:not(:last-child):after{content:"";position:absolute;left:9px;top:28px;bottom:-8px;width:1px;background:rgba(127,127,127,.2)}
+.timeline-marker{font-size:12px;line-height:20px;z-index:1}
+.timeline-event strong{font-size:12px;text-transform:capitalize}
+.timeline-event p{margin:3px 0;font-size:12px;opacity:.78}
+.timeline-event time{font-size:10px;opacity:.5}
+.timeline-mission-step-started .timeline-marker,.timeline-mission-tool-completed .timeline-marker{color:#16a34a}
+.timeline-mission-step-failed .timeline-marker,.timeline-mission-tool-failed .timeline-marker,.timeline-mission-failed .timeline-marker{color:#dc2626}
+.timeline-mission-step-retry .timeline-marker,.timeline-mission-approval-required .timeline-marker{color:#d97706}
