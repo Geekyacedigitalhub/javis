@@ -17,6 +17,8 @@ registerTool({
   async execute(args) {
     const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
+    const appName = typeof args.appName === "string" ? args.appName.trim() : "";
+    if (!appName) return { accepted: false, message: "An app name is required." };
     return sendDeviceCommand(device.id, "open_app", appName);
   }
 });
