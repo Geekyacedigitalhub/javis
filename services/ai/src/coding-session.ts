@@ -2,6 +2,7 @@ import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/ja
 import { listTools, approvalStore, resolveApproval } from "../../tools/src";
 import type { ProviderClient } from "./provider";
 import { createAgentRunStore } from "./run-store-factory";
+import { broadcast } from "../../api/src/realtime";
 
 export const agentRunStore = createAgentRunStore();
 
@@ -48,7 +49,7 @@ export class CodingSessionManager {
           : undefined;
       if (!approvalId) throw new Error("Provider paused without an approval request");
 
-      return agentRunStore.update(runId, {
+      const updated = await agentRunStore.update(runId, {
         status: "waiting_approval",
         pendingApprovalId: approvalId,
         providerContinuation: result.continuation,
