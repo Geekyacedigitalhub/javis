@@ -120,3 +120,5 @@
 .health-breakdown{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:8px}.health-breakdown span{padding:6px;border-radius:7px;background:rgba(127,127,127,.05);font-size:9px}.health-breakdown b{display:block;margin-top:2px;font-size:11px}@media(max-width:700px){.health-breakdown{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .health-trend{margin:-7px 0 9px;font-size:10px;opacity:.75}.health-trend b{font-weight:700}
+
+.health-history-chart{height:46px;display:flex;align-items:flex-end;gap:3px;margin:0 0 7px;padding:4px 0}.health-history-chart i{flex:1;min-width:3px;border-radius:3px 3px 0 0;background:#16a34a;opacity:.65}
