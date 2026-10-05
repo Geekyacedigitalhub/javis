@@ -61,6 +61,25 @@ export async function createMemoryCandidate(candidate: FroshMemoryCandidate): Pr
   return normalize(rows[0]);
 }
 
+export async function listUserMemoryCandidates(userId: string, status: FroshMemoryCandidateStatus = "pending"): Promise<FroshMemoryCandidateRecord[]> {
+  const normalized = userId.trim();
+  if (!normalized) return [];
+  const sql = sqlClient();
+  if (!sql) return [...memoryStore.values()].filter((item) => item.userId === normalized && item.status === status);
+  const rows = await sql.unsafe<any[]>(
+    `SELECT id, kind, statement, confidence,
+      source_conversation_id AS "sourceConversationId",
+      source_message_id AS "sourceMessageId", user_id AS "userId",
+      status, created_at AS "createdAt", resolved_at AS "resolvedAt"
+     FROM frosh_memory_candidates
+     WHERE user_id = $1 AND status = $2
+     ORDER BY created_at DESC LIMIT 200`,
+    [normalized, status]
+  );
+  await sql.end({ timeout: 1 });
+  return rows.map(normalize);
+}
+
 export async function listMemoryCandidates(status?: FroshMemoryCandidateStatus): Promise<FroshMemoryCandidateRecord[]> {
   const sql = sqlClient();
   if (!sql) return [...memoryStore.values()].filter((item) => !status || item.status === status);
