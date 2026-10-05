@@ -221,7 +221,7 @@ const server = Bun.serve({
       try {
         const body = await request.json();
         const command = typeof body?.command === "string" ? body.command : "";
-        const allowed = ["open_dialer", "media_control", "media_state", "open_app"];
+        const allowed = ["open_dialer", "media_control", "media_state", "open_app", "contacts_search", "message_inbox"];
         if (!allowed.includes(command)) {
           return Response.json({ error: "Command is not available from the web console." }, { status: 403 });
         }
@@ -229,6 +229,7 @@ const server = Bun.serve({
         const value =
           command === "media_control" ? (typeof body?.action === "string" ? body.action : "") :
           command === "open_app" ? (typeof body?.appName === "string" ? body.appName : "") :
+          command === "contacts_search" ? (typeof body?.query === "string" ? body.query : "") :
           undefined;
         if (command === "media_control" && !["play","pause","toggle","next","previous","stop","volume_up","volume_down"].includes(value ?? "")) {
           return Response.json({ error: "Invalid media action." }, { status: 400 });
@@ -236,9 +237,12 @@ const server = Bun.serve({
         if (command === "open_app" && !value?.trim()) {
           return Response.json({ error: "appName is required." }, { status: 400 });
         }
+        if (command === "contacts_search" && !value?.trim()) {
+          return Response.json({ error: "query is required." }, { status: 400 });
+        }
         const result = await sendDeviceCommand(
           commandMatch[1],
-          command as "open_dialer" | "media_control" | "media_state" | "open_app",
+          command as "open_dialer" | "media_control" | "media_state" | "open_app" | "contacts_search" | "message_inbox",
           value,
         );
         return Response.json(result);
