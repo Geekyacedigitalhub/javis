@@ -6,6 +6,7 @@ export interface FroshMissionStep {
   status: "pending" | "running" | "completed" | "blocked" | "failed";
   runId?: string;
   result?: string;
+  context?: string;
   createdAt: string;
   updatedAt: string;
 }
