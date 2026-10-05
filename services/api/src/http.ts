@@ -591,6 +591,24 @@ const server = Bun.serve({
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Priority update failed"},{status:400});}
     }
 
+    const missionBudgetProfileMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/budget-profile$/);
+    if(missionBudgetProfileMatch && request.method==="POST"){
+      try{
+        const userId=decodeURIComponent(missionBudgetProfileMatch[1]);
+        const id=decodeURIComponent(missionBudgetProfileMatch[2]);
+        const body=await request.json();
+        const budgetProfile=body?.budgetProfile;
+        if(budgetProfile!=="standard"&&budgetProfile!=="extended"&&budgetProfile!=="intensive")return Response.json({error:"invalid budget profile"},{status:400});
+        const {getMissionStore}=await import("../../missions/src");
+        const store=getMissionStore();
+        const mission=await store.get(id,userId);
+        if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        const updated=await store.update(id,userId,{budgetProfile});
+        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Budget profile changed to "+budgetProfile+"."});
+        return Response.json({mission:updated});
+      }catch(error){return Response.json({error:error instanceof Error?error.message:"Budget profile update failed"},{status:400});}
+    }
+
     if(missionMatch && request.method==="DELETE"){
       const {getMissionStore}=await import("../../missions/src");
       const deleted=await getMissionStore().delete(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
