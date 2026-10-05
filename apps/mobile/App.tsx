@@ -9,6 +9,7 @@ import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
 import { controlMedia, readMediaState } from "./src/media-bridge";
+import { listInstalledApps } from "./modules/frosh-apps/src";
 import { getMediaState, openMediaAccessSettings } from "./src/media";
 import { getNotificationCapability, getRecentNotifications, openNotificationSettings, replyToNotification } from "./modules/frosh-notifications/src";
 
@@ -29,12 +30,14 @@ export default function App() {
   const [notificationAccess, setNotificationAccess] = useState("checking");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [installedApps, setInstalledApps] = useState<Array<{ packageName: string; name: string }>>([]);
 
   useEffect(() => {
     try {
       const capability = getNotificationCapability();
       setNotificationAccess(capability.available ? "active" : "permission required");
       if (capability.available) getRecentNotifications().then(setNotifications).catch(() => undefined);
+      try { setInstalledApps(listInstalledApps().slice(0, 20)); } catch { setInstalledApps([]); }
     } catch {
       setNotificationAccess("native module unavailable");
     }
@@ -127,6 +130,19 @@ export default function App() {
         <Text style={styles.eyebrow}>PERSONAL AI OPERATING SYSTEM</Text>
         <Text style={styles.title}>FROSH</Text>
         <Text style={styles.status}>● {realtimeStatus === "open" ? "LIVE" : realtimeStatus.toUpperCase()}</Text>
+
+        {paired ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Apps</Text>
+            <Text style={styles.reply}>Installed launchable apps: {installedApps.length ? installedApps.length : "unavailable"}</Text>
+            {installedApps.slice(0, 8).map((app) => (
+              <View key={app.packageName} style={styles.notification}>
+                <Text style={styles.device}>{app.name}</Text>
+                <Text style={styles.muted}>{app.packageName}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {paired ? (
           <View style={styles.card}>
