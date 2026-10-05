@@ -534,6 +534,48 @@ const server = Bun.serve({
       return Response.json({mission:updated});
     }
 
+    const missionRerunStepMatch=url.pathname.match(/^\\/v1\\/missions\\/users\\/([^/]+)\\/([^/]+)\\/rerun-from-step\\/([^/]+)$/);
+    if(missionRerunStepMatch && request.method==="POST"){
+      const userId=decodeURIComponent(missionRerunStepMatch[1]);
+      const id=decodeURIComponent(missionRerunStepMatch[2]);
+      const stepId=decodeURIComponent(missionRerunStepMatch[3]);
+      const store=(await import("../../missions/src")).getMissionStore();
+      const source=await store.get(id,userId);
+      if(!source)return Response.json({error:"Mission not found"},{status:404});
+      if(!["completed","failed","cancelled"].includes(source.status))return Response.json({error:"Only completed, failed, or cancelled missions can be partially rerun"},{status:409});
+      const stepIndex=source.steps.findIndex((step)=>step.id===stepId);
+      if(stepIndex<0)return Response.json({error:"Mission step not found"},{status:404});
+      const now=new Date().toISOString();
+      const steps=source.steps.map((step,index)=>({
+        ...step,
+        status:index<stepIndex?"completed":"pending",
+        runId:undefined,
+        result:index<stepIndex?step.result:undefined,
+        retryCount:0,
+        nextRetryAt:undefined,
+        createdAt:now,
+        updatedAt:now
+      }));
+      const completedBefore=steps.filter((step)=>step.status==="completed").length;
+      const rerunMission=await store.create({
+        userId,
+        goal:source.goal,
+        status:"planning",
+        priority:source.priority,
+        budgetProfile:source.budgetProfile,
+        progress:steps.length?completedBefore/steps.length:0,
+        steps
+      });
+      await store.addEvent({
+        missionId:rerunMission.id,
+        userId,
+        type:"mission.created",
+        message:"Mission rerun from step "+source.steps[stepIndex].title,
+        metadata:{sourceMissionId:source.id,sourceStepId:stepId,rerunFromStepId:stepId}
+      });
+      return Response.json({mission:rerunMission});
+    }
+
     const missionRerunMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun$/);
     if(missionRerunMatch && request.method==="POST"){
       const userId=decodeURIComponent(missionRerunMatch[1]);
