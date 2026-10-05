@@ -5,7 +5,7 @@ import { InMemoryApprovalStore } from "./approvals";
 
 export const approvalStore: FroshApprovalStore = new InMemoryApprovalStore();
 
-export async function executeToolCall(call: FroshToolCall) {
+export async function executeToolCall(call: FroshToolCall, options: { runId?: string } = {}) {
   const tool = getTool(call.name);
 
   if (!tool) {
@@ -14,6 +14,7 @@ export async function executeToolCall(call: FroshToolCall) {
 
   if (tool.permission !== "safe") {
     const approval = await approvalStore.create({
+      runId: options.runId,
       toolName: call.name,
       arguments: call.arguments,
       reason: `FROSH requested the ${call.name} action.`,
@@ -23,11 +24,7 @@ export async function executeToolCall(call: FroshToolCall) {
     return {
       ...call,
       status: "failed" as const,
-      result: {
-        error: "Approval required",
-        approvalId: approval.id,
-        approval,
-      },
+      result: { error: "Approval required", approvalId: approval.id, approval },
     };
   }
 
@@ -45,7 +42,6 @@ export async function executeToolCall(call: FroshToolCall) {
 
 export async function resolveApproval(id: string, status: "approved" | "rejected") {
   const approval = await approvalStore.resolve(id, status);
-
   if (status === "rejected") return { approval, result: null };
 
   const tool = getTool(approval.toolName);
