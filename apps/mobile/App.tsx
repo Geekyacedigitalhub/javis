@@ -10,6 +10,7 @@ import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
 import { controlMedia, readMediaState } from "./src/media-bridge";
 import { getMediaState, openMediaAccessSettings } from "./src/media";
+import { getNotificationCapability, getRecentNotifications, openNotificationSettings } from "./modules/frosh-notifications/src";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -24,8 +25,18 @@ export default function App() {
   const [deviceName, setDeviceName] = useState("My Android Phone");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [mediaMessage, setMediaMessage] = useState("Media controls unavailable until Android MediaSession access is connected.");
+  const [notifications, setNotifications] = useState<Array<{ id: string; packageName: string; title?: string; text?: string }>>([]);
+  const [notificationAccess, setNotificationAccess] = useState("checking");
 
   useEffect(() => {
+    try {
+      const capability = getNotificationCapability();
+      setNotificationAccess(capability.available ? "active" : "permission required");
+      if (capability.available) getRecentNotifications().then(setNotifications).catch(() => undefined);
+    } catch {
+      setNotificationAccess("native module unavailable");
+    }
+
     loadDeviceCredential().then((saved) => {
       if (!saved) return;
       setDeviceCredential(saved);
@@ -114,6 +125,23 @@ export default function App() {
         <Text style={styles.eyebrow}>PERSONAL AI OPERATING SYSTEM</Text>
         <Text style={styles.title}>FROSH</Text>
         <Text style={styles.status}>● {realtimeStatus === "open" ? "LIVE" : realtimeStatus.toUpperCase()}</Text>
+
+        {paired ? (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Notifications</Text>
+            <Text style={styles.reply}>Access: {notificationAccess}</Text>
+            <View style={styles.actions}>
+              <Pressable style={styles.secondary} onPress={() => openNotificationSettings()}><Text style={styles.secondaryText}>OPEN ACCESS</Text></Pressable>
+              <Pressable style={styles.primary} onPress={() => getRecentNotifications().then(setNotifications).catch(() => undefined)}><Text style={styles.primaryText}>REFRESH</Text></Pressable>
+            </View>
+            {notifications.slice(0, 8).map((item) => (
+              <View key={item.id} style={styles.notification}>
+                <Text style={styles.device}>{item.title ?? item.packageName}</Text>
+                {item.text ? <Text style={styles.muted}>{item.text}</Text> : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {paired ? (
           <View style={styles.card}>
@@ -216,5 +244,6 @@ const styles = StyleSheet.create({
   secondaryText: { color: "#86efac", fontWeight: "900" },
   warning: { color: "#fbbf24" },
   device: { color: "#d1d5db", paddingVertical: 4 },
+  notification: { borderTopWidth: 1, borderTopColor: "#173524", paddingTop: 10, gap: 3 },
   muted: { color: "#6b7280" },
 });
