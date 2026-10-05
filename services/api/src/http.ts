@@ -833,7 +833,15 @@ const server = Bun.serve({
         const completed=steps.filter(item=>item.status==="completed").length;
         mission=await store.update(id,userId,{status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
         return Response.json({mission});
-      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
+      }catch(error){
+        try{
+          const current=await store.get(id,userId);
+          if(current && current.status==="running" && current.leaseOwner===executionOwner){
+            await store.update(id,userId,{leaseUntil:undefined,leaseOwner:undefined});
+          }
+        }catch{}
+        return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});
+      }
     }
     const missionRetryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/steps\/([^/]+)\/retry$/);
     if(missionRetryMatch && request.method==="POST"){
@@ -909,7 +917,7 @@ const server = Bun.serve({
             pendingApprovalId:run.pendingApprovalId,
             activeRunId:run.id,
             result:run.result,
-            leaseUntil:continuationStatus==="waiting_approval"||continuationStatus==="completed"||continuationStatus==="failed"?undefined:undefined,
+            leaseUntil:undefined,
             leaseOwner:undefined
           });
           if(updated.status==="waiting_approval"){
