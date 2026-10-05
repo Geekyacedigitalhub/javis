@@ -3,6 +3,7 @@ import type { FroshPhoneActionRequest, FroshPhoneActionResult } from "../../../p
 import { launchApp } from "../modules/frosh-apps/src";
 import { openCallDialer, placeDirectCall } from "../modules/frosh-calls/src";
 import { searchContacts } from "../modules/frosh-contacts/src";
+import { sendSms } from "../modules/frosh-messaging/src";
 
 export async function executePhoneAction(
   request: FroshPhoneActionRequest,
@@ -23,6 +24,14 @@ export async function executePhoneAction(
     const matches = searchContacts(request.value);
     const number = matches.length === 1 && matches[0].phones.length === 1 ? matches[0].phones[0].number : request.value;
     const result = placeDirectCall(number);
+    return { action: request.action, accepted: result.accepted, message: result.message };
+  }
+
+  if (request.action === "send_message") {
+    if (!request.value || !request.message) return { action: request.action, accepted: false, message: "A phone number and message are required." };
+    const matches = searchContacts(request.value);
+    const number = matches.length === 1 && matches[0].phones.length === 1 ? matches[0].phones[0].number : request.value;
+    const result = sendSms(number, request.message);
     return { action: request.action, accepted: result.accepted, message: result.message };
   }
 
