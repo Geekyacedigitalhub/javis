@@ -835,7 +835,8 @@ const server = Bun.serve({
         const {getMissionStore}=await import("../../missions/src");
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
-        if(mission.status==="completed")return Response.json({mission});
+        if(["completed","waiting_approval","paused","cancelled"].includes(mission.status))return Response.json({mission});
+        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({mission});
         const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
         return next;
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission recovery failed"},{status:400});}
