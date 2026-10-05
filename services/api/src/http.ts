@@ -510,6 +510,34 @@ const server = Bun.serve({
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
     }
+    const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
+    if(missionContinueMatch && request.method==="POST"){
+      try{
+        const userId=decodeURIComponent(missionContinueMatch[1]);
+        const id=decodeURIComponent(missionContinueMatch[2]);
+        const {getMissionStore}=await import("../../missions/src");
+        const mission=await getMissionStore().get(id,userId);
+        if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        if(mission.status==="waiting_approval" && mission.pendingApprovalId){
+          const run=await codingSessions.approveAndResume(mission.pendingApprovalId);
+          const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
+          const completed=steps.filter(step=>step.status==="completed").length;
+          const progress=steps.length?completed/steps.length:0;
+          const updated=await getMissionStore().update(id,userId,{
+            status:run.status==="failed"?"failed":progress===1?"completed":"running",
+            progress,
+            steps,
+            pendingApprovalId:run.pendingApprovalId,
+            activeRunId:run.id,
+            result:run.result
+          });
+          return Response.json({mission:updated,run});
+        }
+        const response=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
+        return response;
+      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission continuation failed"},{status:400});}
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
       try {
         const body = await request.json();
