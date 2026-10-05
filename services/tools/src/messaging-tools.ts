@@ -97,3 +97,15 @@ registerTool({
     return { accepted: true, total: insights.length, needsReply: insights.filter((x) => x.needsReply).length, urgent: insights.filter((x) => x.priority === "urgent").length, insights };
   }
 });
+
+registerTool({
+  name: "analyze_android_messages",
+  description: "Analyze recent supported messaging notifications from the paired Android device and identify urgent or likely-reply-needed messages. Read-only.",
+  permission: "safe",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+  async execute() {
+    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
+    return requestMessageInbox(device.id);
+  }
+});
