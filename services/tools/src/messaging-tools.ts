@@ -139,3 +139,15 @@ registerTool({
     return store.list(50);
   }
 });
+
+registerTool({
+  name: "get_message_memory_candidates",
+  description: "Review durable memory candidates extracted from recent supported messaging notifications. This does not automatically save them as permanent memory.",
+  permission: "safe",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+  async execute() {
+    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
+    return requestMessageInbox(device.id);
+  }
+});
