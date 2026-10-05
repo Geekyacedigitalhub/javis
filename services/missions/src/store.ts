@@ -9,7 +9,34 @@ export class PostgresMissionStore implements FroshMissionStore {
   async list(userId:string){return this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE user_id=$1 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC`,[userId]);}
   async get(id:string,userId:string){const rows=await this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE id=$1 AND user_id=$2 LIMIT 1`,[id,userId]);return rows[0]??null;}
   async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){const id=crypto.randomUUID();const rows=await this.sql.unsafe<FroshMission[]>(`INSERT INTO frosh_missions(id,user_id,goal,status,priority,budget_profile,progress,steps,active_run_id,pending_approval_id,lease_until,lease_owner,result,tool_calls_used,execution_duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14) RETURNING ${SELECT_FIELDS}`,[id,input.userId,input.goal,input.status,input.priority,input.budgetProfile,input.progress,JSON.stringify(input.steps),input.activeRunId??null,input.pendingApprovalId??null,input.leaseUntil??null,input.leaseOwner??null,input.result??null,input.toolCallsUsed??0,input.executionDurationMs??0]);return rows[0];}
-  async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){const current=await this.get(id,userId);if(!current)throw new Error("Mission not found");const next={...current,...patch};const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET goal=$3,status=$4,priority=$5,budget_profile=$6,progress=$7,steps=$8::jsonb,active_run_id=$9,pending_approval_id=$10,lease_until=$11,lease_owner=$12,result=$13,tool_calls_used=$14,execution_duration_ms=$15,updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING ${SELECT_FIELDS}`,[id,userId,next.goal,next.status,next.priority,next.budgetProfile,next.progress,JSON.stringify(next.steps),next.activeRunId??null,next.pendingApprovalId??null,next.leaseUntil??null,next.leaseOwner??null,next.result??null,next.toolCallsUsed,next.executionDurationMs]);return rows[0];}
+  async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
+    const fields:string[]=[];
+    const values:unknown[]=[id,userId];
+    const add=(column:string,value:unknown)=>{
+      fields.push(column+"=$"+String(values.length+1));
+      values.push(value);
+    };
+    if(Object.prototype.hasOwnProperty.call(patch,"goal"))add("goal",patch.goal);
+    if(Object.prototype.hasOwnProperty.call(patch,"status"))add("status",patch.status);
+    if(Object.prototype.hasOwnProperty.call(patch,"priority"))add("priority",patch.priority);
+    if(Object.prototype.hasOwnProperty.call(patch,"budgetProfile"))add("budget_profile",patch.budgetProfile);
+    if(Object.prototype.hasOwnProperty.call(patch,"progress"))add("progress",patch.progress);
+    if(Object.prototype.hasOwnProperty.call(patch,"steps"))add("steps",JSON.stringify(patch.steps));
+    if(Object.prototype.hasOwnProperty.call(patch,"activeRunId"))add("active_run_id",patch.activeRunId??null);
+    if(Object.prototype.hasOwnProperty.call(patch,"pendingApprovalId"))add("pending_approval_id",patch.pendingApprovalId??null);
+    if(Object.prototype.hasOwnProperty.call(patch,"leaseUntil"))add("lease_until",patch.leaseUntil??null);
+    if(Object.prototype.hasOwnProperty.call(patch,"leaseOwner"))add("lease_owner",patch.leaseOwner??null);
+    if(Object.prototype.hasOwnProperty.call(patch,"result"))add("result",patch.result??null);
+    if(Object.prototype.hasOwnProperty.call(patch,"toolCallsUsed"))add("tool_calls_used",patch.toolCallsUsed);
+    if(Object.prototype.hasOwnProperty.call(patch,"executionDurationMs"))add("execution_duration_ms",patch.executionDurationMs);
+    const setClause=fields.map(field=>field.startsWith("steps=")?field+"::jsonb":field).join(",");
+    const sql=setClause
+      ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING ${SELECT_FIELDS}`
+      : `UPDATE frosh_missions SET updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING ${SELECT_FIELDS}`;
+    const rows=await this.sql.unsafe<FroshMission[]>(sql,values);
+    if(!rows[0])throw new Error("Mission not found");
+    return rows[0];
+  }
   async updateOwned(id:string,userId:string,leaseOwner:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
     const fields:string[]=[];
     const values:unknown[]=[id,userId];
