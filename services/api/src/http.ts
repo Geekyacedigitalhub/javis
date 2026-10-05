@@ -701,6 +701,11 @@ const server = Bun.serve({
         }
 
         let steps=mission.steps.length?mission.steps:planMission(mission.goal);
+        const staleRunningSteps=steps.filter(step=>step.status==="running");
+        if(staleRunningSteps.length){
+          steps=steps.map(step=>step.status==="running"?{...step,status:"pending",retryCount:(step.retryCount??0)+1,nextRetryAt:undefined,updatedAt:new Date().toISOString()}:step);
+          await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered "+staleRunningSteps.length+" interrupted mission step(s) after execution restart.",metadata:{stepIds:staleRunningSteps.map(step=>step.id)}});
+        }
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
         let lastResult=mission.result;
@@ -731,6 +736,7 @@ const server = Bun.serve({
           const now=new Date().toISOString();
           steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
           const step=steps[index];
+          await store.update(id,userId,{status:"running",steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
           await emit("mission.step.started","Started: "+step.title,step.id);
           const runStartedAt=Date.now();
           const run=await codingSessions.start({
