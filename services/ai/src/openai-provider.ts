@@ -29,6 +29,12 @@ export type FroshStreamEvent =
 
 type StreamOptions = GenerateOptions;
 
+async function executeTimedToolCall(call:FroshToolCall, runId?:string){
+  const startedAt=Date.now();
+  const result=await executeToolCall(call,{runId});
+  return {...result,durationMs:Math.max(0,Date.now()-startedAt)};
+}
+
 export class OpenAIProvider {
   async *stream(
     input: ReturnType<typeof buildModelInput>,
@@ -132,7 +138,7 @@ export class OpenAIProvider {
 
         yield { type: "tool", name: item.name, status: "planned", toolCallId: callId };
 
-        const result = await executeToolCall(planned, { runId: options.runId });
+        const result = await executeTimedToolCall(planned, options.runId);
         executedCalls.push(result);
 
         yield {
@@ -288,7 +294,7 @@ export class OpenAIProvider {
           status: "planned",
         };
 
-        const result = await executeToolCall(planned, { runId: options.runId });
+        const result = await executeTimedToolCall(planned, options.runId);
         executedCalls.push(result);
 
         const resultValue = result.result;
