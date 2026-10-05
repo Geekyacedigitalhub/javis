@@ -503,7 +503,7 @@ const server = Bun.serve({
           const step=steps[index];
           const run=await codingSessions.start({
             goal:step.title+"\nOverall objective: "+mission.goal,
-            messages:[{role:"user",content:step.title+"\nOverall objective: "+mission.goal}]
+            messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
           });
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
           steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
