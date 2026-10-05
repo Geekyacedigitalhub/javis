@@ -9,6 +9,7 @@ import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
 import { controlMedia, readMediaState } from "./src/media-bridge";
+import { getMediaState, openMediaAccessSettings } from "./src/media";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -118,6 +119,7 @@ export default function App() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Media</Text>
             <Text style={styles.reply}>{mediaMessage}</Text>
+            <Pressable style={styles.secondary} onPress={() => openMediaAccessSettings()}><Text style={styles.secondaryText}>OPEN MEDIA ACCESS</Text></Pressable>
             <View style={styles.actions}>
               <Pressable style={styles.secondary} onPress={() => controlMedia({ action: "previous" }).then((r) => setMediaMessage(r.message))}><Text style={styles.secondaryText}>PREV</Text></Pressable>
               <Pressable style={styles.primary} onPress={() => controlMedia({ action: "toggle" }).then((r) => setMediaMessage(r.message))}><Text style={styles.primaryText}>PLAY / PAUSE</Text></Pressable>
