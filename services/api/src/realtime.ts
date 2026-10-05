@@ -1,3 +1,5 @@
+import type { FroshEvent } from "../../../packages/types/src/events";
+
 type Client = {
   id: string;
   socket: WebSocket;
@@ -10,7 +12,6 @@ export function addRealtimeClient(socket: WebSocket) {
   clients.set(id, { id, socket });
 
   socket.addEventListener("close", () => clients.delete(id));
-
   return id;
 }
 
@@ -18,12 +19,10 @@ export function removeRealtimeClient(id: string) {
   clients.delete(id);
 }
 
-export function broadcast(event: unknown) {
+export function broadcast(event: FroshEvent) {
   const payload = JSON.stringify(event);
   for (const client of clients.values()) {
-    if (client.socket.readyState === WebSocket.OPEN) {
-      client.socket.send(payload);
-    }
+    if (client.socket.readyState === WebSocket.OPEN) client.socket.send(payload);
   }
 }
 
