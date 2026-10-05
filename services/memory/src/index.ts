@@ -4,3 +4,5 @@ export * from "./postgres";
 export * from "./agent-runs";
 export * from "./factory";
 export * from "./context";
+export * from "./conversation-memory";
+export * from "./conversation-memory-factory";
