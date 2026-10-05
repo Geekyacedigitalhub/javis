@@ -483,31 +483,54 @@ const server = Bun.serve({
         const userId=decodeURIComponent(missionMatch[1]);
         const id=decodeURIComponent(missionMatch[2]);
         const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
-        const mission=await getMissionStore().get(id,userId);
+        const store=getMissionStore();
+        let mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="completed")return Response.json({mission});
 
         let steps=mission.steps.length?mission.steps:planMission(mission.goal);
-        const index=steps.findIndex(step=>step.status==="pending");
-        if(index<0){
-          const done=await getMissionStore().update(id,userId,{status:"completed",progress:1,steps,result:"All planned mission steps completed."});
-          return Response.json({mission:done});
+        let lastRunId=mission.activeRunId;
+        let lastApproval=mission.pendingApprovalId;
+        let lastResult=mission.result;
+
+        for(let cycle=0;cycle<8;cycle++){
+          const index=steps.findIndex(step=>step.status==="pending");
+          if(index<0)break;
+
+          const now=new Date().toISOString();
+          steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
+          const step=steps[index];
+          const run=await codingSessions.start({
+            goal:step.title+"\nOverall objective: "+mission.goal,
+            messages:[{role:"user",content:step.title+"\nOverall objective: "+mission.goal}]
+          });
+          const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
+          steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
+          if(stepStatus==="failed") steps.push(createRecoveryStep(step.title,run.result));
+
+          lastRunId=run.id;
+          lastApproval=run.pendingApprovalId;
+          lastResult=run.result;
+          const completed=steps.filter(item=>item.status==="completed").length;
+          const progress=steps.length?completed/steps.length:0;
+
+          if(run.status==="waiting_approval"){
+            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
+            return Response.json({mission});
+          }
+          if(run.status==="failed"){
+            mission=await store.update(id,userId,{status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult});
+            return Response.json({mission});
+          }
+          if(progress>=1){
+            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult});
+            return Response.json({mission});
+          }
         }
 
-        const now=new Date().toISOString();
-        steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
-        const step=steps[index];
-        const run=await codingSessions.start({
-          goal:step.title+"\nOverall objective: "+mission.goal,
-          messages:[{role:"user",content:step.title+"\nOverall objective: "+mission.goal}]
-        });
-        const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
-        steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);\n        if(stepStatus==="failed") steps.push(createRecoveryStep(step.title,run.result));
         const completed=steps.filter(item=>item.status==="completed").length;
-        const progress=steps.length?completed/steps.length:0;
-        const status=run.status==="waiting_approval"?"waiting_approval":run.status==="failed"?"failed":progress===1?"completed":"running";
-        const updated=await getMissionStore().update(id,userId,{status,progress,steps,activeRunId:run.id,pendingApprovalId:run.pendingApprovalId,result:run.result});
-        return Response.json({mission:updated});
+        mission=await store.update(id,userId,{status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
+        return Response.json({mission});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
     }
     const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
