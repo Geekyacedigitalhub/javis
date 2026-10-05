@@ -4,6 +4,8 @@ import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice } from "./devices";
 import { addRealtimeClient, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
+import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
+import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
@@ -78,6 +80,44 @@ const server = Bun.serve({
       }
     }
 
+
+    const memoryUserMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)$/);
+    if (memoryUserMatch && request.method === "GET") {
+      const userId = decodeURIComponent(memoryUserMatch[1]);
+      return Response.json({ memories: await getUserMemoryStore().list(userId, 100) });
+    }
+
+    const memoryCandidatesMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/candidates$/);
+    if (memoryCandidatesMatch && request.method === "GET") {
+      const userId = decodeURIComponent(memoryCandidatesMatch[1]);
+      return Response.json({ candidates: await listUserMemoryCandidates(userId) });
+    }
+
+    if (memoryCandidatesMatch && request.method === "POST") {
+      try {
+        const userId = decodeURIComponent(memoryCandidatesMatch[1]);
+        const body = await request.json();
+        const candidateId = typeof body?.candidateId === "string" ? body.candidateId.trim() : "";
+        const status = body?.status === "approved" || body?.status === "rejected" ? body.status : "";
+        if (!candidateId || !status) {
+          return Response.json({ error: "candidateId and status are required" }, { status: 400 });
+        }
+        const candidate = await resolveUserMemoryCandidate(userId, candidateId, status);
+        return Response.json(candidate);
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Memory candidate update failed" }, { status: 400 });
+      }
+    }
+
+    const memoryDeleteMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/([^/]+)$/);
+    if (memoryDeleteMatch && request.method === "DELETE") {
+      const userId = decodeURIComponent(memoryDeleteMatch[1]);
+      const memoryId = decodeURIComponent(memoryDeleteMatch[2]);
+      const deleted = await getUserMemoryStore().delete(memoryId, userId);
+      return deleted
+        ? Response.json({ deleted: true })
+        : Response.json({ error: "Memory not found for this user" }, { status: 404 });
+    }
 
     if (request.method === "GET" && url.pathname === "/v1/devices") {
       return Response.json({ devices: listDevices() });
