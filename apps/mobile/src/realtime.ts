@@ -1,5 +1,6 @@
 import type { FroshEvent } from "../../../packages/types/src/events";
 import { FROSH_API_URL } from "./api";
+import { loadDeviceCredential } from "./session";
 
 function websocketUrl() {
   return FROSH_API_URL.replace(/^http/, "ws") + "/v1/realtime";
@@ -12,7 +13,20 @@ export function connectFroshRealtime(
   onStatus?.("connecting");
   const socket = new WebSocket(websocketUrl());
 
-  socket.onopen = () => onStatus?.("open");
+  socket.onopen = async () => {
+    const credential = await loadDeviceCredential();
+    if (!credential) {
+      onStatus?.("closed");
+      socket.close();
+      return;
+    }
+    socket.send(JSON.stringify({
+      type: "auth",
+      deviceId: credential.deviceId,
+      token: credential.token
+    }));
+    onStatus?.("open");
+  };
   socket.onmessage = (message) => {
     try {
       onEvent(JSON.parse(message.data) as FroshEvent);
