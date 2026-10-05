@@ -8,6 +8,8 @@ export interface FroshMissionStep {
   runId?: string;
   result?: string;
   context?: string;
+  retryCount?: number;
+  nextRetryAt?: string;
   createdAt: string;
   updatedAt: string;
 }
