@@ -6,12 +6,12 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 const model = process.env.FROSH_MODEL || "gpt-6-luna";
 
 export class OpenAIProvider {
-  async generate(input: Parameters<typeof buildModelInput>[0]) {
+  async generate(input: ReturnType<typeof buildModelInput>) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY is not configured");
     }
 
-    const modelInput = buildModelInput(input);
+    const modelInput = input;
     const tools = modelInput.tools.map((tool) => ({
       type: "function" as const,
       name: tool.name,
