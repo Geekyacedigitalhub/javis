@@ -534,6 +534,19 @@ const server = Bun.serve({
       return Response.json({mission:updated});
     }
 
+    const missionRerunMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun$/);
+    if(missionRerunMatch && request.method==="POST"){
+      const userId=decodeURIComponent(missionRerunMatch[1]);
+      const id=decodeURIComponent(missionRerunMatch[2]);
+      const store=(await import("../../missions/src")).getMissionStore();
+      const source=await store.get(id,userId);
+      if(!source)return Response.json({error:"Mission not found"},{status:404});
+      if(!["completed","failed","cancelled"].includes(source.status))return Response.json({error:"Only completed, failed, or cancelled missions can be rerun"},{status:409});
+      const rerunMission=await store.create({userId,goal:source.goal,status:"planning",priority:source.priority,budgetProfile:source.budgetProfile,progress:0,steps:[]});
+      await store.addEvent({missionId:rerunMission.id,userId,type:"mission.created",message:"Mission rerun created from "+source.id,metadata:{sourceMissionId:source.id}});
+      return Response.json({mission:rerunMission});
+    }
+
     const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
     const missionEventStreamMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events\/stream$/);
     if(missionEventStreamMatch && request.method==="GET"){
