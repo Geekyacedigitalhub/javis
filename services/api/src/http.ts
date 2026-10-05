@@ -780,12 +780,21 @@ const server = Bun.serve({
           const runStartedAt=Date.now();
           let leaseLost=false;
           let leaseRenewing=false;
+          let activeRunId:string|undefined;
           const leaseRenewTimer=setInterval(async()=>{
             if(leaseLost||leaseRenewing)return;
             leaseRenewing=true;
             try{
               const renewed=await store.renewLease(id,userId,executionOwner);
-              if(!renewed)leaseLost=true;
+              if(!renewed){
+                leaseLost=true;
+              }else if(activeRunId){
+                try{
+                  await agentRunStore.update(activeRunId,{});
+                }catch(error){
+                  console.error("FROSH mission agent run heartbeat failed:",error);
+                }
+              }
             }catch(error){leaseLost=true;console.error("FROSH mission execution lease renewal error:",error);}
             finally{leaseRenewing=false;}
           },60000);
@@ -793,7 +802,18 @@ const server = Bun.serve({
           try{
             run=await codingSessions.start({
               goal:step.title+"\nOverall objective: "+mission.goal,
-              messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
+              messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}],
+              onRunCreated:async(createdRun)=>{
+                activeRunId=createdRun.id;
+                const updated=await updateOwned({
+                  status:"running",
+                  steps:steps.map((item,i)=>i===index?{...item,runId:createdRun.id,updatedAt:new Date().toISOString()}:item),
+                  activeRunId:createdRun.id,
+                  pendingApprovalId:lastApproval,
+                  result:lastResult
+                });
+                steps=updated.steps;
+              }
             });
           }finally{
             clearInterval(leaseRenewTimer);
