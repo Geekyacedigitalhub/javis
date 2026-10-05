@@ -74,6 +74,8 @@ export interface FroshMissionStore {
   claim(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   claimApprovalContinuation(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   claimStepRetry(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
+  updatePriorityIfIdle(id: string, userId: string, priority: FroshMissionPriority): Promise<FroshMission | null>;
+  updateBudgetProfileIfIdle(id: string, userId: string, budgetProfile: FroshMissionBudgetProfile): Promise<FroshMission | null>;
   renewLease(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   addEvent(input: Omit<FroshMissionEvent, "id" | "createdAt">): Promise<FroshMissionEvent>;
   listEvents(missionId: string, userId: string, limit?: number): Promise<FroshMissionEvent[]>;
