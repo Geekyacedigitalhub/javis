@@ -572,6 +572,24 @@ const server = Bun.serve({
       return mission?Response.json({mission}):Response.json({error:"Mission not found"},{status:404});
     }
 
+    const missionPriorityMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/priority$/);
+    if(missionPriorityMatch && request.method==="POST"){
+      try{
+        const userId=decodeURIComponent(missionPriorityMatch[1]);
+        const id=decodeURIComponent(missionPriorityMatch[2]);
+        const body=await request.json();
+        const priority=body?.priority;
+        if(priority!=="low"&&priority!=="normal"&&priority!=="high")return Response.json({error:"priority must be low, normal, or high"},{status:400});
+        const {getMissionStore}=await import("../../missions/src");
+        const store=getMissionStore();
+        const mission=await store.get(id,userId);
+        if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        const updated=await store.update(id,userId,{priority});
+        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Priority changed to "+priority+"."});
+        return Response.json({mission:updated});
+      }catch(error){return Response.json({error:error instanceof Error?error.message:"Priority update failed"},{status:400});}
+    }
+
     if(missionMatch && request.method==="DELETE"){
       const {getMissionStore}=await import("../../missions/src");
       const deleted=await getMissionStore().delete(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
