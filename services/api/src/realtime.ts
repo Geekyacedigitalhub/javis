@@ -40,7 +40,7 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : {}) }));
+  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : {}) }));
   return new Promise<{ accepted: boolean; message: string }>((resolve, reject) => {
     pendingCommands.set(requestId, { resolve, reject });
     setTimeout(() => {
