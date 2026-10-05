@@ -31,6 +31,7 @@ export class PostgresMissionStore implements FroshMissionStore {
 
 export class InMemoryMissionStore implements FroshMissionStore {
   private items=new Map<string,FroshMission>();
+  private events=new Map<string,import("../../../packages/types/src/mission").FroshMissionEvent[]>();
   async list(userId:string){return [...this.items.values()].filter(x=>x.userId===userId).sort((a,b)=>{const rank=(p:string)=>p==="high"?0:p==="normal"?1:2;return rank(a.priority)-rank(b.priority)||Date.parse(b.updatedAt)-Date.parse(a.updatedAt);});}
   async get(id:string,userId:string){const x=this.items.get(id);return x?.userId===userId?x:null;}
   async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){const now=new Date().toISOString();const x={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};this.items.set(x.id,x);return x;}
@@ -39,10 +40,15 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async renewLease(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="running"||mission.leaseOwner!==leaseOwner)return null;const next={...mission,leaseUntil:new Date(Date.now()+120000).toISOString(),updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
     const event={...input,id:crypto.randomUUID(),createdAt:new Date().toISOString()};
+    const list=this.events.get(input.missionId)??[];
+    list.unshift(event);
+    this.events.set(input.missionId,list);
     return event;
   }
-  async listEvents(_missionId:string,_userId:string,_limit=100){
-    return [];
+  async listEvents(missionId:string,userId:string,limit=100){
+    const mission=await this.get(missionId,userId);
+    if(!mission)return [];
+    return (this.events.get(missionId)??[]).slice(0,Math.min(Math.max(limit,1),500));
   }
-  async delete(id:string,userId:string){const x=await this.get(id,userId);if(!x)return false;this.items.delete(id);return true;}
+  async delete(id:string,userId:string){const x=await this.get(id,userId);if(!x)return false;this.items.delete(id);this.events.delete(id);return true;}
 }
