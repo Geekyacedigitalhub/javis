@@ -9,3 +9,5 @@ export * from "./conversation-memory-factory";
 export * from "./memory-extractor";
 export * from "./memory-candidates";
 export * from "./postgres-conversation-memory";
+export * from "./user-memory";
+export * from "./user-memory-factory";
