@@ -1,6 +1,6 @@
 import { FroshOrchestrator } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { buildConversationContext, createMemoryStore, getConversationMemoryStore, getUserMemoryStore } from "../../memory/src";
+import { buildConversationContext, createMemoryStore, getConversationMemoryStore, getUserMemoryStore, extractConversationMemories, createMemoryCandidate } from "../../memory/src";
 
 const provider = new OpenAIProvider();
 const orchestrator = new FroshOrchestrator(provider);
@@ -70,6 +70,21 @@ export async function handleFroshRequest(input: FroshHttpRequest) {
     role: "assistant",
     content: response.message,
   });
+
+  if (input.userId) {
+    const extraction = extractConversationMemories([{
+      id: crypto.randomUUID(),
+      text: message,
+      conversationId: currentConversation.id,
+    }]);
+
+    for (const candidate of extraction.candidates) {
+      await createMemoryCandidate({
+        ...candidate,
+        userId: input.userId,
+      });
+    }
+  }
 
   return { conversationId: currentConversation.id, ...response };
 }
