@@ -108,3 +108,5 @@
 .timeline-stats{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin:0 0 12px}.timeline-stats div{padding:8px;border:1px solid rgba(127,127,127,.14);border-radius:8px;background:rgba(127,127,127,.035)}.timeline-stats strong{display:block;font-size:15px}.timeline-stats span{display:block;margin-top:2px;font-size:9px;opacity:.65}@media(max-width:700px){.timeline-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 .event-duration{display:inline-block;margin-left:7px;font-size:9px;opacity:.7;font-variant-numeric:tabular-nums}
+
+.tool-performance-list{display:grid;gap:6px}.tool-performance-row{display:grid;grid-template-columns:minmax(150px,1.6fr) repeat(4,minmax(70px,1fr));gap:8px;align-items:center;padding:9px 10px;border:1px solid rgba(127,127,127,.14);border-radius:8px;font-size:10px}.tool-performance-row span{opacity:.72;text-align:right}.tool-performance-empty{font-size:11px;opacity:.65}@media(max-width:700px){.tool-performance-row{grid-template-columns:1fr 1fr}.tool-performance-row span{text-align:left}}
