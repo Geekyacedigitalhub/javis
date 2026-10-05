@@ -447,6 +447,51 @@ const server = Bun.serve({
       return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Automation not found" }, { status: 404 });
     }
 
+    const missionUsers = url.pathname.match(/^\/v1\/missions\/users\/([^/]+)$/);
+    if (missionUsers && request.method === "GET") {
+      const { getMissionStore } = await import("../../missions/src");
+      return Response.json({ missions: await getMissionStore().list(decodeURIComponent(missionUsers[1])) });
+    }
+
+    if (missionUsers && request.method === "POST") {
+      try {
+        const userId=decodeURIComponent(missionUsers[1]);
+        const body=await request.json();
+        const goal=typeof body?.goal==="string"?body.goal.trim():"";
+        if(!goal)return Response.json({error:"goal is required"},{status:400});
+        const { getMissionStore }=await import("../../missions/src");
+        const mission=await getMissionStore().create({userId,goal,status:"planning",progress:0,steps:[]});
+        return Response.json({mission},{status:201});
+      } catch(error){return Response.json({error:error instanceof Error?error.message:"Mission creation failed"},{status:400});}
+    }
+
+    const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
+    if(missionMatch && request.method==="GET"){
+      const {getMissionStore}=await import("../../missions/src");
+      const mission=await getMissionStore().get(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
+      return mission?Response.json({mission}):Response.json({error:"Mission not found"},{status:404});
+    }
+
+    if(missionMatch && request.method==="DELETE"){
+      const {getMissionStore}=await import("../../missions/src");
+      const deleted=await getMissionStore().delete(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
+      return deleted?Response.json({deleted:true}):Response.json({error:"Mission not found"},{status:404});
+    }
+
+    if(missionMatch && request.method==="POST"){
+      try{
+        const userId=decodeURIComponent(missionMatch[1]); const id=decodeURIComponent(missionMatch[2]);
+        const {getMissionStore}=await import("../../missions/src");
+        const mission=await getMissionStore().get(id,userId); if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        if(mission.status==="completed")return Response.json({mission});
+        const run=await codingSessions.start({goal:mission.goal,messages:[{role:"user",content:mission.goal}],conversationId:undefined});
+        const steps=[{id:crypto.randomUUID(),title:"Execute mission objective",status:run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":"running",runId:run.id,result:run.result,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}];
+        const status=run.status==="waiting_approval"?"waiting_approval":run.status==="completed"?"completed":"running";
+        const updated=await getMissionStore().update(id,userId,{status,progress:status==="completed"?1:0.1,steps,activeRunId:run.id,pendingApprovalId:run.pendingApprovalId,result:run.result});
+        return Response.json({mission:updated});
+      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
       try {
         const body = await request.json();
