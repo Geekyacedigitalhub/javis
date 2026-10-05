@@ -489,6 +489,33 @@ const server = Bun.serve({
       } catch(error){return Response.json({error:error instanceof Error?error.message:"Mission creation failed"},{status:400});}
     }
 
+    const missionControlMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/(pause|resume|cancel)$/);
+    if(missionControlMatch && request.method==="POST"){
+      const {getMissionStore}=await import("../../missions/src");
+      const userId=decodeURIComponent(missionControlMatch[1]);
+      const id=decodeURIComponent(missionControlMatch[2]);
+      const action=missionControlMatch[3];
+      const store=getMissionStore();
+      const mission=await store.get(id,userId);
+      if(!mission)return Response.json({error:"Mission not found"},{status:404});
+      if(action==="pause"){
+        if(["completed","failed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be paused in its current state"},{status:409});
+        const updated=await store.update(id,userId,{status:"paused",leaseUntil:undefined});
+        await store.addEvent({missionId:id,userId,type:"mission.failed",message:"Mission paused by user."});
+        return Response.json({mission:updated});
+      }
+      if(action==="resume"){
+        if(mission.status!=="paused")return Response.json({error:"Only paused missions can be resumed"},{status:409});
+        const updated=await store.update(id,userId,{status:"running"});
+        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Mission resumed by user."});
+        return Response.json({mission:updated});
+      }
+      if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
+      const updated=await store.update(id,userId,{status:"cancelled",leaseUntil:undefined,pendingApprovalId:undefined});
+      await store.addEvent({missionId:id,userId,type:"mission.failed",message:"Mission cancelled by user."});
+      return Response.json({mission:updated});
+    }
+
     const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
     const missionEventStreamMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events\/stream$/);
     if(missionEventStreamMatch && request.method==="GET"){
