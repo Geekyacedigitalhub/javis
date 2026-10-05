@@ -76,3 +76,19 @@ export interface FroshMessagingSummary {
   byProvider: Record<string, number>;
   highlights: FroshMessageInsight[];
 }
+
+export interface FroshConversation {
+  id: string;
+  provider: string;
+  packageName: string;
+  appName?: string;
+  participant: string;
+  messages: FroshUnifiedMessage[];
+  latestMessage?: FroshUnifiedMessage;
+  unreadCount: number;
+  canReply: boolean;
+}
+
+export interface FroshConversationInbox {
+  conversations: FroshConversation[];
+}
