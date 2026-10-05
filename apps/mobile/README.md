@@ -1,46 +1,43 @@
 # FROSH Android
 
-The Android client is the mobile control center for FROSH.
+The Android client is the mobile control center for the FROSH personal AI operating system.
 
-## Initial product surface
+## Native capability architecture
 
-- FROSH chat
-- streaming assistant responses
-- voice interaction
-- agent-run progress
-- approval cards
-- activity history
-- connected-device status
-- notifications
-- memory controls
-- settings and permissions
+FROSH uses a capability model instead of assuming unrestricted Android access. Every native action must report whether it is available, requires user permission, or is unsupported on the current device.
 
-## Device capabilities planned
+Current capability contracts:
 
-- calls and dialer workflows
-- contacts
-- permitted messaging/reply workflows
-- notification intelligence
-- music controls
-- video workflows
+- device information
 - app launching
-- camera/vision
-- screen understanding
-- maps/navigation
-- phone-to-Windows control
+- media control
+- dialer and direct calls
+- message composition
+- notification access
+- camera
+- screen observation
+- location
 
-## Backend contract
+High-risk capabilities remain behind explicit Android permissions and FROSH authorization.
 
-The client communicates with the FROSH API for:
+## Current client
 
-- `POST /v1/chat`
-- `POST /v1/agent-runs`
-- `GET /v1/agent-runs/:id`
-- `GET /v1/approvals/:id`
-- `POST /v1/approvals/:id`
-- `GET /v1/devices`
-- `POST /v1/devices`
-- `GET /v1/devices/:id`
-- `GET /health`
+- secure device pairing
+- FROSH chat
+- agent task launcher
+- task status
+- approval UI
+- realtime events
+- connected-device list
+- capability reporting
 
-The Android client must never treat a model response as authorization. Consequential actions are controlled by the FROSH backend permission system.
+## Next native integrations
+
+1. Android device/app discovery
+2. media-session controls
+3. dialer and call permissions
+4. notification listener
+5. camera/vision
+6. screen/accessibility bridge
+7. location/maps
+8. phone-to-Windows control
