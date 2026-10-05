@@ -6,11 +6,16 @@
   "packageManager": "bun@1.4.1",
   "scripts": {
     "dev": "bun run services/api/src/http.ts",
-    "typecheck": "echo 'Typecheck pipeline will be added with the first service'",
-    "start": "bun run services/api/src/http.ts"
+    "typecheck": "tsc --noEmit",
+    "start": "bun run services/api/src/http.ts",
+    "check": "bun run typecheck"
   },
   "dependencies": {
     "postgres": "^3.4.7",
     "openai": "^6.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2",
+    "@types/bun": "latest"
   }
 }
