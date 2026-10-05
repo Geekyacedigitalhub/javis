@@ -6,7 +6,6 @@ export interface FroshMessage {
   content: string;
   name?: string;
   toolCallId?: string;
-  durationMs?: number;
 }
 export type JavisMessage = FroshMessage;
 
@@ -23,6 +22,7 @@ export interface FroshToolCall {
   arguments: Record<string, unknown>;
   status: "planned" | "completed" | "failed";
   result?: unknown;
+  durationMs?: number;
 }
 export type JavisToolCall = FroshToolCall;
 
