@@ -1,3 +1,5 @@
+import { getConversationMemoryStore } from "./conversation-memory-factory";
+import { mergeConversationMemory } from "./conversation-memory";
 import type {
   FroshMemoryCandidate,
   FroshMemoryCandidateRecord,
@@ -21,10 +23,25 @@ export function listMemoryCandidates(status?: FroshMemoryCandidateStatus) {
   return [...candidates.values()].filter((item) => !status || item.status === status);
 }
 
-export function resolveMemoryCandidate(id: string, status: "approved" | "rejected") {
+export async function resolveMemoryCandidate(id: string, status: "approved" | "rejected") {
   const candidate = candidates.get(id);
   if (!candidate) throw new Error("Memory candidate not found.");
-  const resolved = { ...candidate, status, resolvedAt: new Date().toISOString() };
+  let resolved = { ...candidate, status, resolvedAt: new Date().toISOString() };
+
+  if (status === "approved") {
+    const conversationId = candidate.sourceConversationId?.trim();
+    if (!conversationId) throw new Error("Approved memory candidate is missing its source conversation.");
+
+    const store = getConversationMemoryStore();
+    const existing = await store.get(conversationId);
+    const memory = mergeConversationMemory(existing, {
+      provider: existing?.provider ?? "other",
+      participant: existing?.participant ?? "unknown",
+      statement: candidate.statement
+    });
+    await store.upsert(memory);
+  }
+
   candidates.set(id, resolved);
   return resolved;
 }
