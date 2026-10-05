@@ -44,3 +44,6 @@
 .live-dot{width:7px;height:7px;border-radius:50%;background:#16a34a;animation:frosh-pulse 1.2s infinite}
 .mission-step.executing{border-left:3px solid #16a34a;padding-left:12px;background:rgba(22,163,74,.05)}
 @keyframes frosh-pulse{0%,100%{opacity:.35}50%{opacity:1}}
+
+.mission-live-tool{display:flex;flex-direction:column;gap:4px;margin:12px 0;padding:12px 14px;border:1px solid rgba(22,163,74,.2);border-radius:12px;background:rgba(22,163,74,.04)}
+.mission-live-tool strong{font-size:13px}.mission-live-tool span{font-size:12px;opacity:.72}
