@@ -44,7 +44,6 @@ export type FroshMissionEventType =
   | "mission.approval.required"
   | "mission.paused"
   | "mission.cancelled"
-  | "mission.step.retry"
   | "mission.recovered"
   | "mission.completed"
   | "mission.failed"
