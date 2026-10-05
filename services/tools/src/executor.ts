@@ -12,7 +12,10 @@ export async function executeToolCall(call: FroshToolCall) {
     return {
       ...call,
       status: "failed" as const,
-      result: { error: "This tool requires explicit approval before execution.", permission: tool.permission },
+      result: {
+        error: "This tool requires explicit user approval before execution.",
+        permission: tool.permission,
+      },
     };
   }
 
