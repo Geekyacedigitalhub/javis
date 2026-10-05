@@ -676,8 +676,14 @@ const server = Bun.serve({
 
     if(missionMatch && request.method==="DELETE"){
       const {getMissionStore}=await import("../../missions/src");
-      const deleted=await getMissionStore().delete(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
-      return deleted?Response.json({deleted:true}):Response.json({error:"Mission not found"},{status:404});
+      const store=getMissionStore();
+      const userId=decodeURIComponent(missionMatch[1]);
+      const id=decodeURIComponent(missionMatch[2]);
+      const mission=await store.get(id,userId);
+      if(!mission)return Response.json({error:"Mission not found"},{status:404});
+      const deleted=await store.deleteIfIdle(id,userId);
+      if(!deleted)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
+      return Response.json({deleted:true});
     }
 
     if(missionMatch && request.method==="POST"){
