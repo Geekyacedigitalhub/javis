@@ -38,7 +38,9 @@ export type FroshMissionEventType =
   | "mission.approval.required"
   | "mission.recovered"
   | "mission.completed"
-  | "mission.failed";
+  | "mission.failed"
+  | "mission.tool.completed"
+  | "mission.tool.failed";
 
 export interface FroshMissionEvent {
   id: string;
