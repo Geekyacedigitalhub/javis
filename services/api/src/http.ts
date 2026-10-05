@@ -82,7 +82,7 @@ const server = Bun.serve({
 
             try {
               const { buildConversationContext, getUserMemoryStore, getConversationMemoryStore, createMemoryStore, extractConversationMemories, createMemoryCandidate } = await import("../../memory/src");
-              const { FroshOrchestrator } = await import("../../ai/src");
+              const { buildModelInput } = await import("../../ai/src/provider");
               const { OpenAIProvider } = await import("../../ai/src/openai-provider");
 
               const userId = typeof body?.userId === "string" ? body.userId : undefined;
@@ -112,12 +112,11 @@ const server = Bun.serve({
               }
 
               const provider = new OpenAIProvider();
-              const orchestrator = new FroshOrchestrator(provider);
               let finalMessage = "";
               let finalTools: any[] = [];
 
               for await (const event of provider.stream(
-                { ...orchestrator.getModelInput(context) },
+                buildModelInput(context),
                 {}
               )) {
                 if (event.type === "delta") {
