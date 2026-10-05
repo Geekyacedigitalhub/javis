@@ -10,7 +10,7 @@ import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
 import { controlMedia, readMediaState } from "./src/media-bridge";
 import { getMediaState, openMediaAccessSettings } from "./src/media";
-import { getNotificationCapability, getRecentNotifications, openNotificationSettings } from "./modules/frosh-notifications/src";
+import { getNotificationCapability, getRecentNotifications, openNotificationSettings, replyToNotification } from "./modules/frosh-notifications/src";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -27,6 +27,8 @@ export default function App() {
   const [mediaMessage, setMediaMessage] = useState("Media controls unavailable until Android MediaSession access is connected.");
   const [notifications, setNotifications] = useState<Array<{ id: string; packageName: string; title?: string; text?: string }>>([]);
   const [notificationAccess, setNotificationAccess] = useState("checking");
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [replyText, setReplyText] = useState("");
 
   useEffect(() => {
     try {
@@ -138,6 +140,25 @@ export default function App() {
               <View key={item.id} style={styles.notification}>
                 <Text style={styles.device}>{item.title ?? item.packageName}</Text>
                 {item.text ? <Text style={styles.muted}>{item.text}</Text> : null}
+                {item.canReply ? (
+                  <>
+                    {replyingTo === item.id ? (
+                      <View style={styles.replyRow}>
+                        <TextInput value={replyText} onChangeText={setReplyText} placeholder="Reply..." placeholderTextColor="#6b7280" style={styles.input} />
+                        <Pressable style={styles.primary} onPress={async () => {
+                          const result = await replyToNotification(item.id, replyText);
+                          setReplyingTo(null);
+                          setReplyText("");
+                          setMediaMessage(result.message);
+                        }}><Text style={styles.primaryText}>SEND</Text></Pressable>
+                      </View>
+                    ) : (
+                      <Pressable style={styles.secondary} onPress={() => { setReplyingTo(item.id); setReplyText(""); }}>
+                        <Text style={styles.secondaryText}>REPLY</Text>
+                      </Pressable>
+                    )}
+                  </>
+                ) : null}
               </View>
             ))}
           </View>
