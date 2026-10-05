@@ -901,31 +901,78 @@ const server = Bun.serve({
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission recovery failed"},{status:400});}
     }
 
-    const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
+    const missionContinueMatch=url.pathname.match(/^\\/v1\\/missions\\/users\\/([^/]+)\\/([^/]+)\\/continue$/);
     if(missionContinueMatch && request.method==="POST"){
       try{
         const userId=decodeURIComponent(missionContinueMatch[1]);
         const id=decodeURIComponent(missionContinueMatch[2]);
         const {getMissionStore}=await import("../../missions/src");
-        const mission=await getMissionStore().get(id,userId);
+        const store=getMissionStore();
+        const mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="waiting_approval" && mission.pendingApprovalId){
+          const profileMultiplier=mission.budgetProfile==="extended"?1.5:mission.budgetProfile==="intensive"?2:1;
+          const maxSteps=Math.min(24,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12)*profileMultiplier)));
+          const maxTools=Math.min(80,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40)*profileMultiplier)));
+          const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
+          const existingToolCount=mission.toolCallsUsed??0;
+          const existingDurationMs=mission.executionDurationMs??0;
+          const emit=async(type:"mission.approval.required"|"mission.budget.exceeded"|"mission.failed",message:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await store.addEvent({missionId:id,userId,type,message,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+          if(mission.steps.length>maxSteps || existingToolCount>=maxTools || existingDurationMs>=maxDurationMs){
+            await emit("mission.budget.exceeded","Mission approval continuation cannot start because the mission budget is already exhausted.",mission.activeRunId,{toolCount:existingToolCount,maxTools,executionDurationMs:existingDurationMs,maxDurationMs});
+            const paused=await store.update(id,userId,{status:"paused",pendingApprovalId:mission.pendingApprovalId,toolCallsUsed:existingToolCount,executionDurationMs:existingDurationMs,leaseUntil:undefined,leaseOwner:undefined});
+            return Response.json({mission:paused,budgetExceeded:true},{status:409});
+          }
+
+          const executionOwner="approval-continuation:"+crypto.randomUUID();
+          const claimed=await store.claim(id,userId,executionOwner);
+          if(!claimed)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
+
+          const continuationStartedAt=Date.now();
           let run;
           try {
             run=await codingSessions.approveAndResume(mission.pendingApprovalId);
           } catch(error) {
-            const failed=await getMissionStore().update(id,userId,{
+            const continuationDurationMs=Date.now()-continuationStartedAt;
+            const executionDurationMs=existingDurationMs+continuationDurationMs;
+            const failed=await store.update(id,userId,{
               status:"failed",
               pendingApprovalId:undefined,
               leaseUntil:undefined,
+              leaseOwner:undefined,
+              executionDurationMs,
+              toolCallsUsed:existingToolCount,
               result:error instanceof Error?error.message:"Mission approval continuation failed"
             });
-            await getMissionStore().addEvent({missionId:id,userId,type:"mission.failed",message:"Approval continuation failed: "+(error instanceof Error?error.message:"Unknown error")});
+            await emit("mission.failed","Approval continuation failed: "+(error instanceof Error?error.message:"Unknown error"),mission.activeRunId,{executionDurationMs});
             return Response.json({mission:failed},{status:500});
           }
+
+          const continuationDurationMs=Date.now()-continuationStartedAt;
+          const executionDurationMs=existingDurationMs+continuationDurationMs;
+          const toolCallsUsed=existingToolCount+run.toolCalls.length;
           const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
           const completed=steps.filter(step=>step.status==="completed").length;
           const progress=steps.length?completed/steps.length:0;
+
+          if(toolCallsUsed>maxTools || executionDurationMs>maxDurationMs){
+            const reason=toolCallsUsed>maxTools?"Mission tool-call budget was exceeded during approval continuation.":"Mission execution time budget was exceeded during approval continuation.";
+            await emit("mission.budget.exceeded",reason,run.id,{toolCount:toolCallsUsed,maxTools,executionDurationMs,maxDurationMs});
+            const paused=await store.update(id,userId,{
+              status:"paused",
+              progress,
+              steps,
+              toolCallsUsed,
+              executionDurationMs,
+              activeRunId:run.id,
+              pendingApprovalId:run.pendingApprovalId,
+              result:run.result,
+              leaseUntil:undefined,
+              leaseOwner:undefined
+            });
+            return Response.json({mission:paused,run,budgetExceeded:true});
+          }
+
           const continuationStatus=run.status==="failed"
             ?"failed"
             :run.status==="waiting_approval"
@@ -933,11 +980,12 @@ const server = Bun.serve({
               :progress===1
                 ?"completed"
                 :"running";
-          const updated=await getMissionStore().update(id,userId,{
+          const updated=await store.update(id,userId,{
             status:continuationStatus,
             progress,
             steps,
-            toolCallsUsed:(mission.toolCallsUsed??0)+run.toolCalls.length,
+            toolCallsUsed,
+            executionDurationMs,
             pendingApprovalId:run.pendingApprovalId,
             activeRunId:run.id,
             result:run.result,
@@ -945,7 +993,7 @@ const server = Bun.serve({
             leaseOwner:undefined
           });
           if(updated.status==="waiting_approval"){
-            await getMissionStore().addEvent({missionId:id,userId,type:"mission.approval.required",message:"Another approval is required to continue the mission.",runId:run.id});
+            await emit("mission.approval.required","Another approval is required to continue the mission.",run.id,{toolCallsUsed,executionDurationMs});
             return Response.json({mission:updated,run});
           }
           if(updated.status==="running"){
