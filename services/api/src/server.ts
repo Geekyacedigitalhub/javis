@@ -1,9 +1,6 @@
 import { JavisOrchestrator } from "../../ai/src";
 import { DevelopmentProvider } from "../../ai/src/mock-provider";
-import {
-  InMemoryStore,
-  buildConversationContext,
-} from "../../memory/src";
+import { buildConversationContext, createMemoryStore } from "../../memory/src";
 
 const provider = new DevelopmentProvider();
 const orchestrator = new JavisOrchestrator(provider);
