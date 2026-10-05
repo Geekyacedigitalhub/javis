@@ -1,6 +1,7 @@
 import type { FroshDevice, FroshDeviceRegistration } from "../../../packages/types/src/device";
 
 const devices = new Map<string, FroshDevice>();
+const credentials = new Map<string, { token: string; expiresAt: number }>();
 
 export function registerDevice(input: FroshDeviceRegistration) {
   const now = new Date().toISOString();
@@ -35,4 +36,21 @@ export function markDeviceOffline(id: string) {
   const updated = { ...device, status: "offline" as const };
   devices.set(id, updated);
   return updated;
+}
+
+export function issueDeviceCredential(deviceId: string) {
+  if (!devices.has(deviceId)) return null;
+  const token = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
+  const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  credentials.set(deviceId, { token, expiresAt });
+  return { deviceId, token, expiresAt: new Date(expiresAt).toISOString() };
+}
+
+export function authenticateDevice(deviceId: string, token: string) {
+  const credential = credentials.get(deviceId);
+  if (!credential || credential.expiresAt <= Date.now() || credential.token !== token) return false;
+  const device = devices.get(deviceId);
+  if (!device) return false;
+  devices.set(deviceId, { ...device, status: "online", lastSeenAt: new Date().toISOString() });
+  return true;
 }
