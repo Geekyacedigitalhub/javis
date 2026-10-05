@@ -2,7 +2,7 @@ import { postChat } from "./routes";
 import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { listDevices, registerDevice, getDevice } from "./devices";
+import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice } from "./devices";
 import { addRealtimeClient, realtimeClientCount } from "./realtime";
 
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
@@ -28,6 +28,15 @@ const server = Bun.serve({
   },
   async fetch(request) {
     const url = new URL(request.url);
+
+    const deviceId = request.headers.get("x-frosh-device-id");
+    const deviceToken = request.headers.get("x-frosh-device-token");
+    const publicPath =
+      url.pathname === "/health" ||
+      (request.method === "POST" && url.pathname === "/v1/devices");
+    if (!publicPath && (!deviceId || !deviceToken || !authenticateDevice(deviceId, deviceToken))) {
+      return Response.json({ error: "FROSH device authentication required" }, { status: 401 });
+    }
 
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "frosh-api", realtimeClients: realtimeClientCount() });
@@ -72,17 +81,16 @@ const server = Bun.serve({
           );
         }
 
-        return Response.json(
-          registerDevice({
-            name: body.name.trim(),
-            platform: body.platform,
-            capabilities: body.capabilities.filter(
-              (capability: unknown): capability is string =>
-                typeof capability === "string",
-            ),
-          }),
-          { status: 201 },
-        );
+        const device = registerDevice({
+          name: body.name.trim(),
+          platform: body.platform,
+          capabilities: body.capabilities.filter(
+            (capability: unknown): capability is string =>
+              typeof capability === "string",
+          ),
+        });
+        const credential = issueDeviceCredential(device.id);
+        return Response.json({ device, credential }, { status: 201 });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Device registration failed";
         return Response.json({ error: message }, { status: 400 });
