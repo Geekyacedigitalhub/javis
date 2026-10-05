@@ -703,8 +703,24 @@ const server = Bun.serve({
         let steps=mission.steps.length?mission.steps:planMission(mission.goal);
         const staleRunningSteps=steps.filter(step=>step.status==="running");
         if(staleRunningSteps.length){
-          steps=steps.map(step=>step.status==="running"?{...step,status:"pending",runId:undefined,retryCount:(step.retryCount??0)+1,nextRetryAt:undefined,updatedAt:new Date().toISOString()}:step);
-          await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered "+staleRunningSteps.length+" interrupted mission step(s) after execution restart.",metadata:{stepIds:staleRunningSteps.map(step=>step.id)}});
+          const reconciled=new Set<string>();
+          for(const staleStep of staleRunningSteps){
+            if(!staleStep.runId) continue;
+            const savedRun=await agentRunStore.get(staleStep.runId);
+            if(savedRun?.status==="completed"){
+              steps=steps.map(step=>step.id===staleStep.id?{...step,status:"completed",result:savedRun.result??step.result,context:[step.context??"",savedRun.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:step);
+              reconciled.add(staleStep.id);
+            }else if(savedRun?.status==="waiting_approval" && savedRun.pendingApprovalId){
+              await store.update(id,userId,{status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
+              await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
+              return Response.json({mission:await store.get(id,userId)});
+            }
+          }
+          const interrupted=staleRunningSteps.filter(step=>!reconciled.has(step.id));
+          if(interrupted.length){
+            steps=steps.map(step=>interrupted.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,retryCount:(step.retryCount??0)+1,nextRetryAt:undefined,updatedAt:new Date().toISOString()}:step);
+          }
+          await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Reconciled "+reconciled.size+" interrupted run(s); reset "+interrupted.length+" unfinished step(s).",metadata:{reconciledStepIds:[...reconciled],resetStepIds:interrupted.map(step=>step.id)}});
         }
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
