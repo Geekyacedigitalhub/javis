@@ -25,5 +25,5 @@ export function evaluateMissionStep(input:{goal:string;step:FroshMissionStep;res
 
 export function createRecoveryStep(stepTitle:string,result?:string){
   const detail=result?" Review the failure/result: "+result.slice(0,500):"";
-  return step("Recover from the previous step and complete the missing work."+detail);
+  return {...step("Recover from the previous step and complete the missing work."+detail), retryCount:0};
 }
