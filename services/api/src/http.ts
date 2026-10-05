@@ -773,13 +773,15 @@ const server = Bun.serve({
           for(const toolCall of run.toolCalls){
             await emit(toolCall.status==="failed"?"mission.tool.failed":"mission.tool.completed","Tool "+toolCall.name+" "+toolCall.status,step.id,run.id,{toolName:toolCall.name,status:toolCall.status,durationMs:toolCall.durationMs??runDurationMs});
           }
-          if(toolCount>maxTools){
-            await emit("mission.budget.exceeded","Mission tool-call budget was exceeded.",step.id,run.id,{toolCount,maxTools});
+          const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
+          steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,context:[item.context??"",run.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:item);
+          if(toolCount>maxTools || executionDurationMs>maxDurationMs){
+            const reason=toolCount>maxTools?"Mission tool-call budget was exceeded.":"Mission execution time budget was exceeded.";
+            await emit("mission.budget.exceeded",reason,step.id,run.id,{toolCount,maxTools,executionDurationMs,maxDurationMs});
             mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,toolCallsUsed:toolCount,executionDurationMs,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
-          const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
-          steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,context:[item.context??"",run.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:item);
+
           if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
           if(stepStatus==="failed"){
             await emit("mission.step.failed","Failed: "+step.title,step.id,run.id);
