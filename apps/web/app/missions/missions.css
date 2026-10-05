@@ -126,3 +126,5 @@
 .health-alert:empty{display:none}.health-alert{margin:0 0 8px;padding:8px 10px;border:1px solid rgba(239,68,68,.28);border-radius:8px;background:rgba(239,68,68,.06);color:#ef4444;font-size:10px;font-weight:600}
 
 .health-recommendation{margin:0 0 7px;padding:8px 10px;border:1px solid rgba(22,163,74,.2);border-radius:8px;background:rgba(22,163,74,.04);font-size:10px}
+
+.health-recovery-action{margin-top:7px;padding:6px 9px;border:1px solid rgba(22,163,74,.25);border-radius:7px;background:transparent;color:inherit;font-size:10px;cursor:pointer}.health-recovery-action:hover{border-color:#16a34a}.health-recovery-action:disabled{opacity:.5;cursor:not-allowed}
