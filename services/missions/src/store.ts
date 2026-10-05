@@ -47,6 +47,7 @@ export class PostgresMissionStore implements FroshMissionStore {
     return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),500)]);
   }
   async delete(id:string,userId:string){const result=await this.sql.unsafe("DELETE FROM frosh_missions WHERE id=$1 AND user_id=$2",[id,userId]);return result.count>0;}
+  async deleteIfIdle(id:string,userId:string){const result=await this.sql.unsafe("DELETE FROM frosh_missions WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW())",[id,userId]);return result.count>0;}
 }
 
 export class InMemoryMissionStore implements FroshMissionStore {
@@ -76,4 +77,5 @@ export class InMemoryMissionStore implements FroshMissionStore {
     return (this.events.get(missionId)??[]).slice(0,Math.min(Math.max(limit,1),500));
   }
   async delete(id:string,userId:string){const x=await this.get(id,userId);if(!x)return false;this.items.delete(id);this.events.delete(id);return true;}
+  async deleteIfIdle(id:string,userId:string){const x=await this.get(id,userId);if(!x||(x.leaseUntil&&Date.parse(x.leaseUntil)>Date.now()))return false;this.items.delete(id);this.events.delete(id);return true;}
 }
