@@ -27,7 +27,8 @@ function normalize(row: any): FroshMemoryCandidateRecord {
     sourceMessageId: row.sourceMessageId ?? undefined,
     status: row.status,
     createdAt: row.createdAt,
-    resolvedAt: row.resolvedAt ?? undefined
+    resolvedAt: row.resolvedAt ?? undefined,
+    userId: row.userId ?? undefined
   };
 }
 
@@ -48,13 +49,13 @@ export async function createMemoryCandidate(candidate: FroshMemoryCandidate): Pr
 
   const rows = await sql.unsafe<any[]>(
     `INSERT INTO frosh_memory_candidates
-      (id, kind, statement, confidence, source_conversation_id, source_message_id, status)
-     VALUES ($1, $2, $3, $4, $5, $6, 'pending')
+      (id, kind, statement, confidence, source_conversation_id, source_message_id, user_id, status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending')
      RETURNING id, kind, statement, confidence,
        source_conversation_id AS "sourceConversationId",
        source_message_id AS "sourceMessageId",
        status, created_at AS "createdAt", resolved_at AS "resolvedAt"`,
-    [id, candidate.kind, candidate.statement, candidate.confidence, candidate.sourceConversationId ?? null, candidate.sourceMessageId ?? null]
+    [id, candidate.kind, candidate.statement, candidate.confidence, candidate.sourceConversationId ?? null, candidate.sourceMessageId ?? null, candidate.userId ?? null]
   );
   await sql.end({ timeout: 1 });
   return normalize(rows[0]);
@@ -67,7 +68,7 @@ export async function listMemoryCandidates(status?: FroshMemoryCandidateStatus):
   const rows = await sql.unsafe<any[]>(
     `SELECT id, kind, statement, confidence,
       source_conversation_id AS "sourceConversationId",
-      source_message_id AS "sourceMessageId",
+      source_message_id AS "sourceMessageId", user_id AS "userId",
       status, created_at AS "createdAt", resolved_at AS "resolvedAt"
      FROM frosh_memory_candidates
      ${status ? "WHERE status = $1" : ""}
@@ -89,7 +90,7 @@ export async function resolveMemoryCandidate(id: string, status: "approved" | "r
        WHERE id = $1
        RETURNING id, kind, statement, confidence,
          source_conversation_id AS "sourceConversationId",
-         source_message_id AS "sourceMessageId",
+         source_message_id AS "sourceMessageId", user_id AS "userId",
          status, created_at AS "createdAt", resolved_at AS "resolvedAt"`,
       [id, status]
     );
