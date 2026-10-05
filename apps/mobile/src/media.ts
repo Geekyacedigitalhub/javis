@@ -3,6 +3,7 @@ import type { FroshMediaRequest, FroshMediaResult, FroshMediaState } from "../..
 
 type NativeMediaModule = {
   getPermissionStatus(): string;
+  openMediaAccessSettings(): boolean;
   getState(): Promise<Record<string, unknown>>;
   control(action: string): Promise<{ accepted: boolean; message: string }>;
   volume(direction: "up" | "down"): Promise<{ accepted: boolean; message: string }>;
@@ -68,4 +69,10 @@ export async function executeMediaAction(
 
   const result = await native.control(request.action);
   return { action: request.action, ...result };
+}
+
+export function openMediaAccessSettings() {
+  const native = loadNativeMedia();
+  if (!native) return false;
+  return native.openMediaAccessSettings();
 }
