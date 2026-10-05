@@ -482,7 +482,7 @@ const server = Bun.serve({
       try{
         const userId=decodeURIComponent(missionMatch[1]);
         const id=decodeURIComponent(missionMatch[2]);
-        const {getMissionStore, planMission}=await import("../../missions/src");
+        const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="completed")return Response.json({mission});
@@ -502,7 +502,7 @@ const server = Bun.serve({
           messages:[{role:"user",content:step.title+"\nOverall objective: "+mission.goal}]
         });
         const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
-        steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
+        steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);\n        if(stepStatus==="failed") steps.push(createRecoveryStep(step.title,run.result));
         const completed=steps.filter(item=>item.status==="completed").length;
         const progress=steps.length?completed/steps.length:0;
         const status=run.status==="waiting_approval"?"waiting_approval":run.status==="failed"?"failed":progress===1?"completed":"running";
