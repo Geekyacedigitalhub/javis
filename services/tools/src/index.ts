@@ -6,3 +6,4 @@ import "./developer-tools";
 import "./command-tools";
 import "./github-tools";
 import "./repo-intelligence";
+import "./validation-tools";
