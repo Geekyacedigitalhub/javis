@@ -58,3 +58,21 @@ export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: 
   pendingCommands.delete(message.requestId);
   pending.resolve({ accepted: message.accepted, message: message.message, data: "data" in message ? message.data : undefined });
 }
+
+export function sendMessageCommand(deviceId: string, phoneNumber: string, message: string) {
+  const client = [...clients.values()].find((item) => item.deviceId === deviceId);
+  if (!client || client.socket.readyState !== WebSocket.OPEN) {
+    return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
+  }
+  const requestId = crypto.randomUUID();
+  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", phoneNumber, message }));
+  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve) => {
+    pendingCommands.set(requestId, { resolve, reject: () => undefined });
+    setTimeout(() => {
+      const pending = pendingCommands.get(requestId);
+      if (!pending) return;
+      pendingCommands.delete(requestId);
+      resolve({ accepted: false, message: "The Android device did not respond in time." });
+    }, 15000);
+  });
+}
