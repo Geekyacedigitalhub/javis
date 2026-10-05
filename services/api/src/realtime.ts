@@ -32,15 +32,15 @@ export function realtimeClientCount() {
   return clients.size;
 }
 
-const pendingCommands = new Map<string, { resolve: (value: { accepted: boolean; message: string }) => void; reject: (error: Error) => void }>();
+const pendingCommands = new Map<string, { resolve: (value: { accepted: boolean; message: string; data?: unknown }) => void; reject: (error: Error) => void }>();
 
-export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], appName: string) {
+export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
   const client = [...clients.values()].find((item) => item.deviceId === deviceId);
   if (!client || client.socket.readyState !== WebSocket.OPEN) {
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, appName }));
+  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : {}) }));
   return new Promise<{ accepted: boolean; message: string }>((resolve, reject) => {
     pendingCommands.set(requestId, { resolve, reject });
     setTimeout(() => {
@@ -56,5 +56,5 @@ export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: 
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
   pendingCommands.delete(message.requestId);
-  pending.resolve({ accepted: message.accepted, message: message.message });
+  pending.resolve({ accepted: message.accepted, message: message.message, data: "data" in message ? message.data : undefined });
 }
