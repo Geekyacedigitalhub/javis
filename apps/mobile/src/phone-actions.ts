@@ -22,7 +22,7 @@ export async function executePhoneAction(
     }
     const matches = searchContacts(request.value);
     const number = matches.length === 1 && matches[0].phones.length === 1 ? matches[0].phones[0].number : request.value;
-    const result = openCallDialer(number);
+    const result = placeDirectCall(number);
     return { action: request.action, accepted: result.accepted, message: result.message };
   }
 
