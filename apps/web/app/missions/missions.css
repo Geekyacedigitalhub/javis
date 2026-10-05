@@ -84,3 +84,5 @@
 .quality-reasons{display:flex;flex-wrap:wrap;gap:6px;width:100%;margin-top:3px}.quality-reasons span{font-size:10px;padding:4px 7px;border-radius:999px;background:rgba(127,127,127,.08);opacity:.72}
 
 .step-quality{display:inline-flex;align-items:center;gap:6px;margin-top:5px;font-size:11px}.step-quality span{font-weight:700}.step-quality small{opacity:.65}.step-quality.strong{color:#16a34a}.step-quality.good{color:#2563eb}.step-quality.attention{color:#d97706}.step-quality.failed{color:#dc2626}
+
+.step-performance{display:block;font-size:10px;opacity:.55;margin:0 0 8px}
