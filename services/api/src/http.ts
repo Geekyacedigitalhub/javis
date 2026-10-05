@@ -2,6 +2,7 @@ import { postChat } from "./routes";
 import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
+import { listDevices, registerDevice, getDevice } from "./devices";
 
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
@@ -26,6 +27,52 @@ const server = Bun.serve({
           { status: message === "message is required" ? 400 : 500 },
         );
       }
+    }
+
+
+    if (request.method === "GET" && url.pathname === "/v1/devices") {
+      return Response.json({ devices: listDevices() });
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/devices") {
+      try {
+        const body = await request.json();
+        if (
+          typeof body?.name !== "string" ||
+          (body?.platform !== "android" &&
+            body?.platform !== "windows" &&
+            body?.platform !== "web") ||
+          !Array.isArray(body?.capabilities)
+        ) {
+          return Response.json(
+            { error: "name, platform, and capabilities are required" },
+            { status: 400 },
+          );
+        }
+
+        return Response.json(
+          registerDevice({
+            name: body.name.trim(),
+            platform: body.platform,
+            capabilities: body.capabilities.filter(
+              (capability: unknown): capability is string =>
+                typeof capability === "string",
+            ),
+          }),
+          { status: 201 },
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Device registration failed";
+        return Response.json({ error: message }, { status: 400 });
+      }
+    }
+
+    const deviceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)$/);
+    if (deviceMatch && request.method === "GET") {
+      const device = getDevice(deviceMatch[1]);
+      return device
+        ? Response.json(device)
+        : Response.json({ error: "Device not found" }, { status: 404 });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
