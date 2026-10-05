@@ -1,5 +1,6 @@
 import { postChat } from "./routes";
 import { approvalStore, resolveApproval } from "../../tools/src";
+import { agentRunStore } from "../../ai/src";
 
 const port = Number(process.env.PORT ?? 3001);
 
@@ -33,7 +34,7 @@ const server = Bun.serve({
         : Response.json({ error: "Approval not found" }, { status: 404 });
     }
 
-    if (approvalMatch && request.method === "POST") {
+    const runMatch = url.pathname.match(/^\/v1\/agent-runs\/([^/]+)$/);\n\n    if (runMatch && request.method === "GET") {\n      const run = await agentRunStore.get(runMatch[1]);\n      return run ? Response.json(run) : Response.json({ error: "Agent run not found" }, { status: 404 });\n    }\n\n    if (approvalMatch && request.method === "POST") {
       try {
         const body = await request.json();
         const status = body?.status;
