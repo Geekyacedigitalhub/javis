@@ -895,7 +895,9 @@ const server = Bun.serve({
           if(failedSteps.length){
             const now=new Date().toISOString();
             const steps=mission.steps.map(step=>failedSteps.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,nextRetryAt:undefined,updatedAt:now}:step);
-            const recovered=await getMissionStore().update(id,userId,{status:"running",steps,leaseUntil:undefined,leaseOwner:undefined});
+            const executionOwner="manual-recovery:"+crypto.randomUUID();
+            const recovered=await getMissionStore().recoverFailedIfIdle(id,userId,executionOwner,steps);
+            if(!recovered)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
             await getMissionStore().addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered failed mission for another execution attempt.",metadata:{stepIds:failedSteps.map(step=>step.id)}});
             return Response.json({mission:recovered});
           }
