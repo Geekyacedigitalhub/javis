@@ -597,7 +597,7 @@ const server = Bun.serve({
         const maxDurationMs=Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000);
         const missionStartedAt=Date.now();
         let toolCount=0;
-        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
         await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
@@ -632,9 +632,6 @@ const server = Bun.serve({
           lastRunId=run.id;
           lastApproval=run.pendingApprovalId;
           lastResult=run.result;
-          const completed=steps.filter(item=>item.status==="completed").length;
-          const progress=steps.length?completed/steps.length:0;
-
           if(run.status==="completed"){
             const evaluation=await missionEvaluator.evaluateMission({
               goal:mission.goal,
@@ -651,8 +648,11 @@ const server = Bun.serve({
             }
           }
 
+          const completed=steps.filter(item=>item.status==="completed").length;
+          const progress=steps.length?completed/steps.length:0;
+
           if(run.status==="waiting_approval"){
-            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
+            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined});
             return Response.json({mission});
           }
           if(run.status==="failed"){
