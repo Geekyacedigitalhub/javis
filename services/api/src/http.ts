@@ -3,7 +3,7 @@ import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice } from "./devices";
-import { addRealtimeClient, realtimeClientCount } from "./realtime";
+import { addRealtimeClient, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
 
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
@@ -12,12 +12,29 @@ const server = Bun.serve({
   port,
   websocket: {
     open(ws) {
-      addRealtimeClient(ws);
+      // Authentication is completed by the first realtime auth message.
+      ws.data = { authenticated: false, deviceId: undefined as string | undefined };
       ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
     },
     message(ws, message) {
       try {
         const parsed = JSON.parse(String(message));
+        if (parsed?.type === "auth") {
+          if (typeof parsed.deviceId !== "string" || typeof parsed.token !== "string" || !authenticateDevice(parsed.deviceId, parsed.token)) {
+            ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" }));
+            ws.close();
+            return;
+          }
+          ws.data = { authenticated: true, deviceId: parsed.deviceId };
+          addRealtimeClient(ws, parsed.deviceId);
+          ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
+          return;
+        }
+        if (parsed?.type === "device.command.result") {
+          if (!ws.data?.authenticated || ws.data.deviceId !== parsed.deviceId) return;
+          handleDeviceCommandResult(parsed);
+          return;
+        }
         if (parsed?.type === "ping") {
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
         }
