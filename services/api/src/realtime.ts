@@ -32,7 +32,7 @@ export function realtimeClientCount() {
   return clients.size;
 }
 
-const pendingCommands = new Map<string, { resolve: (value: { accepted: boolean; message: string; data?: unknown }) => void; reject: (error: Error) => void }>();
+const pendingCommands = new Map<string, { deviceId: string; resolve: (value: { accepted: boolean; message: string; data?: unknown }) => void; reject: (error: Error) => void }>();
 
 export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
   const client = [...clients.values()].find((item) => item.deviceId === deviceId);
@@ -42,7 +42,7 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
   const requestId = crypto.randomUUID();
   client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
   return new Promise<{ accepted: boolean; message: string }>((resolve, reject) => {
-    pendingCommands.set(requestId, { resolve, reject });
+    pendingCommands.set(requestId, { deviceId, resolve, reject });
     setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
@@ -56,6 +56,7 @@ export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: 
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
   pendingCommands.delete(message.requestId);
+  if (pending.deviceId !== message.deviceId) return;
   pending.resolve({ accepted: message.accepted, message: message.message, data: "data" in message ? message.data : undefined });
 }
 
@@ -67,7 +68,7 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
   const requestId = crypto.randomUUID();
   client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
   return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve) => {
-    pendingCommands.set(requestId, { resolve, reject: () => undefined });
+    pendingCommands.set(requestId, { deviceId, resolve, reject: () => undefined });
     setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
