@@ -58,3 +58,9 @@
 .timeline-mission-step-started .timeline-marker,.timeline-mission-tool-completed .timeline-marker{color:#16a34a}
 .timeline-mission-step-failed .timeline-marker,.timeline-mission-tool-failed .timeline-marker,.timeline-mission-failed .timeline-marker{color:#dc2626}
 .timeline-mission-step-retry .timeline-marker,.timeline-mission-approval-required .timeline-marker{color:#d97706}
+
+.mission-controls{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.mission-controls button,.mission-retry-button{border:1px solid rgba(127,127,127,.25);border-radius:8px;padding:7px 11px;background:transparent;cursor:pointer;font-size:12px}
+.mission-controls button:hover,.mission-retry-button:hover{border-color:#16a34a}
+.mission-controls button:disabled,.mission-retry-button:disabled{opacity:.5;cursor:not-allowed}
+.mission-retry-button{margin-top:7px}
