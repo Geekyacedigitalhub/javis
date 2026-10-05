@@ -72,6 +72,7 @@ export interface FroshMissionStore {
   update(id: string, userId: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission>;
   delete(id: string, userId: string): Promise<boolean>;
   claim(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
+  claimApprovalContinuation(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   renewLease(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   addEvent(input: Omit<FroshMissionEvent, "id" | "createdAt">): Promise<FroshMissionEvent>;
   listEvents(missionId: string, userId: string, limit?: number): Promise<FroshMissionEvent[]>;
