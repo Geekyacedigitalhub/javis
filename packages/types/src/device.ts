@@ -1,5 +1,4 @@
 export type FroshDevicePlatform = "android" | "windows" | "web";
-
 export type FroshDeviceStatus = "online" | "offline" | "unknown";
 
 export interface FroshDevice {
@@ -15,4 +14,10 @@ export interface FroshDeviceRegistration {
   name: string;
   platform: FroshDevicePlatform;
   capabilities: string[];
+}
+
+export interface FroshDeviceCredential {
+  deviceId: string;
+  token: string;
+  expiresAt: string;
 }
