@@ -490,6 +490,17 @@ const server = Bun.serve({
     }
 
     const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
+    const missionEventsMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events$/);
+    if(missionEventsMatch && request.method==="GET"){
+      const {getMissionStore}=await import("../../missions/src");
+      const userId=decodeURIComponent(missionEventsMatch[1]);
+      const id=decodeURIComponent(missionEventsMatch[2]);
+      const mission=await getMissionStore().get(id,userId);
+      if(!mission)return Response.json({error:"Mission not found"},{status:404});
+      const limit=Number(url.searchParams.get("limit")??"100");
+      return Response.json({events:await getMissionStore().listEvents(id,userId,Number.isFinite(limit)?limit:100)});
+    }
+
     if(missionMatch && request.method==="GET"){
       const {getMissionStore}=await import("../../missions/src");
       const mission=await getMissionStore().get(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
