@@ -24,3 +24,28 @@ export class InMemoryConversationMemoryStore implements FroshConversationMemoryS
       .slice(0, limit);
   }
 }
+
+
+export function mergeConversationMemory(
+  existing: FroshConversationMemory | null,
+  candidate: { provider: string; participant: string; statement: string; lastMessageAt?: string }
+): FroshConversationMemory {
+  const base = existing ?? {
+    id: crypto.randomUUID(),
+    provider: candidate.provider,
+    participant: candidate.participant,
+    summary: "",
+    keyFacts: []
+  };
+  const keyFacts = [...new Set([...base.keyFacts, candidate.statement])].slice(-20);
+  const summary = [base.summary, candidate.statement].filter(Boolean).join(" | ").slice(-2000);
+  return {
+    ...base,
+    provider: candidate.provider,
+    participant: candidate.participant,
+    summary,
+    keyFacts,
+    lastMessageAt: candidate.lastMessageAt,
+    updatedAt: new Date().toISOString()
+  };
+}
