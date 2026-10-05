@@ -672,6 +672,26 @@ const server = Bun.serve({
         return Response.json({mission});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
     }
+    const missionRetryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/steps\/([^/]+)\/retry$/);
+    if(missionRetryMatch && request.method==="POST"){
+      try{
+        const userId=decodeURIComponent(missionRetryMatch[1]);
+        const id=decodeURIComponent(missionRetryMatch[2]);
+        const stepId=decodeURIComponent(missionRetryMatch[3]);
+        const {getMissionStore}=await import("../../missions/src");
+        const store=getMissionStore();
+        const mission=await store.get(id,userId);
+        if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        if(["completed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be retried in its current state"},{status:409});
+        const step=mission.steps.find(item=>item.id===stepId);
+        if(!step)return Response.json({error:"Mission step not found"},{status:404});
+        const steps=mission.steps.map(item=>item.id===stepId?{...item,status:"pending",runId:undefined,result:undefined,updatedAt:new Date().toISOString()}:item);
+        const updated=await store.update(id,userId,{status:"running",steps,pendingApprovalId:undefined,leaseUntil:undefined});
+        await store.addEvent({missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
+        return Response.json({mission:updated});
+      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission retry failed"},{status:400});}
+    }
+
     const missionRecoveryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/recover$/);
     if(missionRecoveryMatch && request.method==="POST"){
       try{
