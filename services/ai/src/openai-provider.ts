@@ -173,6 +173,38 @@ export class OpenAIProvider {
     yield { type: "done", message, toolCalls: executedCalls };
   }
 
+  async evaluateMission(input:{goal:string;step:string;result:string}):Promise<{complete:boolean;nextAction:"continue"|"recover"|"finish";reason:string;nextStep?:string}> {
+    if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
+    const response = await client.responses.create({
+      model,
+      instructions: [
+        "You are FROSH's mission evaluator.",
+        "Evaluate only the supplied mission goal, step, and result.",
+        "Do not execute tools or claim actions outside the supplied result.",
+        "Return strict JSON with keys complete, nextAction, reason, and optional nextStep.",
+        "nextAction must be continue, recover, or finish.",
+        "Use finish only when the supplied result demonstrates the overall goal is achieved.",
+        "Use recover when the step failed, validation failed, or the result shows a concrete problem.",
+        "Use continue when more work is needed but no recovery is required."
+      ].join(" "),
+      input: JSON.stringify(input),
+      store: false,
+    });
+    const raw = response.output_text?.trim() ?? "";
+    try {
+      const parsed = JSON.parse(raw) as {complete?:unknown;nextAction?:unknown;reason?:unknown;nextStep?:unknown};
+      const action = parsed.nextAction==="recover"||parsed.nextAction==="finish"?""+parsed.nextAction:"continue";
+      return {
+        complete: action==="finish" || parsed.complete===true,
+        nextAction: action as "continue"|"recover"|"finish",
+        reason: typeof parsed.reason==="string"?parsed.reason:"Mission evaluation completed.",
+        nextStep: typeof parsed.nextStep==="string"?parsed.nextStep:undefined
+      };
+    } catch {
+      return {complete:false,nextAction:"continue",reason:"Evaluator returned an unreadable result; continue conservatively."};
+    }
+  }
+
   async generate(input: ReturnType<typeof buildModelInput>, options: GenerateOptions = {}) {
     if (!process.env.OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY is not configured");
