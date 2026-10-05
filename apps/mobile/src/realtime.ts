@@ -36,7 +36,7 @@ export function connectFroshRealtime(
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
       if (parsed.type === "device.command" && parsed.command === "send_message") {
         try {
-          const result = await executePhoneAction({ action: "compose_message", value: String(parsed.phoneNumber ?? ""), message: String(parsed.message ?? "") } as never);
+          const result = await executePhoneAction({ action: "compose_message", value: String(parsed.recipient ?? ""), message: String(parsed.message ?? "") } as never);
           socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: result.accepted, message: result.message }));
         } catch (error) {
           socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to send the message." }));
