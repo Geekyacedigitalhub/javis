@@ -70,6 +70,7 @@ export interface FroshMissionStore {
   get(id: string, userId: string): Promise<FroshMission | null>;
   create(input: Omit<FroshMission, "id" | "createdAt" | "updatedAt">): Promise<FroshMission>;
   update(id: string, userId: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission>;
+  updateOwned(id: string, userId: string, leaseOwner: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission | null>;
   delete(id: string, userId: string): Promise<boolean>;
   deleteIfIdle(id: string, userId: string): Promise<boolean>;
   claim(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
