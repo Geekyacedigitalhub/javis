@@ -109,3 +109,15 @@ registerTool({
     return requestMessageInbox(device.id);
   }
 });
+
+registerTool({
+  name: "get_android_conversations",
+  description: "Group recent supported messaging notifications on the paired Android device into conversations by provider and participant. Read-only.",
+  permission: "safe",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+  async execute() {
+    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
+    return requestMessageInbox(device.id);
+  }
+});
