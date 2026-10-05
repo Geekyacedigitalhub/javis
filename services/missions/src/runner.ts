@@ -17,9 +17,9 @@ export function startMissionRunner(){
       const batch=candidates.slice(offset,offset+limit);
       await Promise.all(batch.map(async(mission)=>{
         try{
-          const claimed=await store.claim(mission.id,userId);
+          const claimed=await store.claim(mission.id,userId,workerId);
           if(!claimed)return;
-          const heartbeat=setInterval(()=>void store.renewLease(mission.id,userId),60_000);
+          const heartbeat=setInterval(()=>void store.renewLease(mission.id,userId,workerId),60_000);
           try{
             const response=await fetch("http://localhost:"+String(process.env.PORT??3001)+"/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(mission.id)+"/recover",{method:"POST",headers:{"x-frosh-web-token":process.env.FROSH_WEB_TOKEN??"","x-frosh-mission-worker-id":workerId}});
             if(!response.ok)console.error("FROSH mission worker failed",mission.id,response.status);
