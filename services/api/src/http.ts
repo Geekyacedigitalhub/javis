@@ -793,7 +793,7 @@ const server = Bun.serve({
                 leaseLost=true;
               }else if(activeRunId){
                 try{
-                  await agentRunStore.update(activeRunId,{});
+                  await agentRunStore.touch(activeRunId);
                 }catch(error){
                   console.error("FROSH mission agent run heartbeat failed:",error);
                 }
