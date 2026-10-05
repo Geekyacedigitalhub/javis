@@ -59,13 +59,13 @@ export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: 
   pending.resolve({ accepted: message.accepted, message: message.message, data: "data" in message ? message.data : undefined });
 }
 
-export function sendMessageCommand(deviceId: string, phoneNumber: string, message: string) {
+export function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
   const client = [...clients.values()].find((item) => item.deviceId === deviceId);
   if (!client || client.socket.readyState !== WebSocket.OPEN) {
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", phoneNumber, message }));
+  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
   return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve) => {
     pendingCommands.set(requestId, { resolve, reject: () => undefined });
     setTimeout(() => {
