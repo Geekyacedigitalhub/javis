@@ -5,3 +5,4 @@ import "./safe-tools";
 import "./developer-tools";
 import "./command-tools";
 import "./github-tools";
+import "./repo-intelligence";
