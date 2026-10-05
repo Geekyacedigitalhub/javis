@@ -554,6 +554,9 @@ const server = Bun.serve({
             activeRunId:run.id,
             result:run.result
           });
+          if(updated.status==="running"){
+            return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
+          }
           return Response.json({mission:updated,run});
         }
         const response=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
