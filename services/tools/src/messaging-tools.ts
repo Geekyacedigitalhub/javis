@@ -151,3 +151,36 @@ registerTool({
     return requestMessageInbox(device.id);
   }
 });
+
+registerTool({
+  name: "review_memory_candidates",
+  description: "List pending FROSH memory candidates extracted from communication. Read-only until a candidate is explicitly approved.",
+  permission: "safe",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+  async execute() {
+    const { listMemoryCandidates } = await import("../../memory/src/memory-candidates");
+    return listMemoryCandidates("pending");
+  }
+});
+
+registerTool({
+  name: "resolve_memory_candidate",
+  description: "Approve or reject one FROSH memory candidate. Approval stores the candidate as durable conversation memory; rejection discards it.",
+  permission: "confirm",
+  parameters: {
+    type: "object",
+    properties: {
+      candidateId: { type: "string" },
+      decision: { type: "string", enum: ["approved", "rejected"] }
+    },
+    required: ["candidateId", "decision"],
+    additionalProperties: false
+  },
+  async execute(args) {
+    const candidateId = typeof args.candidateId === "string" ? args.candidateId.trim() : "";
+    const decision = args.decision === "approved" || args.decision === "rejected" ? args.decision : "";
+    if (!candidateId || !decision) return { accepted: false, message: "A candidate ID and valid decision are required." };
+    const { resolveMemoryCandidate } = await import("../../memory/src/memory-candidates");
+    return resolveMemoryCandidate(candidateId, decision);
+  }
+});
