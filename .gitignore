@@ -1,0 +1,14 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.next/
+dist/
+build/
+coverage/
+.expo/
+android/.gradle/
+android/local.properties
+*.log
+.DS_Store
+Thumbs.db
