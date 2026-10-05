@@ -34,6 +34,28 @@ export function connectFroshRealtime(
   socket.onmessage = (message) => {
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      if (parsed.type === "device.command" && parsed.command === "message_inbox") {
+        try {
+          const { getUnifiedMessagingInbox } = await import("./messaging-inbox");
+          const inbox = await getUnifiedMessagingInbox();
+          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: true, message: "Message inbox loaded.", data: inbox }));
+        } catch (error) {
+          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to load the message inbox." }));
+        }
+        return;
+      }
+
+      if (parsed.type === "device.command" && parsed.command === "message_reply") {
+        try {
+          const { replyToUnifiedMessage } = await import("./messaging-inbox");
+          const result = await replyToUnifiedMessage(String(parsed.notificationId ?? ""), String(parsed.message ?? ""));
+          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: result.accepted, message: result.message }));
+        } catch (error) {
+          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to reply to the message." }));
+        }
+        return;
+      }
+
       if (parsed.type === "device.command" && parsed.command === "send_message") {
         try {
           const result = await executePhoneAction({ action: "compose_message", value: String(parsed.recipient ?? ""), message: String(parsed.message ?? "") } as never);
