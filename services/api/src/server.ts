@@ -7,7 +7,7 @@ import {
 
 const provider = new DevelopmentProvider();
 const orchestrator = new JavisOrchestrator(provider);
-const memory = new InMemoryStore();
+const memory = createMemoryStore();
 
 export interface JavisHttpRequest {
   message: string;
