@@ -16,6 +16,8 @@ export function startMissionRunner(){
     for(const mission of missions){
       if(mission.status!=="running"&&mission.status!=="planning")continue;
       try{
+        const claimed=await store.claim(mission.id,userId);
+        if(!claimed)continue;
         const response=await fetch("http://localhost:"+String(process.env.PORT??3001)+"/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(mission.id)+"/recover",{method:"POST",headers:{"x-frosh-web-token":process.env.FROSH_WEB_TOKEN??""}});
         if(!response.ok) console.error("FROSH mission worker failed",mission.id,response.status);
       }catch(error){console.error("FROSH mission worker error",mission.id,error);}
