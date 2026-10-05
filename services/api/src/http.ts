@@ -716,6 +716,10 @@ const server = Bun.serve({
         await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
+          const renewed=await store.renewLease(id,userId,executionOwner);
+          if(!renewed){
+            return Response.json({error:"Mission execution lease was lost"},{status:409});
+          }
           if(steps.length>maxSteps||Date.now()-missionStartedAt>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
             mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined});
@@ -784,7 +788,7 @@ const server = Bun.serve({
           const progress=steps.length?completed/steps.length:0;
 
           if(run.status==="waiting_approval"){
-            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined});
+            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission});
           }
           if(run.status==="failed"){
