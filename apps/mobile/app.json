@@ -1,0 +1,13 @@
+{
+  "expo": {
+    "name": "FROSH",
+    "slug": "frosh",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "frosh",
+    "android": {
+      "package": "com.geekyacedigitalhub.frosh"
+    }
+  }
+}
