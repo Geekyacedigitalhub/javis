@@ -1,0 +1,11 @@
+{
+  "name": "javis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "JARVIS personal AI assistant platform",
+  "packageManager": "bun@1.4.1",
+  "scripts": {
+    "dev": "echo 'JARVIS foundation initialized'",
+    "typecheck": "echo 'Typecheck pipeline will be added with the first service'
+  }
+}
