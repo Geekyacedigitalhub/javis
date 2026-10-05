@@ -483,7 +483,8 @@ const server = Bun.serve({
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
         if(!goal)return Response.json({error:"goal is required"},{status:400});
         const { getMissionStore }=await import("../../missions/src");
-        const mission=await getMissionStore().create({userId,goal,status:"planning",progress:0,steps:[]});
+        const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
+        const mission=await getMissionStore().create({userId,goal,status:"planning",priority,progress:0,steps:[]});
         return Response.json({mission},{status:201});
       } catch(error){return Response.json({error:error instanceof Error?error.message:"Mission creation failed"},{status:400});}
     }
