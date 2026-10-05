@@ -76,3 +76,23 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
     }, 15000);
   });
 }
+
+export function requestMessageInbox(deviceId: string) {
+  return sendDeviceCommand(deviceId, "message_inbox");
+}
+
+export function replyToMessageCommand(deviceId: string, notificationId: string, message: string) {
+  const client = [...clients.values()].find((item) => item.deviceId === deviceId);
+  if (!client || client.socket.readyState !== WebSocket.OPEN) return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
+  const requestId = crypto.randomUUID();
+  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
+  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve) => {
+    pendingCommands.set(requestId, { resolve, reject: () => undefined });
+    setTimeout(() => {
+      const pending = pendingCommands.get(requestId);
+      if (!pending) return;
+      pendingCommands.delete(requestId);
+      resolve({ accepted: false, message: "The Android device did not respond in time." });
+    }, 15000);
+  });
+}
