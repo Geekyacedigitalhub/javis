@@ -518,7 +518,7 @@ const server = Bun.serve({
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       if(action==="pause"){
         if(["completed","failed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be paused in its current state"},{status:409});
-        const updated=await store.update(id,userId,{status:"paused",leaseUntil:undefined});
+        const updated=await store.update(id,userId,{status:"paused",leaseUntil:undefined,leaseOwner:undefined});
         await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
         return Response.json({mission:updated});
       }
@@ -722,7 +722,7 @@ const server = Bun.serve({
           }
           if(steps.length>maxSteps||Date.now()-missionStartedAt>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
-            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined});
+            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
           const index=steps.findIndex(step=>step.status==="pending" && (!step.nextRetryAt || Date.parse(step.nextRetryAt)<=Date.now()));
@@ -744,7 +744,7 @@ const server = Bun.serve({
           }
           if(toolCount>maxTools){
             await emit("mission.budget.exceeded","Mission tool-call budget was exceeded.",step.id,run.id,{toolCount,maxTools});
-            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,leaseUntil:undefined});
+            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
@@ -796,7 +796,7 @@ const server = Bun.serve({
             return Response.json({mission});
           }
           if(progress>=1){
-            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,leaseUntil:undefined});
+            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
             await emit("mission.completed","Mission completed.");
             return Response.json({mission});
           }
@@ -821,7 +821,7 @@ const server = Bun.serve({
         const step=mission.steps.find(item=>item.id===stepId);
         if(!step)return Response.json({error:"Mission step not found"},{status:404});
         const steps=mission.steps.map(item=>item.id===stepId?{...item,status:"pending",runId:undefined,result:undefined,updatedAt:new Date().toISOString()}:item);
-        const updated=await store.update(id,userId,{status:"running",steps,pendingApprovalId:undefined,leaseUntil:undefined});
+        const updated=await store.update(id,userId,{status:"running",steps,pendingApprovalId:undefined,leaseUntil:undefined,leaseOwner:undefined});
         await store.addEvent({missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission retry failed"},{status:400});}
