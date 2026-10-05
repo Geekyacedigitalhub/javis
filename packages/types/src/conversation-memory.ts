@@ -15,3 +15,18 @@ export interface FroshConversationMemoryStore {
   upsert(input: Omit<FroshConversationMemory, "id" | "updatedAt"> & { id?: string }): Promise<FroshConversationMemory>;
   list(limit?: number): Promise<FroshConversationMemory[]>;
 }
+
+export type FroshMemoryKind = "preference" | "commitment" | "relationship" | "project_context" | "important_fact";
+
+export interface FroshMemoryCandidate {
+  kind: FroshMemoryKind;
+  statement: string;
+  confidence: number;
+  sourceConversationId?: string;
+  sourceMessageId?: string;
+}
+
+export interface FroshMemoryExtractionResult {
+  candidates: FroshMemoryCandidate[];
+  skippedCount: number;
+}
