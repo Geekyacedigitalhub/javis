@@ -956,12 +956,12 @@ const server = Bun.serve({
             const recovered=await getMissionStore().recoverFailedIfIdle(id,userId,executionOwner,steps);
             if(!recovered)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
             await getMissionStore().addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered failed mission for another execution attempt.",metadata:{stepIds:failedSteps.map(step=>step.id)}});
-            const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{
+            const handoffHeaders=new Headers(request.headers);
+            handoffHeaders.set("x-frosh-mission-worker-id",executionOwner);
+            return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{
               method:"POST",
-              headers:new Headers(request.headers)
+              headers:handoffHeaders
             });
-            next.headers.set("x-frosh-mission-worker-id",executionOwner);
-            return next;
           }
         }
         const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
