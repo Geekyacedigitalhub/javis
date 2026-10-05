@@ -776,11 +776,16 @@ const server = Bun.serve({
           await updateOwned({status:"running",steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
           await emit("mission.step.started","Started: "+step.title,step.id);
           const runStartedAt=Date.now();
+          let leaseLost=false;
+          let leaseRenewing=false;
           const leaseRenewTimer=setInterval(async()=>{
+            if(leaseLost||leaseRenewing)return;
+            leaseRenewing=true;
             try{
               const renewed=await store.renewLease(id,userId,executionOwner);
-              if(!renewed)console.error("FROSH mission execution lease renewal failed:",id);
-            }catch(error){console.error("FROSH mission execution lease renewal error:",error);}
+              if(!renewed)leaseLost=true;
+            }catch(error){leaseLost=true;console.error("FROSH mission execution lease renewal error:",error);}
+            finally{leaseRenewing=false;}
           },60000);
           let run;
           try{
@@ -792,6 +797,9 @@ const server = Bun.serve({
             clearInterval(leaseRenewTimer);
           }
           const runDurationMs=Date.now()-runStartedAt;
+          if(leaseLost){
+            return Response.json({error:"Mission execution lease was lost during agent execution"},{status:409});
+          }
           toolCount+=run.toolCalls.length;
           const executionDurationMs=initialDurationMs+(Date.now()-missionStartedAt);
           for(const toolCall of run.toolCalls){
