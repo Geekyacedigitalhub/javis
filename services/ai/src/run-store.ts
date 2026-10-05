@@ -14,6 +14,14 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return this.runs.get(id) ?? null;
   }
 
+  async touch(id: string) {
+    const current = this.runs.get(id);
+    if (!current) throw new Error("Agent run not found");
+    const updated = { ...current, updatedAt: new Date().toISOString() };
+    this.runs.set(id, updated);
+    return updated;
+  }
+
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");
