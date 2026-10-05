@@ -14,6 +14,7 @@ export interface FroshConversationMemoryStore {
   get(id: string): Promise<FroshConversationMemory | null>;
   upsert(input: Omit<FroshConversationMemory, "id" | "updatedAt"> & { id?: string }): Promise<FroshConversationMemory>;
   list(limit?: number): Promise<FroshConversationMemory[]>;
+  delete(id: string): Promise<boolean>;
 }
 
 export type FroshMemoryKind = "preference" | "commitment" | "relationship" | "project_context" | "important_fact";
