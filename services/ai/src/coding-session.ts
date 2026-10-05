@@ -113,10 +113,10 @@ export class CodingSessionManager {
       );
     } catch (error) {
       await agentRunStore.update(run.id, {
-        status: "waiting_approval",
+        status: "failed",
         pendingApprovalId: undefined,
         providerContinuation: run.providerContinuation,
-        result: "Approval was accepted, but FROSH could not resume the provider session. The run is preserved for recovery.",
+        result: "Approval was accepted, but FROSH could not resume the provider session. The run was stopped safely.",
         error: error instanceof Error ? error.message : "Provider continuation failed",
       });
       throw error;
