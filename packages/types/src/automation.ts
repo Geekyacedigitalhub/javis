@@ -1,0 +1,28 @@
+export type FroshAutomationSchedule =
+  | { type: "once"; runAt: string }
+  | { type: "daily"; hour: number; minute: number }
+  | { type: "weekly"; dayOfWeek: number; hour: number; minute: number }
+  | { type: "interval"; minutes: number };
+
+export type FroshAutomationStatus = "active" | "paused" | "completed";
+
+export interface FroshAutomation {
+  id: string;
+  userId: string;
+  name: string;
+  prompt: string;
+  schedule: FroshAutomationSchedule;
+  status: FroshAutomationStatus;
+  nextRunAt?: string;
+  lastRunAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FroshAutomationStore {
+  list(userId: string): Promise<FroshAutomation[]>;
+  get(id: string, userId: string): Promise<FroshAutomation | null>;
+  create(input: Omit<FroshAutomation, "id" | "createdAt" | "updatedAt">): Promise<FroshAutomation>;
+  update(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation>;
+  delete(id: string, userId: string): Promise<boolean>;
+}
