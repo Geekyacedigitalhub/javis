@@ -727,6 +727,11 @@ const server = Bun.serve({
           for(const toolCall of run.toolCalls){
             await emit(toolCall.status==="failed"?"mission.tool.failed":"mission.tool.completed","Tool "+toolCall.name+" "+toolCall.status,step.id,run.id,{toolName:toolCall.name,status:toolCall.status,durationMs:toolCall.durationMs??runDurationMs});
           }
+          if(toolCount>maxTools){
+            await emit("mission.budget.exceeded","Mission tool-call budget was exceeded.",step.id,run.id,{toolCount,maxTools});
+            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,leaseUntil:undefined});
+            return Response.json({mission,budgetExceeded:true});
+          }
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
           steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
           if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
