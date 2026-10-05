@@ -42,27 +42,6 @@ export interface FroshUnifiedInbox {
 
 export type FroshMessagePriority = "low" | "normal" | "high" | "urgent";
 
-export interface FroshMessageInsight {
-  messageId: string;
-  provider: string;
-  sender?: string;
-  summary: string;
-  priority: FroshMessagePriority;
-  needsReply: boolean;
-  replyReason?: string;
-  receivedAt: string;
-}
-
-export interface FroshMessageDigest {
-  total: number;
-  needsReply: number;
-  urgent: number;
-  insights: FroshMessageInsight[];
-}
-
-
-export type FroshMessagePriority = "low" | "normal" | "high" | "urgent";
-
 export interface FroshMessageInsight extends FroshUnifiedMessage {
   priority: FroshMessagePriority;
   likelyNeedsReply: boolean;
