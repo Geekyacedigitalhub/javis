@@ -7,13 +7,18 @@ export class FroshOrchestrator {
 
   async respond(messages: FroshMessage[]) {
     const result = await this.model.generate({ messages, tools: listTools() });
-    const completedCalls: FroshToolCall[] = [];
+    const toolCalls: FroshToolCall[] = [];
 
     for (const call of result.toolCalls ?? []) {
-      completedCalls.push(await executeToolCall(call));
+      toolCalls.push(
+        call.status === "planned" ? await executeToolCall(call) : call,
+      );
     }
 
-    return { message: result.message, toolCalls: completedCalls };
+    return {
+      message: result.message,
+      toolCalls,
+    };
   }
 }
 
