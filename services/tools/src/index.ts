@@ -12,3 +12,6 @@ import "./validation-tools";
 import "./mobile-tools";
 import "./media-tools";
 import "./contact-tools";
+
+import "./memory-tools";
+import "./messaging-tools";
