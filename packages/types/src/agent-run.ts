@@ -7,6 +7,7 @@ export interface FroshProviderContinuation {
   responseId: string;
   pendingCallId?: string;
   pendingToolName?: string;
+  pendingToolOutputs?: Array<{ callId: string; output: string }>;
 }
 
 export interface FroshAgentRun {
