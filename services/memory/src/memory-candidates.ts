@@ -6,6 +6,7 @@ import type {
 } from "../../../packages/types/src/conversation-memory";
 import { getConversationMemoryStore } from "./conversation-memory-factory";
 import { mergeConversationMemory } from "./conversation-memory";
+import { getUserMemoryStore } from "./user-memory-factory";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -116,6 +117,17 @@ export async function resolveMemoryCandidate(id: string, status: "approved" | "r
       statement: candidate.statement
     });
     await store.upsert(memory);
+
+    const userId = candidate.sourceConversationId?.startsWith("user:") ? candidate.sourceConversationId.slice(5) : "";
+    if (userId) {
+      await getUserMemoryStore().upsert({
+        userId,
+        kind: candidate.kind,
+        statement: candidate.statement,
+        confidence: candidate.confidence,
+        sourceConversationId: conversationId
+      });
+    }
   }
 
   return candidate;
