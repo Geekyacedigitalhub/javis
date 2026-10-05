@@ -25,6 +25,7 @@ export interface FroshMemoryCandidate {
   confidence: number;
   sourceConversationId?: string;
   sourceMessageId?: string;
+  userId?: string;
 }
 
 export interface FroshMemoryExtractionResult {
