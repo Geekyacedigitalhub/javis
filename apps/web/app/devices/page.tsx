@@ -22,6 +22,7 @@ export default function DevicesPage() {
   const [result, setResult] = useState("");
   const [appNames, setAppNames] = useState<Record<string, string>>({});
   const [busyCommand, setBusyCommand] = useState<string | null>(null);
+  const [inspectData, setInspectData] = useState<Record<string, unknown>>({});
 
   async function load() {
     setLoading(true);
@@ -51,6 +52,24 @@ export default function DevicesPage() {
       setResult(data.message ?? (response.ok ? "Command completed." : "Command failed."));
     } catch {
       setResult("Could not send the device command.");
+    } finally {
+      setBusyCommand(null);
+    }
+  }
+
+  async function inspect(deviceId: string, command: string, extra: Record<string, string> = {}) {
+    setBusyCommand(deviceId + ":" + command);
+    try {
+      const response = await fetch(`${API}/v1/devices/${encodeURIComponent(deviceId)}/command`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ command, ...extra })
+      });
+      const data = await response.json();
+      setResult(data.message ?? "Inspection complete.");
+      if (data.data !== undefined) setInspectData((current) => ({ ...current, [deviceId + ":" + command]: data.data }));
+    } catch {
+      setResult("Device inspection failed.");
     } finally {
       setBusyCommand(null);
     }
@@ -123,7 +142,30 @@ export default function DevicesPage() {
                   <button disabled={!!busyCommand} onClick={() => void command(device.id, "open_dialer")}>Dialer</button>
                   <button disabled={!!busyCommand} onClick={() => void command(device.id, "media_control", { action: "toggle" })}>Play / Pause</button>
                   <button disabled={!!busyCommand} onClick={() => void command(device.id, "media_control", { action: "next" })}>Next</button>
+                  <button disabled={!!busyCommand} onClick={() => void inspect(device.id, "media_state")}>Media State</button>
+                  <button disabled={!!busyCommand} onClick={() => void inspect(device.id, "message_inbox")}>Messages</button>
                 </div>
+                <div className="inspect-row">
+                  <input
+                    placeholder="Search contacts"
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void inspect(device.id, "contacts_search", { query: event.currentTarget.value });
+                    }}
+                  />
+                  <button disabled={!!busyCommand} onClick={(event) => {
+                    const input = (event.currentTarget.parentElement?.querySelector("input") as HTMLInputElement | null);
+                    if (input?.value.trim()) void inspect(device.id, "contacts_search", { query: input.value.trim() });
+                  }}>Contacts</button>
+                </div>
+                {inspectData[device.id + ":media_state"] && (
+                  <pre className="inspect-output">{JSON.stringify(inspectData[device.id + ":media_state"], null, 2)}</pre>
+                )}
+                {inspectData[device.id + ":message_inbox"] && (
+                  <pre className="inspect-output">{JSON.stringify(inspectData[device.id + ":message_inbox"], null, 2)}</pre>
+                )}
+                {inspectData[device.id + ":contacts_search"] && (
+                  <pre className="inspect-output">{JSON.stringify(inspectData[device.id + ":contacts_search"], null, 2)}</pre>
+                )}
                 <div className="app-control">
                   <input
                     value={appNames[device.id] ?? ""}
