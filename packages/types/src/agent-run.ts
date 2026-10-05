@@ -2,6 +2,13 @@ import type { FroshToolCall } from "./javis";
 
 export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed";
 
+export interface FroshProviderContinuation {
+  provider: "openai";
+  responseId: string;
+  pendingCallId?: string;
+  pendingToolName?: string;
+}
+
 export interface FroshAgentRun {
   id: string;
   conversationId?: string;
@@ -9,6 +16,7 @@ export interface FroshAgentRun {
   status: FroshRunStatus;
   toolCalls: FroshToolCall[];
   pendingApprovalId?: string;
+  providerContinuation?: FroshProviderContinuation;
   createdAt: string;
   updatedAt: string;
   result?: string;
