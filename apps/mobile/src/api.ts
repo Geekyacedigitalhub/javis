@@ -1,4 +1,4 @@
-import type { FroshDevice } from "../../../packages/types/src/device";
+import type { FroshDevice, FroshDeviceCredential } from "../../../packages/types/src/device";
 import type { FroshAgentRun } from "../../../packages/types/src/agent-run";
 import type { FroshApprovalRequest } from "../../../packages/types/src/approval";
 import type { FroshResponse } from "../../../packages/types/src/javis";
@@ -6,10 +6,23 @@ import type { FroshResponse } from "../../../packages/types/src/javis";
 export const FROSH_API_URL =
   process.env.EXPO_PUBLIC_FROSH_API_URL ?? "http://localhost:3001";
 
+let credential: FroshDeviceCredential | null = null;
+
+export function setDeviceCredential(value: FroshDeviceCredential | null) {
+  credential = value;
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${FROSH_API_URL}${path}`, {
     ...init,
-    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      "Content-Type": "application/json",
+      ...(credential ? {
+        "x-frosh-device-id": credential.deviceId,
+        "x-frosh-device-token": credential.token,
+      } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
   const body = await response.json();
   if (!response.ok) throw new Error(body?.error ?? `Request failed: ${response.status}`);
@@ -49,9 +62,11 @@ export function listDevices() {
   return request<{ devices: FroshDevice[] }>("/v1/devices");
 }
 
-export function registerDevice(name: string, capabilities: string[]) {
-  return request<FroshDevice>("/v1/devices", {
+export async function registerDevice(name: string, capabilities: string[]) {
+  const result = await request<{ device: FroshDevice; credential: FroshDeviceCredential }>("/v1/devices", {
     method: "POST",
     body: JSON.stringify({ name, platform: "android", capabilities }),
   });
+  setDeviceCredential(result.credential);
+  return result.device;
 }
