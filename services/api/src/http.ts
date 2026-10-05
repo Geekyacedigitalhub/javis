@@ -226,6 +226,39 @@ const server = Bun.serve({
       }
     }
 
+    const messageIntelligenceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/intelligence$/);
+    if (messageIntelligenceMatch && request.method === "GET") {
+      try {
+        const { requestMessageInbox } = await import("./realtime");
+        const inbox = await requestMessageInbox(messageIntelligenceMatch[1]);
+        if (!inbox.accepted) return Response.json(inbox);
+        const data = inbox.data as { messages?: Array<{ id: string; provider: string; sender?: string; text?: string; receivedAt: string; canReply: boolean }> } | undefined;
+        const messages = data?.messages ?? [];
+        const rank = { urgent: 4, high: 3, normal: 2, low: 1 } as const;
+        const insights = messages.map((item) => {
+          const text = (item.text ?? "").trim();
+          const lower = text.toLowerCase();
+          const urgent = /urgent|asap|emergency|immediately|911|help/.test(lower);
+          const question = /\?|\\bcan you\\b|\\bcould you\\b|\\bplease\\b|\\blet me know\\b|\\bwhen\\b|\\bwhere\\b/.test(lower);
+          const priority = urgent ? "urgent" : question ? "high" : item.canReply ? "normal" : "low";
+          return {
+            ...item,
+            priority,
+            likelyNeedsReply: Boolean(item.canReply && (question || text.length > 0)),
+            reason: urgent ? "Urgency signal detected." : question ? "Looks like a question or request." : undefined
+          };
+        }).sort((a,b) => rank[b.priority as keyof typeof rank] - rank[a.priority as keyof typeof rank]);
+        return Response.json({
+          total: insights.length,
+          needsReply: insights.filter((item) => item.likelyNeedsReply).length,
+          urgent: insights.filter((item) => item.priority === "urgent").length,
+          highlights: insights.slice(0, 30)
+        });
+      } catch (error) {
+        return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message intelligence failed" }, { status: 400 });
+      }
+    }
+
     const messageReplyMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/([^/]+)\/reply$/);
     if (messageReplyMatch && request.method === "POST") {
       try {
