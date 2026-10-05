@@ -1,0 +1,17 @@
+export type FroshPhoneAction =
+  | "open_app"
+  | "open_dialer"
+  | "call_number"
+  | "compose_message";
+
+export interface FroshPhoneActionRequest {
+  action: FroshPhoneAction;
+  value?: string;
+  packageName?: string;
+}
+
+export interface FroshPhoneActionResult {
+  action: FroshPhoneAction;
+  accepted: boolean;
+  message: string;
+}
