@@ -493,6 +493,7 @@ const server = Bun.serve({
         const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,progress:0,steps:[]});
+      await getMissionStore().addEvent({missionId:mission.id,userId,type:"mission.created",message:"Mission created: "+goal});
         return Response.json({mission},{status:201});
       } catch(error){return Response.json({error:error instanceof Error?error.message:"Mission creation failed"},{status:400});}
     }
