@@ -584,10 +584,20 @@ const server = Bun.serve({
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
         let lastResult=mission.result;
-        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.recovered"|"mission.completed"|"mission.failed",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+        const maxSteps=Math.max(1,Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12);
+        const maxTools=Math.max(1,Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40);
+        const maxDurationMs=Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000);
+        const missionStartedAt=Date.now();
+        let toolCount=0;
+        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
         await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
+          if(steps.length>maxSteps||Date.now()-missionStartedAt>maxDurationMs||toolCount>=maxTools){
+            await emit("mission.budget.exceeded","Mission execution budget reached.");
+            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined});
+            return Response.json({mission,budgetExceeded:true});
+          }
           const index=steps.findIndex(step=>step.status==="pending");
           if(index<0)break;
 
@@ -601,6 +611,7 @@ const server = Bun.serve({
             messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
           });
           const runDurationMs=Date.now()-runStartedAt;
+          toolCount+=run.toolCalls.length;
           for(const toolCall of run.toolCalls){
             await emit(toolCall.status==="failed"?"mission.tool.failed":"mission.tool.completed","Tool "+toolCall.name+" "+toolCall.status,step.id,run.id,{toolName:toolCall.name,status:toolCall.status,durationMs:runDurationMs});
           }
