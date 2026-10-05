@@ -1,6 +1,7 @@
 import type { FroshEvent } from "../../../packages/types/src/events";
 import { FROSH_API_URL } from "./api";
 import { loadDeviceCredential } from "./session";
+import { launchAppByName } from "../modules/frosh-apps/src";
 
 function websocketUrl() {
   return FROSH_API_URL.replace(/^http/, "ws") + "/v1/realtime";
@@ -29,7 +30,23 @@ export function connectFroshRealtime(
   };
   socket.onmessage = (message) => {
     try {
-      onEvent(JSON.parse(message.data) as FroshEvent);
+      const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      if (parsed.type === "device.command" && parsed.command === "open_app") {
+        const result = launchAppByName(String(parsed.appName ?? ""));
+        socket.send(JSON.stringify({
+          type: "device.command.result",
+          requestId: parsed.requestId,
+          deviceId: parsed.deviceId,
+          accepted: result.accepted,
+          message: result.message
+        }));
+        return;
+      }
+      if (parsed.type === "connected") {
+        onStatus?.("open");
+        return;
+      }
+      onEvent(parsed as unknown as FroshEvent);
     } catch {
       // Ignore malformed events from the server.
     }
