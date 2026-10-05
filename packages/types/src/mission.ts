@@ -23,6 +23,7 @@ export interface FroshMission {
   activeRunId?: string;
   pendingApprovalId?: string;
   leaseUntil?: string;
+  leaseOwner?: string;
   result?: string;
   createdAt: string;
   updatedAt: string;
