@@ -1,14 +1,14 @@
-# JARVIS
+# FROSH
 
-Personal AI assistant platform for voice, memory, tools, automation, and secure device control.
+Personal AI operating system for intelligence, memory, tools, automation, development, cybersecurity, business, career assistance, voice, vision, and secure device control.
 
 ## Vision
 
-JARVIS is designed as a multi-device assistant with a central AI orchestration layer and permissioned tools. The project will grow from a working text/voice assistant into a secure personal agent for development, research, automation, and authorized computer actions.
+FROSH is designed as a multi-device personal agent with a central AI orchestration layer and permissioned tools. It will grow from a working text assistant into a secure operating system for development, research, cybersecurity, GeekyAce Digital Hub operations, job discovery, automation, and authorized computer actions.
 
 ## Architecture
 
-- `apps/web` — JARVIS control center
+- `apps/web` — FROSH control center
 - `apps/mobile` — Android client
 - `apps/desktop-agent` — authorized Windows device agent
 - `services/api` — backend API and realtime gateway
@@ -19,22 +19,24 @@ JARVIS is designed as a multi-device assistant with a central AI orchestration l
 - `packages/config` — shared configuration
 - `packages/ui` — shared UI primitives
 
+## Core capabilities
+
+- AI reasoning and planning
+- Long-term memory
+- Autonomous development workflows
+- Cybersecurity assistance for authorized work
+- Web research and browser automation
+- GeekyAce Digital Hub business/social workflows
+- Job discovery and application assistance
+- Windows and Android device control
+- Voice and vision
+- Scheduled automation
+
 ## Development principles
 
-1. Security and explicit permissions before powerful computer actions.
-2. Provider-independent AI orchestration where practical.
+1. Security and explicit permissions before powerful actions.
+2. Provider-independent orchestration where practical.
 3. Type-safe contracts between clients, services, and tools.
-4. Observable actions: tool calls should be traceable and explainable.
-5. Start small with a working vertical slice, then expand.
-
-## Roadmap
-
-1. Foundation and contracts
-2. AI chat and tool calling
-3. Persistent memory
-4. Voice interface
-5. Windows desktop agent
-6. Android client
-7. Browser/developer tools
-8. Automation and proactive workflows
-9. Vision and advanced multimodal capabilities
+4. Observable actions: tool calls must be traceable.
+5. The model never grants itself authorization.
+6. Build production-quality vertical slices instead of UI-only prototypes.
