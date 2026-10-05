@@ -119,6 +119,7 @@ export default function Home() {
           <Link href="/devices">Devices</Link>
           <Link href="/messages">Messages</Link>
           <Link href="/automations">Automations</Link>
+          <Link href="/missions">Missions</Link>
         </nav>
         <div className="sidebar-status">
           <span className="status-dot" />
