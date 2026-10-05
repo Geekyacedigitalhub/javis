@@ -695,7 +695,7 @@ const server = Bun.serve({
             return Response.json({error:"Mission lease is missing or expired"},{status:409});
           }
         }else{
-          const claimed=await store.claimApprovalContinuation(id,userId,executionOwner);
+          const claimed=await store.claim(id,userId,executionOwner);
           if(!claimed)return Response.json({error:"Mission is already being executed by another worker"},{status:409});
           mission=claimed;
         }
@@ -901,7 +901,7 @@ const server = Bun.serve({
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission recovery failed"},{status:400});}
     }
 
-    const missionContinueMatch=url.pathname.match(/^\\/v1\\/missions\\/users\\/([^/]+)\\/([^/]+)\\/continue$/);
+    const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
     if(missionContinueMatch && request.method==="POST"){
       try{
         const userId=decodeURIComponent(missionContinueMatch[1]);
@@ -925,7 +925,7 @@ const server = Bun.serve({
           }
 
           const executionOwner="approval-continuation:"+crypto.randomUUID();
-          const claimed=await store.claim(id,userId,executionOwner);
+          const claimed=await store.claimApprovalContinuation(id,userId,executionOwner);
           if(!claimed)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
 
           const continuationStartedAt=Date.now();
