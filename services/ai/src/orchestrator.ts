@@ -1,28 +1,20 @@
-import type { JavisMessage, JavisToolCall } from "../../../packages/types/src/javis";
-import { listTools } from "../../tools/src";
+import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/javis";
+import { executeToolCall, listTools } from "../../tools/src";
+import type { ModelAdapter } from "./provider";
 
-export interface ModelAdapter {
-  generate(input: {
-    messages: JavisMessage[];
-    tools: ReturnType<typeof listTools>;
-  }): Promise<{
-    message: string;
-    toolCalls?: JavisToolCall[];
-  }>;
-}
-
-export class JavisOrchestrator {
+export class FroshOrchestrator {
   constructor(private readonly model: ModelAdapter) {}
 
-  async respond(messages: JavisMessage[]) {
-    const result = await this.model.generate({
-      messages,
-      tools: listTools(),
-    });
+  async respond(messages: FroshMessage[]) {
+    const result = await this.model.generate({ messages, tools: listTools() });
+    const completedCalls: FroshToolCall[] = [];
 
-    return {
-      message: result.message,
-      toolCalls: result.toolCalls ?? [],
-    };
+    for (const call of result.toolCalls ?? []) {
+      completedCalls.push(await executeToolCall(call));
+    }
+
+    return { message: result.message, toolCalls: completedCalls };
   }
 }
+
+export { FroshOrchestrator as JavisOrchestrator };
