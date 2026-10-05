@@ -1,7 +1,7 @@
 import { registerTool } from "./registry";
 import { getConversationMemoryStore } from "../../memory/src/conversation-memory-factory";
 import { removeMemoryFact } from "../../memory/src/conversation-memory";
-import { listMemoryCandidates } from "../../memory/src/memory-candidates";
+import { listMemoryCandidates, listUserMemoryCandidates } from "../../memory/src/memory-candidates";
 
 registerTool({
   name: "list_memory_candidates",
@@ -92,5 +92,23 @@ registerTool({
     const { getUserMemoryStore } = await import("../../memory/src/user-memory-factory");
     const deleted = await getUserMemoryStore().delete(memoryId, userId);
     return { accepted: deleted, message: deleted ? "Long-term memory deleted." : "Memory not found for this user." };
+  }
+});
+
+
+registerTool({
+  name: "list_my_memory_candidates",
+  description: "List pending memory candidates belonging only to the current user.",
+  permission: "safe",
+  parameters: {
+    type: "object",
+    properties: { userId: { type: "string" } },
+    required: ["userId"],
+    additionalProperties: false
+  },
+  async execute(args) {
+    const userId = typeof args.userId === "string" ? args.userId.trim() : "";
+    if (!userId) return { accepted: false, message: "A user ID is required." };
+    return listUserMemoryCandidates(userId);
   }
 });
