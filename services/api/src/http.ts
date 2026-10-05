@@ -216,6 +216,37 @@ const server = Bun.serve({
         : Response.json({ error: "Memory not found for this user" }, { status: 404 });
     }
 
+    const commandMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/command$/);
+    if (commandMatch && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const command = typeof body?.command === "string" ? body.command : "";
+        const allowed = ["open_dialer", "media_control", "media_state", "open_app"];
+        if (!allowed.includes(command)) {
+          return Response.json({ error: "Command is not available from the web console." }, { status: 403 });
+        }
+        const { sendDeviceCommand } = await import("./realtime");
+        const value =
+          command === "media_control" ? (typeof body?.action === "string" ? body.action : "") :
+          command === "open_app" ? (typeof body?.appName === "string" ? body.appName : "") :
+          undefined;
+        if (command === "media_control" && !["play","pause","toggle","next","previous","stop","volume_up","volume_down"].includes(value ?? "")) {
+          return Response.json({ error: "Invalid media action." }, { status: 400 });
+        }
+        if (command === "open_app" && !value?.trim()) {
+          return Response.json({ error: "appName is required." }, { status: 400 });
+        }
+        const result = await sendDeviceCommand(
+          commandMatch[1],
+          command as "open_dialer" | "media_control" | "media_state" | "open_app",
+          value,
+        );
+        return Response.json(result);
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Device command failed" }, { status: 400 });
+      }
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/devices") {
       return Response.json({ devices: listDevices() });
     }
