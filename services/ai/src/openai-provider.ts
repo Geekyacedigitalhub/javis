@@ -43,12 +43,19 @@ export class OpenAIProvider {
 
     if (options.continuation) {
       previousResponseId = options.continuation.continuation.responseId;
+      continuationInput = [
+        ...(options.continuation.continuation.pendingToolOutputs ?? []).map((output) => ({
+          type: "function_call_output",
+          call_id: output.callId,
+          output: output.output,
+        })),
+      ];
       if (options.continuation.toolOutput) {
-        continuationInput = [{
+        continuationInput.push({
           type: "function_call_output",
           call_id: options.continuation.toolOutput.callId,
           output: options.continuation.toolOutput.output,
-        }];
+        });
       }
     } else {
       continuationInput = input.messages.map((message) => ({
@@ -117,6 +124,10 @@ export class OpenAIProvider {
               responseId: response.id,
               pendingCallId: item.call_id ?? item.id,
               pendingToolName: item.name,
+              pendingToolOutputs: continuationInput.map((output: any) => ({
+                callId: output.call_id,
+                output: output.output,
+              })),
             },
           };
         }
