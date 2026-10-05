@@ -226,6 +226,21 @@ const server = Bun.serve({
       }
     }
 
+    const replySuggestionsMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/suggest-replies$/);
+    if (replySuggestionsMatch && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const message = typeof body?.message === "string" ? body.message.trim() : "";
+        const provider = typeof body?.provider === "string" ? body.provider : "other";
+        const sender = typeof body?.sender === "string" ? body.sender : undefined;
+        if (!message) return Response.json({ error: "message is required" }, { status: 400 });
+        const { suggestMessageReplies } = await import("../../ai/src/message-replies");
+        return Response.json({ suggestions: await suggestMessageReplies({ provider, sender, message }) });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Reply suggestion failed" }, { status: 400 });
+      }
+    }
+
     const messageIntelligenceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/intelligence$/);
     if (messageIntelligenceMatch && request.method === "GET") {
       try {
