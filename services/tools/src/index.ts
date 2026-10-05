@@ -1,6 +1,8 @@
 export * from "./registry";
 export * from "./executor";
 export * from "./approvals";
+export * from "./postgres-approvals";
+export * from "./approval-store-factory";
 import "./safe-tools";
 import "./developer-tools";
 import "./command-tools";
