@@ -1,8 +1,8 @@
 {
-  "name": "javis",
+  "name": "frosh",
   "private": true,
   "version": "0.1.0",
-  "description": "JARVIS personal AI assistant platform",
+  "description": "FROSH personal AI operating system",
   "packageManager": "bun@1.4.1",
   "scripts": {
     "dev": "bun run services/api/src/http.ts",
