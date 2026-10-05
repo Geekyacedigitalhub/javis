@@ -10,7 +10,9 @@ import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memo
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
 import { startAutomationRunner } from "../../automation/src";
+import { startMissionRunner } from "../../missions/src";
 startAutomationRunner();
+startMissionRunner();
 
 async function recoverMissionsOnStartup(){
   const userId=process.env.FROSH_AUTOMATION_USER_ID?.trim();
