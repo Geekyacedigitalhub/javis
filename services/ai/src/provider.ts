@@ -20,6 +20,7 @@ export interface ProviderContinuationInput {
     callId: string;
     output: string;
   };
+  toolOutputs?: Array<{ callId: string; output: string }>;
 }
 
 export interface ProviderResponse {
