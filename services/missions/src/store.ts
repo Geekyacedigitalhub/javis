@@ -14,6 +14,10 @@ export class PostgresMissionStore implements FroshMissionStore {
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status IN ('planning','running') AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
   }
+  async claimStepRetry(id:string,userId:string,leaseOwner:string){
+    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status NOT IN ('completed','cancelled','waiting_approval') AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
+    return rows[0]??null;
+  }
   async claimApprovalContinuation(id:string,userId:string,leaseOwner:string){
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='waiting_approval' AND pending_approval_id IS NOT NULL AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
@@ -41,6 +45,7 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){const now=new Date().toISOString();const x={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};this.items.set(x.id,x);return x;}
   async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){const x=await this.get(id,userId);if(!x)throw new Error("Mission not found");const next={...x,...patch,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async claim(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||!["planning","running"].includes(mission.status))return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
+  async claimStepRetry(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||["completed","cancelled","waiting_approval"].includes(mission.status))return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async claimApprovalContinuation(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="waiting_approval"||!mission.pendingApprovalId)return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async renewLease(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="running"||mission.leaseOwner!==leaseOwner)return null;const next={...mission,leaseUntil:new Date(Date.now()+120000).toISOString(),updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
