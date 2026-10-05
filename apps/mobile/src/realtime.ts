@@ -3,6 +3,7 @@ import { FROSH_API_URL } from "./api";
 import { loadDeviceCredential } from "./session";
 import { launchAppByName } from "../modules/frosh-apps/src";
 import { executeMediaAction } from "./media";
+import { searchContacts } from "../modules/frosh-contacts/src";
 
 function websocketUrl() {
   return FROSH_API_URL.replace(/^http/, "ws") + "/v1/realtime";
@@ -32,6 +33,11 @@ export function connectFroshRealtime(
   socket.onmessage = (message) => {
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      if (parsed.type === "device.command" && parsed.command === "contacts_search") {
+        const contacts = searchContacts(String(parsed.query ?? ""));
+        socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: true, message: contacts.length ? "Contact search completed." : "No matching contacts found.", data: contacts }));
+        return;
+      }
       if (parsed.type === "device.command" && parsed.command === "media_state") {
         const state = await (async () => {
           try {
