@@ -1,0 +1,14 @@
+"use client";
+import Link from "next/link";
+import {useEffect,useState} from "react";
+import "../missions.css";
+type Mission={id:string;goal:string;status:string;priority?:string;budgetProfile?:string;progress:number;steps:Array<{id?:string;title:string;status:string;result?:string;retryCount?:number}>;createdAt:string};
+type Event={id:string;type:string;message:string;createdAt:string};
+const userId="default-user";
+export default function MissionDetailPage({params}:{params:Promise<{id:string}>}){
+ const [id,setId]=useState(""); const [mission,setMission]=useState<Mission|null>(null); const [events,setEvents]=useState<Event[]>([]);
+ useEffect(()=>{void params.then(x=>setId(x.id))},[params]);
+ useEffect(()=>{if(!id)return; const load=async()=>{const r=await fetch("/api/frosh/v1/missions/users/"+userId+"/"+id,{cache:"no-store"}); if(r.ok)setMission((await r.json()).mission); const e=await fetch("/api/frosh/v1/missions/users/"+userId+"/"+id+"/events?limit=500",{cache:"no-store"}); if(e.ok)setEvents((await e.json()).events??[])}; void load(); const timer=setInterval(()=>void load(),3000); return()=>clearInterval(timer)},[id]);
+ if(!mission)return <main className="missions-page"><Link href="/missions">← Missions</Link><p>Loading mission…</p></main>;
+ return <main className="missions-page"><Link href="/missions">← Back to missions</Link><header className="mission-detail-header"><div><p>Mission</p><h1>{mission.goal}</h1></div><span className={"mission-state "+mission.status}>{mission.status}</span></header><div className="mission-detail-grid"><div><strong>Priority</strong><span>{mission.priority??"normal"}</span></div><div><strong>Budget</strong><span>{mission.budgetProfile??"standard"}</span></div><div><strong>Progress</strong><span>{Math.round(mission.progress*100)}%</span></div><div><strong>Steps</strong><span>{mission.steps.length}</span></div></div><section className="mission-detail"><h2>Steps</h2>{mission.steps.map((step,index)=><article className="mission-step" key={step.id??index}><strong>{step.title}</strong><span>{step.status}{step.retryCount?` · retries ${step.retryCount}`:""}</span>{step.result&&<small>{step.result}</small>}</article>)}</section><section className="mission-detail"><h2>Timeline</h2><div className="mission-timeline">{events.map(event=><div key={event.id}><time>{new Date(event.createdAt).toLocaleString()}</time><strong>{event.type}</strong><span>{event.message}</span></div>)}</div></section></main>;
+}
