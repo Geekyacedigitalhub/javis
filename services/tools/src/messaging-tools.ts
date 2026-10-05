@@ -121,3 +121,21 @@ registerTool({
     return requestMessageInbox(device.id);
   }
 });
+
+registerTool({
+  name: "get_conversation_memory",
+  description: "Read saved FROSH context about recent messaging conversations. Read-only.",
+  permission: "safe",
+  parameters: {
+    type: "object",
+    properties: { conversationId: { type: "string", description: "Optional conversation identifier." } },
+    additionalProperties: false
+  },
+  async execute(args) {
+    const { getConversationMemoryStore } = await import("../../memory/src/conversation-memory-factory");
+    const store = getConversationMemoryStore();
+    const id = typeof args.conversationId === "string" ? args.conversationId.trim() : "";
+    if (id) return store.get(id);
+    return store.list(50);
+  }
+});
