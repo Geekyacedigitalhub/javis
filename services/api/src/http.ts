@@ -756,10 +756,12 @@ const server = Bun.serve({
         for(let cycle=0;cycle<8;cycle++){
           const renewed=await store.renewLease(id,userId,executionOwner);
           if(!renewed){
+            await store.releaseLeaseIfOwned(id,userId,executionOwner);
             return Response.json({error:"Mission execution lease was lost"},{status:409});
           }
           const leaseCheck=await store.get(id,userId);
           if(!leaseCheck || leaseCheck.leaseOwner!==executionOwner || !leaseCheck.leaseUntil || Date.parse(leaseCheck.leaseUntil)<=Date.now()){
+            await store.releaseLeaseIfOwned(id,userId,executionOwner);
             return Response.json({error:"Mission execution lease was lost before agent execution"},{status:409});
           }
           if(steps.length>maxSteps||initialDurationMs+(Date.now()-missionStartedAt)>maxDurationMs||toolCount>=maxTools){
