@@ -247,8 +247,7 @@ const server = Bun.serve({
       }
     }
 
-    const memoryDeleteMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/([^/]+)$/);
-    if (memoryDeleteMatch && request.method === "DELETE") {
+    const memoryDeleteMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/([^/]+)$/);    if (memoryDeleteMatch && request.method === "DELETE") {
       const userId = decodeURIComponent(memoryDeleteMatch[1]);
       const memoryId = decodeURIComponent(memoryDeleteMatch[2]);
       const deleted = await getUserMemoryStore().delete(memoryId, userId);
@@ -497,8 +496,7 @@ const server = Bun.serve({
         const userId=decodeURIComponent(missionUsers[1]);
         const body=await request.json();
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
-        if(!goal)return Response.json({error:"goal is required"},{status:400});
-        const { getMissionStore }=await import("../../missions/src");
+        if(!goal)return Response.json({error:"goal is required"},{status:400});        const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
       const budgetProfile=body?.budgetProfile==="extended"||body?.budgetProfile==="intensive"?body.budgetProfile:"standard";
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
@@ -723,6 +721,12 @@ const server = Bun.serve({
               await updateOwned({status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
               await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
               return Response.json({mission:await store.get(id,userId)});
+            }else if(savedRun?.status==="running"){
+              const heartbeatAgeMs=Date.now()-Date.parse(savedRun.updatedAt);
+              if(Number.isFinite(heartbeatAgeMs) && heartbeatAgeMs<180000){
+                await store.releaseLeaseIfOwned(id,userId,executionOwner);
+                return Response.json({error:"Mission agent run is still active"},{status:409});
+              }
             }
           }
           const interrupted=staleRunningSteps.filter(step=>!reconciled.has(step.id));
@@ -747,8 +751,7 @@ const server = Bun.serve({
         const maxTools=Math.min(80,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40)*profileMultiplier)));
         const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
         const missionStartedAt=Date.now();
-        const initialToolCount=mission.toolCallsUsed??0;
-        const initialDurationMs=mission.executionDurationMs??0;
+        const initialToolCount=mission.toolCallsUsed??0;        const initialDurationMs=mission.executionDurationMs??0;
         let toolCount=initialToolCount;
         const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.step.retry"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
         await emit("mission.claimed","Mission execution started.");
@@ -1097,52 +1100,3 @@ const server = Bun.serve({
         return Response.json({ error: message }, { status: 500 });
       }
     }
-
-    const runMatch = url.pathname.match(/^\/v1\/agent-runs\/([^/]+)$/);
-    if (runMatch && request.method === "GET") {
-      const run = await agentRunStore.get(runMatch[1]);
-      return run
-        ? Response.json(run)
-        : Response.json({ error: "Agent run not found" }, { status: 404 });
-    }
-
-    const approvalMatch = url.pathname.match(/^\/v1\/approvals\/([^/]+)$/);
-    if (approvalMatch && request.method === "GET") {
-      const approval = await approvalStore.get(approvalMatch[1]);
-      return approval
-        ? Response.json(approval)
-        : Response.json({ error: "Approval not found" }, { status: 404 });
-    }
-
-    if (approvalMatch && request.method === "POST") {
-      try {
-        const body = await request.json();
-        if (body?.status !== "approved" && body?.status !== "rejected") {
-          return Response.json(
-            { error: "status must be approved or rejected" },
-            { status: 400 },
-          );
-        }
-
-        const approval = await approvalStore.get(approvalMatch[1]);
-        if (!approval) {
-          return Response.json({ error: "Approval not found" }, { status: 404 });
-        }
-
-        const run =
-          body.status === "approved"
-            ? await codingSessions.approveAndResume(approvalMatch[1])
-            : await codingSessions.reject(approvalMatch[1]);
-
-        return Response.json({ approvalId: approvalMatch[1], run });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Approval failed";
-        return Response.json({ error: message }, { status: 400 });
-      }
-    }
-
-    return Response.json({ error: "Not found" }, { status: 404 });
-  },
-});
-
-console.log(`FROSH API listening on http://localhost:${server.port}`);
