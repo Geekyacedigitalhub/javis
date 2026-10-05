@@ -37,13 +37,30 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
   }
 
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>) {
-    const current = await this.get(id);
-    if (!current) throw new Error("Agent run not found");
-    const next = { ...current, ...patch };
-    const rows = await this.query<FroshAgentRun>(
-      'UPDATE frosh_agent_runs SET conversation_id=$2, goal=$3, status=$4, tool_calls=$5::jsonb, pending_approval_id=$6, result=$7, error=$8, updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
-      [id, next.conversationId ?? null, next.goal, next.status, JSON.stringify(next.toolCalls), next.pendingApprovalId ?? null, next.result ?? null, next.error ?? null],
-    );
+    const fields: string[] = [];
+    const values: unknown[] = [id];
+    const add = (column: string, value: unknown, transform?: (value: unknown) => unknown) => {
+      fields.push(column + "=$" + String(values.length + 1));
+      values.push(transform ? transform(value) : value);
+    };
+    if (Object.prototype.hasOwnProperty.call(patch, "conversationId")) add("conversation_id", patch.conversationId ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, "goal")) add("goal", patch.goal);
+    if (Object.prototype.hasOwnProperty.call(patch, "status")) add("status", patch.status);
+    if (Object.prototype.hasOwnProperty.call(patch, "toolCalls")) add("tool_calls", JSON.stringify(patch.toolCalls), () => undefined);
+    if (Object.prototype.hasOwnProperty.call(patch, "pendingApprovalId")) add("pending_approval_id", patch.pendingApprovalId ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, "providerContinuation")) add("provider_continuation", JSON.stringify(patch.providerContinuation), () => undefined);
+    if (Object.prototype.hasOwnProperty.call(patch, "result")) add("result", patch.result ?? null);
+    if (Object.prototype.hasOwnProperty.call(patch, "error")) add("error", patch.error ?? null);
+    const rows = fields.length
+      ? await this.query<FroshAgentRun>(
+          'UPDATE frosh_agent_runs SET ' + fields.map((field) => field.startsWith("tool_calls=") ? field + "::jsonb" : field.startsWith("provider_continuation=") ? field + "::jsonb" : field).join(", ") + ', updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+          values,
+        )
+      : await this.query<FroshAgentRun>(
+          'UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+          [id],
+        );
+    if (!rows[0]) throw new Error("Agent run not found");
     return rows[0];
   }
 }
