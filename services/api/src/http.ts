@@ -1,7 +1,9 @@
 import { postChat } from "./routes";
-import { approvalStore, resolveApproval } from "../../tools/src";
-import { agentRunStore } from "../../ai/src";
+import { approvalStore } from "../../tools/src";
+import { CodingSessionManager, agentRunStore } from "../../ai/src";
+import { OpenAIProvider } from "../../ai/src/openai-provider";
 
+const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
 
 const server = Bun.serve({
@@ -16,33 +18,40 @@ const server = Bun.serve({
     if (request.method === "POST" && url.pathname === "/v1/chat") {
       try {
         const body = await request.json();
-        const result = await postChat(body);
-        return Response.json(result);
+        return Response.json(await postChat(body));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Request failed";
-        const status = message === "message is required" ? 400 : 500;
-        return Response.json({ error: message }, { status });
+        return Response.json({ error: message }, { status: message === "message is required" ? 400 : 500 });
       }
     }
 
-    const approvalMatch = url.pathname.match(/^\/v1\/approvals\/([^/]+)$/);
-
-    if (approvalMatch && request.method === "GET") {
-      const approval = await approvalStore.get(approvalMatch[1]);
-      return approval
-        ? Response.json(approval)
-        : Response.json({ error: "Approval not found" }, { status: 404 });
+    const runMatch = url.pathname.match(/^\/v1\/agent-runs\/([^/]+)$/);
+    if (runMatch && request.method === "GET") {
+      const run = await agentRunStore.get(runMatch[1]);
+      return run ? Response.json(run) : Response.json({ error: "Agent run not found" }, { status: 404 });
     }
 
-    const runMatch = url.pathname.match(/^\/v1\/agent-runs\/([^/]+)$/);\n\n    if (runMatch && request.method === "GET") {\n      const run = await agentRunStore.get(runMatch[1]);\n      return run ? Response.json(run) : Response.json({ error: "Agent run not found" }, { status: 404 });\n    }\n\n    if (approvalMatch && request.method === "POST") {
+    const approvalMatch = url.pathname.match(/^\/v1\/approvals\/([^/]+)$/);
+    if (approvalMatch && request.method === "GET") {
+      const approval = await approvalStore.get(approvalMatch[1]);
+      return approval ? Response.json(approval) : Response.json({ error: "Approval not found" }, { status: 404 });
+    }
+
+    if (approvalMatch && request.method === "POST") {
       try {
         const body = await request.json();
-        const status = body?.status;
-        if (status !== "approved" && status !== "rejected") {
+        if (body?.status !== "approved" && body?.status !== "rejected") {
           return Response.json({ error: "status must be approved or rejected" }, { status: 400 });
         }
-        const result = await resolveApproval(approvalMatch[1], status);
-        return Response.json(result);
+
+        const approval = await approvalStore.get(approvalMatch[1]);
+        if (!approval) return Response.json({ error: "Approval not found" }, { status: 404 });
+
+        const result = body.status === "approved"
+          ? await codingSessions.approveAndResume(approvalMatch[1], [])
+          : await codingSessions.reject(approvalMatch[1]);
+
+        return Response.json({ approvalId: approvalMatch[1], run: result });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Approval failed";
         return Response.json({ error: message }, { status: 400 });
