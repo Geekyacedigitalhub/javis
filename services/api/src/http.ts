@@ -733,7 +733,7 @@ const server = Bun.serve({
             return Response.json({mission,budgetExceeded:true});
           }
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
-          steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
+          steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,context:[item.context??"",run.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:item);
           if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
           if(stepStatus==="failed"){
             await emit("mission.step.failed","Failed: "+step.title,step.id,run.id);
