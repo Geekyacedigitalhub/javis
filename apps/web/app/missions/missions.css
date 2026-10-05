@@ -33,3 +33,9 @@
 .mission-timeline time{font-size:11px;opacity:.6}
 .mission-timeline span{font-size:13px;opacity:.8}
 @media(max-width:700px){.mission-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-timeline>div{grid-template-columns:1fr}.mission-timeline time{display:none}}
+
+.mission-detail-header{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;margin:18px 0}
+.mission-detail-header h1{margin:4px 0;font-size:clamp(22px,4vw,34px)}
+.mission-state{text-transform:uppercase;font-size:11px;padding:7px 10px;border-radius:999px;background:rgba(22,163,74,.1)}
+.mission-detail .mission-step{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-bottom:1px solid rgba(127,127,127,.12)}
+.mission-detail .mission-step span{font-size:12px;opacity:.7}
