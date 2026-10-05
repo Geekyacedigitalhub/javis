@@ -698,7 +698,7 @@ const server = Bun.serve({
         if(mission.status==="completed")return Response.json({mission});
         const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
         const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
-        const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await updateOwned(patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
+        const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await store.updateOwned(id,userId,executionOwner,patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
         if(requestedWorkerId){
           if(mission.leaseOwner!==requestedWorkerId || !mission.leaseUntil || Date.parse(mission.leaseUntil)<=Date.now()){
             return Response.json({error:"Mission lease is missing or expired"},{status:409});
@@ -798,6 +798,7 @@ const server = Bun.serve({
           }
           const runDurationMs=Date.now()-runStartedAt;
           if(leaseLost){
+            await store.releaseLeaseIfOwned(id,userId,executionOwner);
             return Response.json({error:"Mission execution lease was lost during agent execution"},{status:409});
           }
           toolCount+=run.toolCalls.length;
