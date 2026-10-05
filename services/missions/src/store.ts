@@ -43,6 +43,10 @@ export class PostgresMissionStore implements FroshMissionStore {
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET lease_until=NOW()+INTERVAL '2 minutes',updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='running' AND lease_owner=$3 RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
   }
+  async releaseLeaseIfOwned(id:string,userId:string,leaseOwner:string){
+    const result=await this.sql.unsafe(`UPDATE frosh_missions SET lease_until=NULL,lease_owner=NULL,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND lease_owner=$3`,[id,userId,leaseOwner]);
+    return result.count>0;
+  }
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
     const id=crypto.randomUUID();
     const rows=await this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`INSERT INTO frosh_mission_events(id,mission_id,user_id,type,message,step_id,run_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt"`,[id,input.missionId,input.userId,input.type,input.message,input.stepId??null,input.runId??null,input.metadata?JSON.stringify(input.metadata):null]);
@@ -70,6 +74,7 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async claimStepRetry(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||["completed","cancelled","waiting_approval"].includes(mission.status))return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async claimApprovalContinuation(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="waiting_approval"||!mission.pendingApprovalId)return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async renewLease(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="running"||mission.leaseOwner!==leaseOwner)return null;const next={...mission,leaseUntil:new Date(Date.now()+120000).toISOString(),updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
+  async releaseLeaseIfOwned(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.leaseOwner!==leaseOwner)return false;const next={...mission,leaseUntil:undefined,leaseOwner:undefined,updatedAt:new Date().toISOString()};this.items.set(id,next);return true;}
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
     const event={...input,id:crypto.randomUUID(),createdAt:new Date().toISOString()};
     const list=this.events.get(input.missionId)??[];
