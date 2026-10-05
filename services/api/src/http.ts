@@ -863,14 +863,16 @@ const server = Bun.serve({
         const mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(["completed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be retried in its current state"},{status:409});
-        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         if(mission.status==="waiting_approval")return Response.json({error:"Resolve the pending approval before retrying a mission step"},{status:409});
         const step=mission.steps.find(item=>item.id===stepId);
         if(!step)return Response.json({error:"Mission step not found"},{status:404});
         if(step.status==="running")return Response.json({error:"Mission step is already running"},{status:409});
+        const executionOwner="manual-retry:"+crypto.randomUUID();
+        const claimed=await store.claimStepRetry(id,userId,executionOwner);
+        if(!claimed)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         const now=new Date().toISOString();
-        const steps=mission.steps.map(item=>item.id===stepId?{...item,status:"pending",runId:undefined,result:undefined,retryCount:0,nextRetryAt:undefined,updatedAt:now}:item);
-        const updated=await store.update(id,userId,{status:"running",steps,pendingApprovalId:undefined,leaseUntil:undefined,leaseOwner:undefined});
+        const steps=claimed.steps.map(item=>item.id===stepId?{...item,status:"pending",runId:undefined,result:undefined,retryCount:0,nextRetryAt:undefined,updatedAt:now}:item);
+        const updated=await store.update(id,userId,{status:"running",steps,pendingApprovalId:undefined});
         await store.addEvent({missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission retry failed"},{status:400});}
