@@ -1,4 +1,6 @@
 import { registerTool } from "./registry";
+import { listDevices } from "../../api/src/devices";
+import { sendDeviceCommand } from "../../api/src/realtime";
 
 registerTool({
   name: "open_android_app",
