@@ -835,7 +835,19 @@ const server = Bun.serve({
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="waiting_approval" && mission.pendingApprovalId){
-          const run=await codingSessions.approveAndResume(mission.pendingApprovalId);
+          let run;
+          try {
+            run=await codingSessions.approveAndResume(mission.pendingApprovalId);
+          } catch(error) {
+            const failed=await getMissionStore().update(id,userId,{
+              status:"failed",
+              pendingApprovalId:undefined,
+              leaseUntil:undefined,
+              result:error instanceof Error?error.message:"Mission approval continuation failed"
+            });
+            await getMissionStore().addEvent({missionId:id,userId,type:"mission.failed",message:"Approval continuation failed: "+(error instanceof Error?error.message:"Unknown error")});
+            return Response.json({mission:failed},{status:500});
+          }
           const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
           const completed=steps.filter(step=>step.status==="completed").length;
           const progress=steps.length?completed/steps.length:0;
