@@ -1,9 +1,9 @@
 import { getTool } from "./registry";
 import type { FroshToolCall } from "../../../packages/types/src/javis";
 import type { FroshApprovalStore } from "../../../packages/types/src/approval";
-import { InMemoryApprovalStore } from "./approvals";
+import { createApprovalStore } from "./approval-store-factory";
 
-export const approvalStore: FroshApprovalStore = new InMemoryApprovalStore();
+export const approvalStore: FroshApprovalStore = createApprovalStore();
 
 export async function executeToolCall(call: FroshToolCall, options: { runId?: string } = {}) {
   const tool = getTool(call.name);
