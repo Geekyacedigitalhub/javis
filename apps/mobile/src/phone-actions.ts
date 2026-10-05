@@ -2,6 +2,7 @@ import { Linking, Platform } from "react-native";
 import type { FroshPhoneActionRequest, FroshPhoneActionResult } from "../../../packages/types/src/phone-actions";
 import { launchApp } from "../modules/frosh-apps/src";
 import { openCallDialer, placeDirectCall } from "../modules/frosh-calls/src";
+import { searchContacts } from "../modules/frosh-contacts/src";
 
 export async function executePhoneAction(
   request: FroshPhoneActionRequest,
@@ -19,7 +20,9 @@ export async function executePhoneAction(
     if (!request.value) {
       return { action: request.action, accepted: false, message: "A phone number is required." };
     }
-    const result = openCallDialer(request.value);
+    const matches = searchContacts(request.value);
+    const number = matches.length === 1 && matches[0].phones.length === 1 ? matches[0].phones[0].number : request.value;
+    const result = openCallDialer(number);
     return { action: request.action, accepted: result.accepted, message: result.message };
   }
 
