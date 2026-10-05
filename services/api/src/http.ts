@@ -9,6 +9,8 @@ import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memo
 
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
+import { startAutomationRunner } from "../../automation/src";
+startAutomationRunner();
 
 const server = Bun.serve({
   port,
