@@ -989,11 +989,20 @@ const server = Bun.serve({
           const continuationStartedAt=Date.now();
           const continuationBaseRun=mission.activeRunId?await agentRunStore.get(mission.activeRunId):null;
           const continuationBaseToolCount=continuationBaseRun?.toolCalls.length??0;
+          let continuationLeaseLost=false;
+          let continuationLeaseRenewing=false;
           const leaseRenewTimer=setInterval(async()=>{
+            if(continuationLeaseLost||continuationLeaseRenewing)return;
+            continuationLeaseRenewing=true;
             try{
               const renewed=await store.renewLease(id,userId,executionOwner);
-              if(!renewed)console.error("FROSH mission continuation lease renewal failed:",id);
-            }catch(error){console.error("FROSH mission continuation lease renewal error:",error);}
+              if(!renewed)continuationLeaseLost=true;
+            }catch(error){
+              continuationLeaseLost=true;
+              console.error("FROSH mission continuation lease renewal error:",error);
+            }finally{
+              continuationLeaseRenewing=false;
+            }
           },60000);
           let run;
           try {
@@ -1017,6 +1026,10 @@ const server = Bun.serve({
 
           const continuationDurationMs=Date.now()-continuationStartedAt;
           const executionDurationMs=existingDurationMs+continuationDurationMs;
+          if(continuationLeaseLost){
+            await store.releaseLeaseIfOwned(id,userId,executionOwner);
+            return Response.json({error:"Mission execution lease was lost during approval continuation"},{status:409});
+          }
           const continuationToolCalls=Math.max(0,run.toolCalls.length-continuationBaseToolCount);
           const toolCallsUsed=existingToolCount+continuationToolCalls;
           const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
