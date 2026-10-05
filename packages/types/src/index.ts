@@ -9,3 +9,4 @@ export * from "./media";
 export * from "./notifications";
 export * from "./contacts";
 export * from "./messaging";
+export * from "./conversation-memory";
