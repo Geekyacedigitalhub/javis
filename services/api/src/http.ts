@@ -534,7 +534,7 @@ const server = Bun.serve({
       return Response.json({mission:updated});
     }
 
-    const missionRerunStepMatch=url.pathname.match(/^\\/v1\\/missions\\/users\\/([^/]+)\\/([^/]+)\\/rerun-from-step\\/([^/]+)$/);
+    const missionRerunStepMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun-from-step\/([^/]+)$/);
     if(missionRerunStepMatch && request.method==="POST"){
       const userId=decodeURIComponent(missionRerunStepMatch[1]);
       const id=decodeURIComponent(missionRerunStepMatch[2]);
