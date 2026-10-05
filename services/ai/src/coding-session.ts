@@ -1,9 +1,19 @@
 import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/javis";
-import { executeToolCall, listTools, approvalStore, resolveApproval } from "../../tools/src";
+import { listTools, approvalStore, resolveApproval } from "../../tools/src";
 import type { ProviderClient } from "./provider";
 import { createAgentRunStore } from "./run-store-factory";
 
 export const agentRunStore = createAgentRunStore();
+
+const CODING_SYSTEM = [
+  "You are FROSH's coding agent.",
+  "Inspect before changing.",
+  "Use safe tools automatically.",
+  "Sensitive actions require explicit user approval.",
+  "After approved changes, validate with tests, typecheck, lint, or build.",
+  "If validation fails, diagnose and propose the next correction.",
+  "Never claim success without tool evidence.",
+].join(" ");
 
 export class CodingSessionManager {
   constructor(private readonly model: ProviderClient) {}
@@ -23,39 +33,28 @@ export class CodingSessionManager {
     if (!run) throw new Error("Agent run not found");
     if (run.status === "completed" || run.status === "failed") return run;
 
-    const result = await this.model.generate({
-      system: [
-        "You are FROSH's coding agent.",
-        "Inspect before changing.",
-        "Use safe tools automatically.",
-        "Sensitive actions require explicit user approval.",
-        "After approved changes, validate with tests, typecheck, lint, or build.",
-        "If validation fails, diagnose and propose the next correction.",
-        "Never claim success without tool evidence.",
-      ].join(" "),
-      messages,
-      tools: listTools(),
-    });
+    const result = await this.model.generate(
+      { system: CODING_SYSTEM, messages, tools: listTools() },
+      { runId, continuation: run.providerContinuation ? { continuation: run.providerContinuation } : undefined },
+    );
 
-    const calls: FroshToolCall[] = [...run.toolCalls];
+    const calls: FroshToolCall[] = [...run.toolCalls, ...(result.toolCalls ?? [])];
 
-    for (const call of result.toolCalls ?? []) {
-      const executed = await executeToolCall(call, { runId });
-      calls.push(executed);
-      const value = executed.result;
+    if (result.waitingForApproval && result.continuation) {
+      const approvalCall = calls[calls.length - 1];
       const approvalId =
-        typeof value === "object" && value !== null && "approvalId" in value
-          ? String((value as { approvalId: unknown }).approvalId)
+        typeof approvalCall?.result === "object" && approvalCall.result !== null && "approvalId" in approvalCall.result
+          ? String((approvalCall.result as { approvalId: unknown }).approvalId)
           : undefined;
+      if (!approvalId) throw new Error("Provider paused without an approval request");
 
-      if (approvalId) {
-        return agentRunStore.update(runId, {
-          status: "waiting_approval",
-          pendingApprovalId: approvalId,
-          toolCalls: calls,
-          result: result.message,
-        });
-      }
+      return agentRunStore.update(runId, {
+        status: "waiting_approval",
+        pendingApprovalId: approvalId,
+        providerContinuation: result.continuation,
+        toolCalls: calls,
+        result: result.message,
+      });
     }
 
     return agentRunStore.update(runId, {
@@ -63,10 +62,11 @@ export class CodingSessionManager {
       toolCalls: calls,
       result: result.message,
       pendingApprovalId: undefined,
+      providerContinuation: undefined,
     });
   }
 
-  async approveAndResume(approvalId: string, messages: FroshMessage[]) {
+  async approveAndResume(approvalId: string) {
     const approval = await approvalStore.get(approvalId);
     if (!approval) throw new Error("Approval request not found");
     if (!approval.runId) throw new Error("Approval is not attached to an agent run");
@@ -75,6 +75,9 @@ export class CodingSessionManager {
     if (!run) throw new Error("Agent run not found");
     if (run.status !== "waiting_approval" || run.pendingApprovalId !== approvalId) {
       throw new Error("Agent run is not waiting for this approval");
+    }
+    if (!run.providerContinuation?.pendingCallId) {
+      throw new Error("Agent run has no resumable provider state");
     }
 
     const resolved = await resolveApproval(approvalId, "approved");
@@ -92,15 +95,46 @@ export class CodingSessionManager {
       toolCalls: [...run.toolCalls, toolCall],
     });
 
-    return this.step(run.id, [
-      ...messages,
+    const resumed = await this.model.generate(
+      { system: CODING_SYSTEM, messages: [], tools: listTools() },
       {
-        role: "tool",
-        name: approval.toolName,
-        toolCallId: toolCall.id,
-        content: JSON.stringify(resolved.result),
+        runId: run.id,
+        continuation: {
+          continuation: run.providerContinuation,
+          toolOutput: {
+            callId: run.providerContinuation.pendingCallId,
+            output: JSON.stringify(resolved.result),
+          },
+        },
       },
-    ]);
+    );
+
+    const calls = [...run.toolCalls, toolCall, ...(resumed.toolCalls ?? [])];
+
+    if (resumed.waitingForApproval && resumed.continuation) {
+      const approvalCall = calls[calls.length - 1];
+      const nextApprovalId =
+        typeof approvalCall?.result === "object" && approvalCall.result !== null && "approvalId" in approvalCall.result
+          ? String((approvalCall.result as { approvalId: unknown }).approvalId)
+          : undefined;
+      if (!nextApprovalId) throw new Error("Provider paused without an approval request");
+
+      return agentRunStore.update(run.id, {
+        status: "waiting_approval",
+        pendingApprovalId: nextApprovalId,
+        providerContinuation: resumed.continuation,
+        toolCalls: calls,
+        result: resumed.message,
+      });
+    }
+
+    return agentRunStore.update(run.id, {
+      status: "completed",
+      pendingApprovalId: undefined,
+      providerContinuation: undefined,
+      toolCalls: calls,
+      result: resumed.message,
+    });
   }
 
   async reject(approvalId: string) {
@@ -108,13 +142,14 @@ export class CodingSessionManager {
     if (!approval) throw new Error("Approval request not found");
     if (!approval.runId) throw new Error("Approval is not attached to an agent run");
 
-    const resolved = await resolveApproval(approvalId, "rejected");
+    await resolveApproval(approvalId, "rejected");
     const run = await agentRunStore.get(approval.runId);
     if (!run) throw new Error("Agent run not found");
 
     return agentRunStore.update(run.id, {
       status: "failed",
       pendingApprovalId: undefined,
+      providerContinuation: undefined,
       result: "The requested action was rejected by the user.",
       error: "User rejected approval",
     });
