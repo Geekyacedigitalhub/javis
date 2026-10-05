@@ -594,6 +594,7 @@ const server = Bun.serve({
         let lastApproval=mission.pendingApprovalId;
         let lastResult=mission.result;
         const maxSteps=Math.max(1,Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12);
+        const maxRetries=Math.max(0,Number(process.env.FROSH_MISSION_MAX_RETRIES??2)||2);
         const maxTools=Math.max(1,Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40);
         const maxDurationMs=Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000);
         const missionStartedAt=Date.now();
@@ -607,7 +608,7 @@ const server = Bun.serve({
             mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
-          const index=steps.findIndex(step=>step.status==="pending");
+          const index=steps.findIndex(step=>step.status==="pending" && (!step.nextRetryAt || Date.parse(step.nextRetryAt)<=Date.now()));
           if(index<0)break;
 
           const now=new Date().toISOString();
@@ -627,7 +628,19 @@ const server = Bun.serve({
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
           steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
           if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
-          if(stepStatus==="failed"){ await emit("mission.step.failed","Failed: "+step.title,step.id,run.id); steps.push(createRecoveryStep(step.title,run.result)); await emit("mission.recovered","Added recovery work for: "+step.title,step.id,run.id); }
+          if(stepStatus==="failed"){
+            await emit("mission.step.failed","Failed: "+step.title,step.id,run.id);
+            const retries=step.retryCount??0;
+            if(retries<maxRetries){
+              const retryDelayMs=Math.min(60000,5000*Math.pow(2,retries));
+              const retryAt=new Date(Date.now()+retryDelayMs).toISOString();
+              steps=steps.map(item=>item.id===step.id?{...item,status:"pending",retryCount:retries+1,nextRetryAt:retryAt,updatedAt:new Date().toISOString()}:item);
+              await emit("mission.recovered","Automatic retry scheduled in "+Math.ceil(retryDelayMs/1000)+"s: "+step.title,step.id,run.id);
+            }else{
+              steps.push(createRecoveryStep(step.title,run.result));
+              await emit("mission.recovered","Retry limit reached; added recovery work for: "+step.title,step.id,run.id);
+            }
+          }
           if(run.status==="waiting_approval") await emit("mission.approval.required","Approval required to continue: "+step.title,step.id,run.id);
 
           lastRunId=run.id;
