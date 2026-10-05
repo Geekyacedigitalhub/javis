@@ -22,3 +22,14 @@
 .health-gauge{position:relative;min-width:150px;height:9px;border-radius:999px;background:rgba(127,127,127,.18);overflow:visible}
 .health-gauge i{display:block;height:100%;border-radius:inherit;background:#16a34a;transition:width .35s ease}
 .health-gauge b{position:absolute;right:0;top:-18px;font-size:11px}
+
+.mission-detail-toggle{margin:8px 0;padding:7px 10px;border:1px solid rgba(22,163,74,.25);border-radius:8px;background:transparent;cursor:pointer}
+.mission-detail{margin-top:18px;padding:18px;border:1px solid rgba(22,163,74,.25);border-radius:16px;background:rgba(22,163,74,.03)}
+.mission-detail-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.mission-detail-grid>div{display:flex;flex-direction:column;gap:4px;padding:10px;border-radius:10px;background:rgba(127,127,127,.06)}
+.mission-detail-grid span{opacity:.75;font-size:13px}
+.mission-timeline{display:flex;flex-direction:column;gap:8px}
+.mission-timeline>div{display:grid;grid-template-columns:80px 170px 1fr;gap:10px;padding:9px;border-left:2px solid rgba(22,163,74,.35)}
+.mission-timeline time{font-size:11px;opacity:.6}
+.mission-timeline span{font-size:13px;opacity:.8}
+@media(max-width:700px){.mission-detail-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-timeline>div{grid-template-columns:1fr}.mission-timeline time{display:none}}
