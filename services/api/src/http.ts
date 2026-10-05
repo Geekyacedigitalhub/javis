@@ -568,10 +568,15 @@ const server = Bun.serve({
           steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
           const step=steps[index];
           await emit("mission.step.started","Started: "+step.title,step.id);
+          const runStartedAt=Date.now();
           const run=await codingSessions.start({
             goal:step.title+"\nOverall objective: "+mission.goal,
             messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
           });
+          const runDurationMs=Date.now()-runStartedAt;
+          for(const toolCall of run.toolCalls){
+            await emit(toolCall.status==="failed"?"mission.tool.failed":"mission.tool.completed","Tool "+toolCall.name+" "+toolCall.status,step.id,run.id,{toolName:toolCall.name,status:toolCall.status,durationMs:runDurationMs});
+          }
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
           steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
           if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
