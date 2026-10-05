@@ -12,6 +12,13 @@ export class PostgresMissionStore implements FroshMissionStore {
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status=$3, updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status IN ($4,$5) RETURNING id,user_id AS "userId",goal,status,progress,steps,active_run_id AS "activeRunId",pending_approval_id AS "pendingApprovalId",result,created_at AS "createdAt",updated_at AS "updatedAt"`,[id,userId,"running","planning","running"]);
     return rows[0]??null;
   }
+  async claim(id:string,userId:string){
+    const mission=await this.get(id,userId);
+    if(!mission||!["planning","running"].includes(mission.status))return null;
+    const next={...mission,status:"running" as const,updatedAt:new Date().toISOString()};
+    this.items.set(id,next);
+    return next;
+  }
   async listResumable(userId:string){
     return (await this.list(userId)).filter((mission)=>mission.status==="running"||mission.status==="waiting_approval"||mission.status==="planning");
   }
