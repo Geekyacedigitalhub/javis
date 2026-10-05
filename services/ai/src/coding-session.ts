@@ -49,7 +49,7 @@ export class CodingSessionManager {
           : undefined;
       if (!approvalId) throw new Error("Provider paused without an approval request");
 
-      const updated = await agentRunStore.update(runId, {
+      return agentRunStore.update(runId, {
         status: "waiting_approval",
         pendingApprovalId: approvalId,
         providerContinuation: result.continuation,
