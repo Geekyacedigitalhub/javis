@@ -14,6 +14,10 @@ export class PostgresMissionStore implements FroshMissionStore {
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status IN ('planning','running') AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
   }
+  async claimApprovalContinuation(id:string,userId:string,leaseOwner:string){
+    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='waiting_approval' AND pending_approval_id IS NOT NULL AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
+    return rows[0]??null;
+  }
   async renewLease(id:string,userId:string,leaseOwner:string){
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET lease_until=NOW()+INTERVAL '2 minutes',updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='running' AND lease_owner=$3 RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
