@@ -23,3 +23,19 @@ export interface FroshNotificationReplyResult {
   accepted: boolean;
   message: string;
 }
+
+export interface FroshUnifiedMessage {
+  id: string;
+  provider: string;
+  packageName: string;
+  appName?: string;
+  sender?: string;
+  text?: string;
+  receivedAt: string;
+  canReply: boolean;
+  notificationId: string;
+}
+
+export interface FroshUnifiedInbox {
+  messages: FroshUnifiedMessage[];
+}
