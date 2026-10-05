@@ -45,3 +45,20 @@ export interface FroshMemoryControlResult {
   accepted: boolean;
   message: string;
 }
+
+export interface FroshUserMemory {
+  id: string;
+  userId: string;
+  kind: FroshMemoryKind;
+  statement: string;
+  confidence: number;
+  sourceConversationId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FroshUserMemoryStore {
+  list(userId: string, limit?: number): Promise<FroshUserMemory[]>;
+  upsert(input: Omit<FroshUserMemory, "id" | "createdAt" | "updatedAt"> & { id?: string }): Promise<FroshUserMemory>;
+  delete(id: string, userId: string): Promise<boolean>;
+}
