@@ -1,5 +1,6 @@
 import type { FroshNotification, FroshUnifiedInbox, FroshUnifiedMessage } from "../../../packages/types/src/notifications";
 import { getRecentNotifications, replyToNotification } from "../modules/frosh-notifications/src";
+import { extractConversationMemories } from "../../../services/memory/src/memory-extractor";
 
 const providerByPackage: Record<string, string> = {
   "com.whatsapp": "whatsapp",
@@ -26,6 +27,10 @@ export function getUnifiedMessagingInbox(): Promise<FroshUnifiedInbox> {
         notificationId: item.id
       }))
   }));
+}
+
+export function extractInboxMemoryCandidates(inbox: FroshUnifiedInbox) {
+  return extractConversationMemories(inbox.messages.map((item) => ({ id: item.id, text: item.text, conversationId: [item.provider, item.packageName, item.sender ?? "unknown"].join(":") })));
 }
 
 export function replyToUnifiedMessage(notificationId: string, message: string) {
