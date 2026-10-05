@@ -1009,8 +1009,12 @@ const server = Bun.serve({
             run=await codingSessions.approveAndResume(mission.pendingApprovalId);
           } catch(error) {
             clearInterval(leaseRenewTimer);
-          const continuationDurationMs=Date.now()-continuationStartedAt;
+            const continuationDurationMs=Date.now()-continuationStartedAt;
             const executionDurationMs=existingDurationMs+continuationDurationMs;
+            if(continuationLeaseLost){
+              await store.releaseLeaseIfOwned(id,userId,executionOwner);
+              return Response.json({error:"Mission execution lease was lost during approval continuation"},{status:409});
+            }
             const failed=await updateOwned({
               status:"failed",
               pendingApprovalId:undefined,
