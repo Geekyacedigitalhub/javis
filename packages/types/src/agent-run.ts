@@ -28,4 +28,5 @@ export interface FroshAgentRunStore {
   create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt">): Promise<FroshAgentRun>;
   get(id: string): Promise<FroshAgentRun | null>;
   update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>): Promise<FroshAgentRun>;
+  touch(id: string): Promise<FroshAgentRun>;
 }
