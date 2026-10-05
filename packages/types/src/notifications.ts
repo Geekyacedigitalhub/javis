@@ -13,3 +13,13 @@ export interface FroshNotificationCapability {
   available: boolean;
   message?: string;
 }
+
+export interface FroshNotificationReplyRequest {
+  notificationId: string;
+  message: string;
+}
+
+export interface FroshNotificationReplyResult {
+  accepted: boolean;
+  message: string;
+}
