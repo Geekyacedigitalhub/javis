@@ -509,7 +509,7 @@ const server = Bun.serve({
       if(action==="pause"){
         if(["completed","failed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be paused in its current state"},{status:409});
         const updated=await store.update(id,userId,{status:"paused",leaseUntil:undefined});
-        await store.addEvent({missionId:id,userId,type:"mission.failed",message:"Mission paused by user."});
+        await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
         return Response.json({mission:updated});
       }
       if(action==="resume"){
@@ -520,7 +520,7 @@ const server = Bun.serve({
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
       const updated=await store.update(id,userId,{status:"cancelled",leaseUntil:undefined,pendingApprovalId:undefined});
-      await store.addEvent({missionId:id,userId,type:"mission.failed",message:"Mission cancelled by user."});
+      await store.addEvent({missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user."});
       return Response.json({mission:updated});
     }
 
@@ -597,7 +597,7 @@ const server = Bun.serve({
         const maxDurationMs=Math.max(60000,Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000);
         const missionStartedAt=Date.now();
         let toolCount=0;
-        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId});}catch(error){console.error("FROSH mission telemetry error:",error);}};
         await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
