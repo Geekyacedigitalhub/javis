@@ -32,6 +32,26 @@ export function connectFroshRealtime(
   socket.onmessage = (message) => {
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      if (parsed.type === "device.command" && parsed.command === "media_state") {
+        const result = await executeMediaAction({ action: "play" } as any);
+        const state = await (async () => {
+          try {
+            const module = require("../modules/frosh-media/src").default;
+            return await module.getState();
+          } catch {
+            return { available: false, message: "Media native module unavailable." };
+          }
+        })();
+        socket.send(JSON.stringify({
+          type: "device.command.result",
+          requestId: parsed.requestId,
+          deviceId: parsed.deviceId,
+          accepted: Boolean(state.available),
+          message: state.message ?? (state.available ? "Current media state retrieved." : "No active media session."),
+          data: state
+        }));
+        return;
+      }
       if (parsed.type === "device.command" && parsed.command === "media_control") {
         const result = await executeMediaAction({ action: String(parsed.action ?? "play") } as any);
         socket.send(JSON.stringify({
