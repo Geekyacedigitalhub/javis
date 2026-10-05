@@ -1,5 +1,6 @@
 export type FroshMissionStatus = "planning" | "running" | "waiting_approval" | "completed" | "failed" | "paused" | "cancelled";
 export type FroshMissionPriority = "low" | "normal" | "high";
+export type FroshMissionBudgetProfile = "standard" | "extended" | "intensive";
 
 export interface FroshMissionStep {
   id: string;
@@ -20,6 +21,7 @@ export interface FroshMission {
   goal: string;
   status: FroshMissionStatus;
   priority: FroshMissionPriority;
+  budgetProfile: FroshMissionBudgetProfile;
   progress: number;
   steps: FroshMissionStep[];
   activeRunId?: string;
