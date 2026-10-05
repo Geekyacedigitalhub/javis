@@ -5,9 +5,6 @@ import { FormEvent, useState } from "react";
 
 type ChatMessage = { role: "user" | "assistant"; content: string; toolCalls?: Array<{ name: string; status: string }> };
 
-const API = process.env.NEXT_PUBLIC_FROSH_API_URL ?? "http://localhost:3001";
-const USER_ID = process.env.NEXT_PUBLIC_FROSH_USER_ID ?? "default-user";
-
 export default function Home() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -26,11 +23,72 @@ export default function Home() {
     setBusy(true);
 
     try {
-      const response = await fetch(`${API}/v1/chat`, {
+      const response = await fetch("/api/frosh/v1/chat/stream", {
         method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message, conversationId, userId: USER_ID })
+        headers: { "content-type": "application/json", "accept": "text/event-stream" },
+        body: JSON.stringify({ message, conversationId })
       });
+
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error ?? "FROSH request failed.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let assistant = "";
+      let toolCalls: Array<{ name: string; status: string }> = [];
+      setMessages((current) => [...current, { role: "assistant", content: "" }]);
+
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+
+        for (const chunk of chunks) {
+          const line = chunk.split("\n").find((item) => item.startsWith("data: "));
+          if (!line) continue;
+          const event = JSON.parse(line.slice(6));
+
+          if (event.type === "delta") {
+            assistant += event.text ?? "";
+            setMessages((current) => {
+              const next = [...current];
+              const last = next[next.length - 1];
+              if (last?.role === "assistant") next[next.length - 1] = { ...last, content: assistant, toolCalls };
+              return next;
+            });
+          }
+
+          if (event.type === "tool") {
+            toolCalls = [...toolCalls, { name: event.name, status: event.status }];
+            setMessages((current) => {
+              const next = [...current];
+              const last = next[next.length - 1];
+              if (last?.role === "assistant") next[next.length - 1] = { ...last, content: assistant, toolCalls };
+              return next;
+            });
+          }
+
+          if (event.type === "done") {
+            if (event.conversationId) setConversationId(event.conversationId);
+            assistant = event.message ?? assistant;
+            toolCalls = event.toolCalls ?? toolCalls;
+            setMessages((current) => {
+              const next = [...current];
+              const last = next[next.length - 1];
+              if (last?.role === "assistant") next[next.length - 1] = { ...last, content: assistant, toolCalls };
+              return next;
+            });
+          }
+
+          if (event.type === "error") throw new Error(event.message ?? "Streaming request failed.");
+        }
+      }
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "FROSH request failed.");
 
