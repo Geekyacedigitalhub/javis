@@ -32,6 +32,28 @@ class FroshAppsModule : Module() {
         }
     }
 
+
+    Function("listMessagingApps") {
+      val pm = packageManager() ?: return@Function emptyList<Map<String, String>>()
+      val known = mapOf(
+        "com.whatsapp" to "whatsapp",
+        "org.telegram.messenger" to "telegram",
+        "com.facebook.orca" to "messenger",
+        "com.instagram.android" to "instagram",
+        "com.discord" to "discord",
+        "com.google.android.apps.messaging" to "sms"
+      )
+      launchableApps()
+        .filter { known.containsKey(it.packageName) }
+        .map {
+          mapOf(
+            "provider" to known[it.packageName]!!,
+            "packageName" to it.packageName,
+            "name" to pm.getApplicationLabel(it).toString()
+          )
+        }
+    }
+
     Function("openApp") { packageName: String ->
       val pm = packageManager() ?: return@Function mapOf(
         "accepted" to false,
