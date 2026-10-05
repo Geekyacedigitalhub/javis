@@ -26,6 +26,8 @@ export default function MessagingPage() {
   const [reply, setReply] = useState("");
   const [filter, setFilter] = useState("all");
   const [status, setStatus] = useState("Loading…");
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggesting, setSuggesting] = useState(false);
 
   const android = devices.find((item) => item.platform === "android" && item.status === "online");
 
@@ -71,6 +73,27 @@ export default function MessagingPage() {
     }
     return [...map.entries()];
   }, [visible]);
+
+  async function suggestReplies() {
+    if (!selected?.text) return;
+    setSuggesting(true);
+    setStatus("FROSH is drafting replies…");
+    try {
+      const response = await fetch(`/api/frosh/v1/devices/${encodeURIComponent(android?.id ?? "")}/messages/suggest-replies`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ provider: selected.provider, sender: selected.sender, message: selected.text })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error ?? "Could not generate replies.");
+      setSuggestions(data.suggestions ?? []);
+      setStatus("Reply drafts ready. Choose one to edit before sending.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Reply suggestions failed.");
+    } finally {
+      setSuggesting(false);
+    }
+  }
 
   async function sendReply() {
     if (!android || !selected || !reply.trim()) return;
@@ -150,6 +173,16 @@ export default function MessagingPage() {
             <div className="eyebrow">REPLY</div>
             <h2>{selected.sender ?? "Message"}</h2>
             <p className="selected-message">{selected.text}</p>
+            <button className="suggest" onClick={() => void suggestReplies()} disabled={suggesting || !android}>
+              {suggesting ? "FROSH is thinking…" : "✨ Suggest replies"}
+            </button>
+            {suggestions.length > 0 && (
+              <div className="suggestions">
+                {suggestions.map((item, index) => (
+                  <button key={index} onClick={() => setReply(item)}>{item}</button>
+                ))}
+              </div>
+            )}
             <textarea value={reply} onChange={(event) => setReply(event.target.value)} placeholder="Write your reply…" />
             <div className="reply-actions">
               <button className="cancel" onClick={() => setSelected(null)}>Cancel</button>
