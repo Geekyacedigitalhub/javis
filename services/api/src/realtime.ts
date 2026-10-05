@@ -96,3 +96,7 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
     }, 15000);
   });
 }
+
+export function requestMessageIntelligence(deviceId: string) {
+  return sendDeviceCommand(deviceId, "message_inbox");
+}
