@@ -30,3 +30,17 @@ export interface FroshMemoryExtractionResult {
   candidates: FroshMemoryCandidate[];
   skippedCount: number;
 }
+
+export type FroshMemoryCandidateStatus = "pending" | "approved" | "rejected";
+
+export interface FroshMemoryCandidateRecord extends FroshMemoryCandidate {
+  id: string;
+  status: FroshMemoryCandidateStatus;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
+export interface FroshMemoryControlResult {
+  accepted: boolean;
+  message: string;
+}
