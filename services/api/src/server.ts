@@ -1,23 +1,21 @@
-import { JavisOrchestrator } from "../../ai/src";
-import { DevelopmentProvider } from "../../ai/src/mock-provider";
+import { FroshOrchestrator } from "../../ai/src";
+import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { buildConversationContext, createMemoryStore } from "../../memory/src";
 
-const provider = new DevelopmentProvider();
-const orchestrator = new JavisOrchestrator(provider);
+const provider = new OpenAIProvider();
+const orchestrator = new FroshOrchestrator(provider);
 const memory = createMemoryStore();
 
-export interface JavisHttpRequest {
+export interface FroshHttpRequest {
   message: string;
   conversationId?: string;
   userId?: string;
 }
 
-export async function handleJavisRequest(input: JavisHttpRequest) {
+export async function handleFroshRequest(input: FroshHttpRequest) {
   const message = input.message?.trim();
 
-  if (!message) {
-    throw new Error("message is required");
-  }
+  if (!message) throw new Error("message is required");
 
   const conversation = input.conversationId
     ? await memory.getConversation(input.conversationId)
@@ -50,8 +48,7 @@ export async function handleJavisRequest(input: JavisHttpRequest) {
     content: response.message,
   });
 
-  return {
-    conversationId: currentConversation.id,
-    ...response,
-  };
+  return { conversationId: currentConversation.id, ...response };
 }
+
+export const handleJavisRequest = handleFroshRequest;
