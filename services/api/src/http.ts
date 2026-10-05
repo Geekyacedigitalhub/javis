@@ -720,7 +720,7 @@ const server = Bun.serve({
           const runStartedAt=Date.now();
           const run=await codingSessions.start({
             goal:step.title+"\nOverall objective: "+mission.goal,
-            messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
+            messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}]
           });
           const runDurationMs=Date.now()-runStartedAt;
           toolCount+=run.toolCalls.length;
