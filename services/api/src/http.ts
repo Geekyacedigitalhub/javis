@@ -738,7 +738,9 @@ const server = Bun.serve({
         const maxTools=Math.min(80,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40)*profileMultiplier)));
         const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
         const missionStartedAt=Date.now();
-        let toolCount=0;
+        const initialToolCount=mission.toolCallsUsed??0;
+        const initialDurationMs=mission.executionDurationMs??0;
+        let toolCount=initialToolCount;
         const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.step.retry"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
         await emit("mission.claimed","Mission execution started.");
 
@@ -747,7 +749,7 @@ const server = Bun.serve({
           if(!renewed){
             return Response.json({error:"Mission execution lease was lost"},{status:409});
           }
-          if(steps.length>maxSteps||Date.now()-missionStartedAt>maxDurationMs||toolCount>=maxTools){
+          if(steps.length>maxSteps||initialDurationMs+(Date.now()-missionStartedAt)>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
             mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
@@ -767,12 +769,13 @@ const server = Bun.serve({
           });
           const runDurationMs=Date.now()-runStartedAt;
           toolCount+=run.toolCalls.length;
+          const executionDurationMs=initialDurationMs+(Date.now()-missionStartedAt);
           for(const toolCall of run.toolCalls){
             await emit(toolCall.status==="failed"?"mission.tool.failed":"mission.tool.completed","Tool "+toolCall.name+" "+toolCall.status,step.id,run.id,{toolName:toolCall.name,status:toolCall.status,durationMs:toolCall.durationMs??runDurationMs});
           }
           if(toolCount>maxTools){
             await emit("mission.budget.exceeded","Mission tool-call budget was exceeded.",step.id,run.id,{toolCount,maxTools});
-            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,leaseUntil:undefined,leaseOwner:undefined});
+            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,toolCallsUsed:toolCount,executionDurationMs,leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
           const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
@@ -816,22 +819,22 @@ const server = Bun.serve({
           const progress=steps.length?completed/steps.length:0;
 
           if(run.status==="waiting_approval"){
-            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
+            mission=await store.update(id,userId,{status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission});
           }
           if(run.status==="failed"){
-            mission=await store.update(id,userId,{status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
+            mission=await store.update(id,userId,{status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission});
           }
           if(progress>=1){
-            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
+            mission=await store.update(id,userId,{status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             await emit("mission.completed","Mission completed.");
             return Response.json({mission});
           }
         }
 
         const completed=steps.filter(item=>item.status==="completed").length;
-        mission=await store.update(id,userId,{status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult});
+        mission=await store.update(id,userId,{status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt)});
         return Response.json({mission});
       }catch(error){
         try{
