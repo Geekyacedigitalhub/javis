@@ -31,5 +31,5 @@ export function startMissionRunner(){
     }
   };
   void tick();
-  setInterval(()=>void tick(),60_000);
+  setInterval(()=>void tick(),10_000);
 }
