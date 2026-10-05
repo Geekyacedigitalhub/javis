@@ -751,7 +751,7 @@ const server = Bun.serve({
           }
           if(steps.length>maxSteps||initialDurationMs+(Date.now()-missionStartedAt)>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
-            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,leaseUntil:undefined,leaseOwner:undefined});
+            mission=await store.update(id,userId,{status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             return Response.json({mission,budgetExceeded:true});
           }
           const index=steps.findIndex(step=>step.status==="pending" && (!step.nextRetryAt || Date.parse(step.nextRetryAt)<=Date.now()));
@@ -917,6 +917,7 @@ const server = Bun.serve({
             status:continuationStatus,
             progress,
             steps,
+            toolCallsUsed:(mission.toolCallsUsed??0)+run.toolCalls.length,
             pendingApprovalId:run.pendingApprovalId,
             activeRunId:run.id,
             result:run.result,
