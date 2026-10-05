@@ -11,4 +11,5 @@ export type FroshEvent =
 
 export type FroshDeviceCommand =
   | { type: "device.command"; requestId: string; deviceId: string; command: "open_app"; appName: string }
+  | { type: "device.command"; requestId: string; deviceId: string; command: "media_control"; action: string }
   | { type: "device.command.result"; requestId: string; deviceId: string; accepted: boolean; message: string };
