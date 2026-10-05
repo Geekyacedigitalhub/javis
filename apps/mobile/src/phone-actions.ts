@@ -1,6 +1,7 @@
 import { Linking, Platform } from "react-native";
 import type { FroshPhoneActionRequest, FroshPhoneActionResult } from "../../../packages/types/src/phone-actions";
 import { launchApp } from "../modules/frosh-apps/src";
+import { openCallDialer, placeDirectCall } from "../modules/frosh-calls/src";
 
 export async function executePhoneAction(
   request: FroshPhoneActionRequest,
@@ -10,16 +11,16 @@ export async function executePhoneAction(
   }
 
   if (request.action === "open_dialer") {
-    await Linking.openURL("tel:");
-    return { action: request.action, accepted: true, message: "Opened the phone dialer." };
+    const result = openCallDialer();
+    return { action: request.action, accepted: result.accepted, message: result.message };
   }
 
   if (request.action === "call_number") {
     if (!request.value) {
       return { action: request.action, accepted: false, message: "A phone number is required." };
     }
-    await Linking.openURL(`tel:${request.value}`);
-    return { action: request.action, accepted: true, message: "Opened the dialer with the requested number." };
+    const result = openCallDialer(request.value);
+    return { action: request.action, accepted: result.accepted, message: result.message };
   }
 
   if (request.action === "compose_message") {
