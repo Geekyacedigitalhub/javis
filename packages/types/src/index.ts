@@ -6,3 +6,4 @@ export * from "./events";
 export * from "./capabilities";
 export * from "./phone-actions";
 export * from "./media";
+export * from "./notifications";
