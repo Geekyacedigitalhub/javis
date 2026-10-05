@@ -96,3 +96,5 @@
 .event-search{width:100%;box-sizing:border-box;margin:0 0 9px;padding:8px 10px;border:1px solid rgba(127,127,127,.2);border-radius:9px;background:transparent;font-size:12px;color:inherit;outline:none}.event-search:focus{border-color:#16a34a}
 
 .event-load-more{margin-top:10px;width:100%;padding:8px;border:1px solid rgba(127,127,127,.2);border-radius:9px;background:transparent;font-size:11px;cursor:pointer}.event-load-more:hover{border-color:#16a34a}
+
+.timeline-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.timeline-heading h2{margin:0}.event-export{padding:7px 10px;border:1px solid rgba(127,127,127,.2);border-radius:8px;background:transparent;color:inherit;font-size:11px;cursor:pointer}.event-export:hover{border-color:#16a34a}
