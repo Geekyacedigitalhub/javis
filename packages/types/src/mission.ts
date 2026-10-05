@@ -29,8 +29,8 @@ export interface FroshMission {
   leaseUntil?: string;
   leaseOwner?: string;
   result?: string;
-  toolCallsUsed: number;
-  executionDurationMs: number;
+  toolCallsUsed?: number;
+  executionDurationMs?: number;
   createdAt: string;
   updatedAt: string;
 }
