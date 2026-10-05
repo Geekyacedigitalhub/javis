@@ -64,3 +64,36 @@ registerTool({
     return replyToMessageCommand(device.id, notificationId, message);
   }
 });
+
+registerTool({
+  name: "analyze_android_messages",
+  description: "Analyze recent Android messaging notifications and return concise summaries, priority, and whether each message appears to need a reply. This is read-only.",
+  permission: "safe",
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+  async execute() {
+    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
+    const inbox = await requestMessageInbox(device.id);
+    if (!inbox.accepted) return inbox;
+    const data = inbox.data as { messages?: Array<{ id: string; provider: string; sender?: string; text?: string; receivedAt: string; canReply: boolean }> } | undefined;
+    const messages = data?.messages ?? [];
+    const insights = messages.map((item) => {
+      const text = (item.text ?? "").trim();
+      const lower = text.toLowerCase();
+      const urgent = /urgent|asap|emergency|immediately|important/.test(lower);
+      const question = /\?|\bcan you\b|\bcould you\b|\bwould you\b|\bplease\b/.test(lower);
+      const needsReply = Boolean(item.canReply && (question || /\bcall me\b|\blet me know\b|\bwhat do you think\b/.test(lower)));
+      return {
+        messageId: item.id,
+        provider: item.provider,
+        sender: item.sender,
+        summary: text.length > 140 ? text.slice(0, 137) + "..." : text || "Message contains no text.",
+        priority: urgent ? "urgent" : needsReply ? "high" : "normal",
+        needsReply,
+        replyReason: needsReply ? "The message appears to request a response." : undefined,
+        receivedAt: item.receivedAt
+      };
+    });
+    return { accepted: true, total: insights.length, needsReply: insights.filter((x) => x.needsReply).length, urgent: insights.filter((x) => x.priority === "urgent").length, insights };
+  }
+});
