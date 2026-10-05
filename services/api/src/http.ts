@@ -67,6 +67,101 @@ const server = Bun.serve({
       return new Response("WebSocket upgrade required", { status: 426 });
     }
 
+    if (request.method === "POST" && url.pathname === "/v1/chat/stream") {
+      try {
+        const body = await request.json();
+        const message = typeof body?.message === "string" ? body.message.trim() : "";
+        if (!message) return Response.json({ error: "message is required" }, { status: 400 });
+
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          async start(controller) {
+            const send = (event: unknown) => {
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\\n\\n`));
+            };
+
+            try {
+              const { buildConversationContext, getUserMemoryStore, getConversationMemoryStore, createMemoryStore, extractConversationMemories, createMemoryCandidate } = await import("../../memory/src");
+              const { FroshOrchestrator } = await import("../../ai/src");
+              const { OpenAIProvider } = await import("../../ai/src/openai-provider");
+
+              const userId = typeof body?.userId === "string" ? body.userId : undefined;
+              const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
+              const memory = createMemoryStore();
+              const conversation = conversationId ? await memory.getConversation(conversationId) : null;
+              const currentConversation = conversation ?? await memory.createConversation({ id: conversationId, userId });
+              await memory.appendMessage({ conversationId: currentConversation.id, role: "user", content: message });
+
+              const context = await buildConversationContext(memory, currentConversation.id, userId);
+              if (userId) {
+                const memories = await getUserMemoryStore().list(userId, 30);
+                if (memories.length) {
+                  context.unshift({
+                    role: "system",
+                    content: ["Approved long-term user memory:", ...memories.map((item) => "- [" + item.kind + "] " + item.statement)].join("\\n")
+                  });
+                }
+              }
+
+              const conversationMemory = await getConversationMemoryStore().get(currentConversation.id);
+              if (conversationMemory && (conversationMemory.summary || conversationMemory.keyFacts.length)) {
+                context.unshift({
+                  role: "system",
+                  content: ["Approved long-term context for this conversation:", ...conversationMemory.keyFacts.map((fact) => "- " + fact)].join("\\n")
+                });
+              }
+
+              const provider = new OpenAIProvider();
+              const orchestrator = new FroshOrchestrator(provider);
+              let finalMessage = "";
+              let finalTools: any[] = [];
+
+              for await (const event of provider.stream(
+                { ...orchestrator.getModelInput(context) },
+                {}
+              )) {
+                if (event.type === "delta") {
+                  finalMessage += event.text;
+                  send(event);
+                } else {
+                  if (event.type === "tool") send(event);
+                  if (event.type === "approval") send(event);
+                  if (event.type === "done") {
+                    finalMessage = event.message;
+                    finalTools = event.toolCalls;
+                    send({ type: "done", conversationId: currentConversation.id, message: event.message, toolCalls: event.toolCalls });
+                  }
+                }
+              }
+
+              await memory.appendMessage({ conversationId: currentConversation.id, role: "assistant", content: finalMessage });
+
+              if (userId) {
+                const extraction = extractConversationMemories([{ id: crypto.randomUUID(), text: message, conversationId: currentConversation.id }]);
+                for (const candidate of extraction.candidates) {
+                  await createMemoryCandidate({ ...candidate, userId });
+                }
+              }
+            } catch (error) {
+              send({ type: "error", message: error instanceof Error ? error.message : "Streaming request failed" });
+            } finally {
+              controller.close();
+            }
+          }
+        });
+
+        return new Response(stream, {
+          headers: {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache, no-transform",
+            "connection": "keep-alive",
+          }
+        });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Streaming request failed" }, { status: 500 });
+      }
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/chat") {
       try {
         const body = await request.json();
