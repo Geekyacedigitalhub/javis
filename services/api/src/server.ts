@@ -1,28 +1,60 @@
 import { JavisOrchestrator } from "../../ai/src";
 import { DevelopmentProvider } from "../../ai/src/mock-provider";
+import {
+  InMemoryStore,
+  buildConversationContext,
+} from "../../memory/src";
 
 const provider = new DevelopmentProvider();
 const orchestrator = new JavisOrchestrator(provider);
+const memory = new InMemoryStore();
 
 export interface JavisHttpRequest {
   message: string;
   conversationId?: string;
+  userId?: string;
 }
 
 export async function handleJavisRequest(input: JavisHttpRequest) {
-  if (!input.message?.trim()) {
+  const message = input.message?.trim();
+
+  if (!message) {
     throw new Error("message is required");
   }
 
-  const response = await orchestrator.respond([
-    {
-      role: "user",
-      content: input.message.trim(),
-    },
-  ]);
+  const conversation = input.conversationId
+    ? await memory.getConversation(input.conversationId)
+    : null;
+
+  const currentConversation =
+    conversation ??
+    (await memory.createConversation({
+      id: input.conversationId,
+      userId: input.userId,
+    }));
+
+  await memory.appendMessage({
+    conversationId: currentConversation.id,
+    role: "user",
+    content: message,
+  });
+
+  const context = await buildConversationContext(
+    memory,
+    currentConversation.id,
+    input.userId,
+  );
+
+  const response = await orchestrator.respond(context);
+
+  await memory.appendMessage({
+    conversationId: currentConversation.id,
+    role: "assistant",
+    content: response.message,
+  });
 
   return {
-    conversationId: input.conversationId ?? crypto.randomUUID(),
+    conversationId: currentConversation.id,
     ...response,
   };
 }
