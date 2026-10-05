@@ -1,23 +1,23 @@
 import { JavisOrchestrator } from "../../ai/src";
+import { DevelopmentProvider } from "../../ai/src/mock-provider";
 
-const orchestrator = new JavisOrchestrator({
-  async generate({ messages }) {
-    const last = messages.at(-1)?.content ?? "";
-    return {
-      message: `JARVIS core received: ${last}`,
-      toolCalls: [],
-    };
-  },
-});
+const provider = new DevelopmentProvider();
+const orchestrator = new JavisOrchestrator(provider);
 
-export async function handleJavisRequest(input: {
+export interface JavisHttpRequest {
   message: string;
   conversationId?: string;
-}) {
+}
+
+export async function handleJavisRequest(input: JavisHttpRequest) {
+  if (!input.message?.trim()) {
+    throw new Error("message is required");
+  }
+
   const response = await orchestrator.respond([
     {
       role: "user",
-      content: input.message,
+      content: input.message.trim(),
     },
   ]);
 
