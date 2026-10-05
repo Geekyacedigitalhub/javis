@@ -21,6 +21,7 @@ export interface FroshToolCall {
   name: string;
   arguments: Record<string, unknown>;
   status: "planned" | "completed" | "failed";
+  result?: unknown;
 }
 export type JavisToolCall = FroshToolCall;
 
