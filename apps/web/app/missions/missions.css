@@ -16,3 +16,9 @@
 
 .mission-health-card{display:flex;justify-content:space-between;gap:12px;margin:0 0 10px;padding:10px 14px;border:1px solid rgba(22,163,74,.22);border-radius:12px;font-size:12px;background:rgba(22,163,74,.04)}
 .mission-health-card span{font-weight:600}
+
+.mission-health-card{align-items:center}
+.mission-health-card>div:first-child{display:flex;flex-direction:column;gap:2px}
+.health-gauge{position:relative;min-width:150px;height:9px;border-radius:999px;background:rgba(127,127,127,.18);overflow:visible}
+.health-gauge i{display:block;height:100%;border-radius:inherit;background:#16a34a;transition:width .35s ease}
+.health-gauge b{position:absolute;right:0;top:-18px;font-size:11px}
