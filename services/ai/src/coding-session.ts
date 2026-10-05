@@ -96,9 +96,11 @@ export class CodingSessionManager {
       toolCalls: [...run.toolCalls, toolCall],
     });
 
-    const resumed = await this.model.generate(
-      { system: CODING_SYSTEM, messages: [], tools: listTools() },
-      {
+    let resumed;
+    try {
+      resumed = await this.model.generate(
+        { system: CODING_SYSTEM, messages: [], tools: listTools() },
+        {
         runId: run.id,
         continuation: {
           continuation: run.providerContinuation,
@@ -107,8 +109,18 @@ export class CodingSessionManager {
             output: JSON.stringify(resolved.result),
           },
         },
-      },
-    );
+        },
+      );
+    } catch (error) {
+      await agentRunStore.update(run.id, {
+        status: "waiting_approval",
+        pendingApprovalId: undefined,
+        providerContinuation: run.providerContinuation,
+        result: "Approval was accepted, but FROSH could not resume the provider session. The run is preserved for recovery.",
+        error: error instanceof Error ? error.message : "Provider continuation failed",
+      });
+      throw error;
+    }
 
     const calls = [...run.toolCalls, toolCall, ...(resumed.toolCalls ?? [])];
 
