@@ -648,7 +648,8 @@ const server = Bun.serve({
         const store=getMissionStore();
         const mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
-        const updated=await store.update(id,userId,{priority});
+        const updated=await store.updatePriorityIfIdle(id,userId,priority);
+        if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
         await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Priority changed to "+priority+"."});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Priority update failed"},{status:400});}
@@ -666,7 +667,8 @@ const server = Bun.serve({
         const store=getMissionStore();
         const mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
-        const updated=await store.update(id,userId,{budgetProfile});
+        const updated=await store.updateBudgetProfileIfIdle(id,userId,budgetProfile);
+        if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
         await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Budget profile changed to "+budgetProfile+"."});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Budget profile update failed"},{status:400});}
