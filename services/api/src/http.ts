@@ -480,18 +480,36 @@ const server = Bun.serve({
 
     if(missionMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionMatch[1]); const id=decodeURIComponent(missionMatch[2]);
-        const {getMissionStore}=await import("../../missions/src");
-        const mission=await getMissionStore().get(id,userId); if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        const userId=decodeURIComponent(missionMatch[1]);
+        const id=decodeURIComponent(missionMatch[2]);
+        const {getMissionStore, planMission}=await import("../../missions/src");
+        const mission=await getMissionStore().get(id,userId);
+        if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="completed")return Response.json({mission});
-        const run=await codingSessions.start({goal:mission.goal,messages:[{role:"user",content:mission.goal}],conversationId:undefined});
-        const steps=[{id:crypto.randomUUID(),title:"Execute mission objective",status:run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":"running",runId:run.id,result:run.result,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()}];
-        const status=run.status==="waiting_approval"?"waiting_approval":run.status==="completed"?"completed":"running";
-        const updated=await getMissionStore().update(id,userId,{status,progress:status==="completed"?1:0.1,steps,activeRunId:run.id,pendingApprovalId:run.pendingApprovalId,result:run.result});
+
+        let steps=mission.steps.length?mission.steps:planMission(mission.goal);
+        const index=steps.findIndex(step=>step.status==="pending");
+        if(index<0){
+          const done=await getMissionStore().update(id,userId,{status:"completed",progress:1,steps,result:"All planned mission steps completed."});
+          return Response.json({mission:done});
+        }
+
+        const now=new Date().toISOString();
+        steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
+        const step=steps[index];
+        const run=await codingSessions.start({
+          goal:step.title+"\nOverall objective: "+mission.goal,
+          messages:[{role:"user",content:step.title+"\nOverall objective: "+mission.goal}]
+        });
+        const stepStatus=run.status==="waiting_approval"?"blocked":run.status==="completed"?"completed":run.status==="failed"?"failed":"running";
+        steps=steps.map((item,i)=>i===index?{...item,status:stepStatus,runId:run.id,result:run.result,updatedAt:new Date().toISOString()}:item);
+        const completed=steps.filter(item=>item.status==="completed").length;
+        const progress=steps.length?completed/steps.length:0;
+        const status=run.status==="waiting_approval"?"waiting_approval":run.status==="failed"?"failed":progress===1?"completed":"running";
+        const updated=await getMissionStore().update(id,userId,{status,progress,steps,activeRunId:run.id,pendingApprovalId:run.pendingApprovalId,result:run.result});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});}
     }
-
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
       try {
         const body = await request.json();
