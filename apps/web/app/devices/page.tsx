@@ -19,6 +19,9 @@ export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [result, setResult] = useState("");
+  const [appNames, setAppNames] = useState<Record<string, string>>({});
+  const [busyCommand, setBusyCommand] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -33,6 +36,33 @@ export default function DevicesPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  async function command(deviceId: string, command: string, extra: Record<string, string> = {}) {
+    setBusyCommand(deviceId + ":" + command);
+    setResult("");
+    try {
+      const response = await fetch(`${API}/v1/devices/${encodeURIComponent(deviceId)}/command`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ command, ...extra })
+      });
+      const data = await response.json();
+      setResult(data.message ?? (response.ok ? "Command completed." : "Command failed."));
+    } catch {
+      setResult("Could not send the device command.");
+    } finally {
+      setBusyCommand(null);
+    }
+  }
+
+  async function openApp(device: Device) {
+    const appName = (appNames[device.id] ?? "").trim();
+    if (!appName) {
+      setResult("Enter an Android app name first.");
+      return;
+    }
+    await command(device.id, "open_app", { appName });
   }
 
   useEffect(() => {
@@ -56,6 +86,8 @@ export default function DevicesPage() {
       </header>
 
       {error && <div className="device-error">{error}</div>}
+
+      {result && <div className="device-result">{result}</div>}
 
       {!loading && !devices.length && (
         <section className="empty">
@@ -83,6 +115,28 @@ export default function DevicesPage() {
                 ? device.capabilities.map((capability) => <span key={capability}>{capability}</span>)
                 : <span className="muted">No capabilities reported</span>}
             </div>
+
+            {device.platform === "android" && device.status === "online" && (
+              <div className="device-controls">
+                <div className="control-title">Quick controls</div>
+                <div className="control-row">
+                  <button disabled={!!busyCommand} onClick={() => void command(device.id, "open_dialer")}>Dialer</button>
+                  <button disabled={!!busyCommand} onClick={() => void command(device.id, "media_control", { action: "toggle" })}>Play / Pause</button>
+                  <button disabled={!!busyCommand} onClick={() => void command(device.id, "media_control", { action: "next" })}>Next</button>
+                </div>
+                <div className="app-control">
+                  <input
+                    value={appNames[device.id] ?? ""}
+                    onChange={(event) => setAppNames((current) => ({ ...current, [device.id]: event.target.value }))}
+                    placeholder="App name, e.g. Spotify"
+                  />
+                  <button disabled={!!busyCommand} onClick={() => void openApp(device)}>
+                    {busyCommand === device.id + ":open_app" ? "Opening…" : "Open"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             <footer>
               {device.lastSeenAt
                 ? `Last seen ${new Date(device.lastSeenAt).toLocaleString()}`
