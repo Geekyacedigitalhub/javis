@@ -21,7 +21,7 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
 
   async get(id: string) {
     const rows = await this.query<FroshAgentRun>(
-      'SELECT id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error FROM frosh_agent_runs WHERE id=$1',
+      'SELECT id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error FROM frosh_agent_runs WHERE id=$1',
       [id],
     );
     return rows[0] ?? null;
@@ -29,7 +29,7 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
 
   async touch(id: string) {
     const rows = await this.query<FroshAgentRun>(
-      'UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+      'UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
       [id],
     );
     if (!rows[0]) throw new Error("Agent run not found");
@@ -53,11 +53,11 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     if (Object.prototype.hasOwnProperty.call(patch, "error")) add("error", patch.error ?? null);
     const rows = fields.length
       ? await this.query<FroshAgentRun>(
-          'UPDATE frosh_agent_runs SET ' + fields.map((field) => field.startsWith("tool_calls=") ? field + "::jsonb" : field.startsWith("provider_continuation=") ? field + "::jsonb" : field).join(", ") + ', updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+          'UPDATE frosh_agent_runs SET ' + fields.map((field) => field.startsWith("tool_calls=") ? field + "::jsonb" : field.startsWith("provider_continuation=") ? field + "::jsonb" : field).join(", ") + ', updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
           values,
         )
       : await this.query<FroshAgentRun>(
-          'UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+          'UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
           [id],
         );
     if (!rows[0]) throw new Error("Agent run not found");
