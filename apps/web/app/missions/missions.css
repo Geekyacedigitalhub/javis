@@ -110,3 +110,5 @@
 .event-duration{display:inline-block;margin-left:7px;font-size:9px;opacity:.7;font-variant-numeric:tabular-nums}
 
 .tool-performance-list{display:grid;gap:6px}.tool-performance-row{display:grid;grid-template-columns:minmax(150px,1.6fr) repeat(4,minmax(70px,1fr));gap:8px;align-items:center;padding:9px 10px;border:1px solid rgba(127,127,127,.14);border-radius:8px;font-size:10px}.tool-performance-row span{opacity:.72;text-align:right}.tool-performance-empty{font-size:11px;opacity:.65}@media(max-width:700px){.tool-performance-row{grid-template-columns:1fr 1fr}.tool-performance-row span{text-align:left}}
+
+.tool-performance-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.tool-performance-heading select{padding:6px 8px;border:1px solid rgba(127,127,127,.2);border-radius:7px;background:transparent;color:inherit;font-size:10px}
