@@ -5,10 +5,12 @@
   "description": "JARVIS personal AI assistant platform",
   "packageManager": "bun@1.4.1",
   "scripts": {
-    "dev": "echo 'JARVIS foundation initialized'",
-    "typecheck": "echo 'Typecheck pipeline will be added with the first service'"
+    "dev": "bun run services/api/src/http.ts",
+    "typecheck": "echo 'Typecheck pipeline will be added with the first service'",
+    "start": "bun run services/api/src/http.ts"
   },
   "dependencies": {
-    "postgres": "^3.4.7"
+    "postgres": "^3.4.7",
+    "openai": "^6.9.0"
   }
 }
