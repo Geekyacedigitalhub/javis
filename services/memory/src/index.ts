@@ -6,3 +6,4 @@ export * from "./factory";
 export * from "./context";
 export * from "./conversation-memory";
 export * from "./conversation-memory-factory";
+export * from "./memory-extractor";
