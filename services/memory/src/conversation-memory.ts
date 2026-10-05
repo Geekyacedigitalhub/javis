@@ -49,3 +49,14 @@ export function mergeConversationMemory(
     updatedAt: new Date().toISOString()
   };
 }
+
+
+export function removeMemoryFact(memory: FroshConversationMemory, fact: string): FroshConversationMemory {
+  const normalized = fact.trim().toLowerCase();
+  const keyFacts = memory.keyFacts.filter((item) => item.trim().toLowerCase() !== normalized);
+  const summary = memory.summary
+    .split(" | ")
+    .filter((item) => item.trim().toLowerCase() !== normalized)
+    .join(" | ");
+  return { ...memory, keyFacts, summary, updatedAt: new Date().toISOString() };
+}
