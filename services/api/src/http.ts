@@ -944,11 +944,18 @@ const server = Bun.serve({
           const continuationStartedAt=Date.now();
           const continuationBaseRun=mission.activeRunId?await agentRunStore.get(mission.activeRunId):null;
           const continuationBaseToolCount=continuationBaseRun?.toolCalls.length??0;
+          const leaseRenewTimer=setInterval(async()=>{
+            try{
+              const renewed=await store.renewLease(id,userId,executionOwner);
+              if(!renewed)console.error("FROSH mission continuation lease renewal failed:",id);
+            }catch(error){console.error("FROSH mission continuation lease renewal error:",error);}
+          },60000);
           let run;
           try {
             run=await codingSessions.approveAndResume(mission.pendingApprovalId);
           } catch(error) {
-            const continuationDurationMs=Date.now()-continuationStartedAt;
+            clearInterval(leaseRenewTimer);
+          const continuationDurationMs=Date.now()-continuationStartedAt;
             const executionDurationMs=existingDurationMs+continuationDurationMs;
             const failed=await updateOwned({
               status:"failed",
