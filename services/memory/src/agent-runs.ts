@@ -13,7 +13,7 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
   async create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt">) {
     const id = crypto.randomUUID();
     const rows = await this.query<FroshAgentRun>(
-      'INSERT INTO frosh_agent_runs (id, conversation_id, goal, status, tool_calls, pending_approval_id, result, error) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+      'INSERT INTO frosh_agent_runs (id, conversation_id, goal, status, tool_calls, pending_approval_id, result, error) VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8) RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
       [id, input.conversationId ?? null, input.goal, input.status, JSON.stringify(input.toolCalls), input.pendingApprovalId ?? null, input.result ?? null, input.error ?? null],
     );
     return rows[0];
@@ -46,9 +46,9 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     if (Object.prototype.hasOwnProperty.call(patch, "conversationId")) add("conversation_id", patch.conversationId ?? null);
     if (Object.prototype.hasOwnProperty.call(patch, "goal")) add("goal", patch.goal);
     if (Object.prototype.hasOwnProperty.call(patch, "status")) add("status", patch.status);
-    if (Object.prototype.hasOwnProperty.call(patch, "toolCalls")) add("tool_calls", JSON.stringify(patch.toolCalls), () => undefined);
+    if (Object.prototype.hasOwnProperty.call(patch, "toolCalls")) add("tool_calls", JSON.stringify(patch.toolCalls));
     if (Object.prototype.hasOwnProperty.call(patch, "pendingApprovalId")) add("pending_approval_id", patch.pendingApprovalId ?? null);
-    if (Object.prototype.hasOwnProperty.call(patch, "providerContinuation")) add("provider_continuation", JSON.stringify(patch.providerContinuation), () => undefined);
+    if (Object.prototype.hasOwnProperty.call(patch, "providerContinuation")) add("provider_continuation", JSON.stringify(patch.providerContinuation));
     if (Object.prototype.hasOwnProperty.call(patch, "result")) add("result", patch.result ?? null);
     if (Object.prototype.hasOwnProperty.call(patch, "error")) add("error", patch.error ?? null);
     const rows = fields.length
