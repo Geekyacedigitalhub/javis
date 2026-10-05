@@ -23,6 +23,10 @@ export class InMemoryConversationMemoryStore implements FroshConversationMemoryS
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
       .slice(0, limit);
   }
+
+  async delete(id: string) {
+    return this.items.delete(id);
+  }
 }
 
 
