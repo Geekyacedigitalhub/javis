@@ -931,15 +931,15 @@ const server = Bun.serve({
           const existingToolCount=mission.toolCallsUsed??0;
           const existingDurationMs=mission.executionDurationMs??0;
           const emit=async(type:"mission.approval.required"|"mission.budget.exceeded"|"mission.failed",message:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await store.addEvent({missionId:id,userId,type,message,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
-          if(mission.steps.length>maxSteps || existingToolCount>=maxTools || existingDurationMs>=maxDurationMs){
-            await emit("mission.budget.exceeded","Mission approval continuation cannot start because the mission budget is already exhausted.",mission.activeRunId,{toolCount:existingToolCount,maxTools,executionDurationMs:existingDurationMs,maxDurationMs});
-            const paused=await store.update(id,userId,{status:"paused",pendingApprovalId:mission.pendingApprovalId,toolCallsUsed:existingToolCount,executionDurationMs:existingDurationMs,leaseUntil:undefined,leaseOwner:undefined});
-            return Response.json({mission:paused,budgetExceeded:true},{status:409});
-          }
-
           const executionOwner="approval-continuation:"+crypto.randomUUID();
           const claimed=await store.claimApprovalContinuation(id,userId,executionOwner);
           if(!claimed)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
+          const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await store.updateOwned(id,userId,executionOwner,patch);if(!updated)throw new Error("Mission continuation lease was lost before mission state update");return updated;};
+          if(mission.steps.length>maxSteps || existingToolCount>=maxTools || existingDurationMs>=maxDurationMs){
+            await emit("mission.budget.exceeded","Mission approval continuation cannot start because the mission budget is already exhausted.",mission.activeRunId,{toolCount:existingToolCount,maxTools,executionDurationMs:existingDurationMs,maxDurationMs});
+            const paused=await updateOwned({status:"paused",pendingApprovalId:mission.pendingApprovalId,toolCallsUsed:existingToolCount,executionDurationMs:existingDurationMs,leaseUntil:undefined,leaseOwner:undefined});
+            return Response.json({mission:paused,budgetExceeded:true},{status:409});
+          }
 
           const continuationStartedAt=Date.now();
           let run;
@@ -948,7 +948,7 @@ const server = Bun.serve({
           } catch(error) {
             const continuationDurationMs=Date.now()-continuationStartedAt;
             const executionDurationMs=existingDurationMs+continuationDurationMs;
-            const failed=await store.update(id,userId,{
+            const failed=await updateOwned({
               status:"failed",
               pendingApprovalId:undefined,
               leaseUntil:undefined,
@@ -971,7 +971,7 @@ const server = Bun.serve({
           if(toolCallsUsed>maxTools || executionDurationMs>maxDurationMs){
             const reason=toolCallsUsed>maxTools?"Mission tool-call budget was exceeded during approval continuation.":"Mission execution time budget was exceeded during approval continuation.";
             await emit("mission.budget.exceeded",reason,run.id,{toolCount:toolCallsUsed,maxTools,executionDurationMs,maxDurationMs});
-            const paused=await store.update(id,userId,{
+            const paused=await updateOwned({
               status:"paused",
               progress,
               steps,
@@ -993,7 +993,7 @@ const server = Bun.serve({
               :progress===1
                 ?"completed"
                 :"running";
-          const updated=await store.update(id,userId,{
+          const updated=await updateOwned({
             status:continuationStatus,
             progress,
             steps,
