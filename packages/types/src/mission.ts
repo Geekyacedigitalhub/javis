@@ -1,4 +1,5 @@
 export type FroshMissionStatus = "planning" | "running" | "waiting_approval" | "completed" | "failed" | "paused";
+export type FroshMissionPriority = "low" | "normal" | "high";
 
 export interface FroshMissionStep {
   id: string;
@@ -16,6 +17,7 @@ export interface FroshMission {
   userId: string;
   goal: string;
   status: FroshMissionStatus;
+  priority: FroshMissionPriority;
   progress: number;
   steps: FroshMissionStep[];
   activeRunId?: string;
@@ -32,4 +34,6 @@ export interface FroshMissionStore {
   create(input: Omit<FroshMission, "id" | "createdAt" | "updatedAt">): Promise<FroshMission>;
   update(id: string, userId: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission>;
   delete(id: string, userId: string): Promise<boolean>;
+  claim(id: string, userId: string): Promise<FroshMission | null>;
+  renewLease(id: string, userId: string): Promise<FroshMission | null>;
 }
