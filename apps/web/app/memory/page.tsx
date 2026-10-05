@@ -15,7 +15,7 @@ type Candidate = Memory & {
   createdAt: string;
 };
 
-const API = process.env.NEXT_PUBLIC_FROSH_API_URL ?? "http://localhost:3001";
+const API = "/api/frosh";
 const USER_ID = process.env.NEXT_PUBLIC_FROSH_USER_ID ?? "default-user";
 
 export default function MemoryPage() {
