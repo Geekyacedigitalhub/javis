@@ -8,3 +8,5 @@
 .budget-track{grid-column:1/-1;height:5px;border-radius:999px;background:rgba(127,127,127,.18);overflow:hidden}
 .budget-track i{display:block;height:100%;border-radius:inherit;background:#16a34a;transition:width .3s ease}
 .mission-budget-card.warning .budget-track i{background:#eab308}
+
+.retry-countdown{display:block;margin-top:5px;opacity:.7;font-variant-numeric:tabular-nums}
