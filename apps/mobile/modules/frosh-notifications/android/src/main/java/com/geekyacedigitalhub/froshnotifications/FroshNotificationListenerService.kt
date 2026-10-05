@@ -48,6 +48,10 @@ object FroshNotificationStore {
 }
 
 class FroshNotificationListenerService : NotificationListenerService() {
+  private fun appName(packageName: String): String? = try {
+    packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+  } catch (_: Exception) { null }
+
   override fun onNotificationPosted(sbn: StatusBarNotification) {
     val extras = sbn.notification.extras
     val replyAction = sbn.notification.actions?.firstOrNull { action ->
@@ -59,6 +63,7 @@ class FroshNotificationListenerService : NotificationListenerService() {
       mapOf(
         "id" to sbn.key,
         "packageName" to sbn.packageName,
+        "appName" to appName(sbn.packageName),
         "title" to extras.getString(Notification.EXTRA_TITLE),
         "text" to extras.getCharSequence(Notification.EXTRA_TEXT)?.toString(),
         "receivedAt" to System.currentTimeMillis(),
