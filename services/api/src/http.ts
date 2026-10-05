@@ -3,17 +3,39 @@ import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { listDevices, registerDevice, getDevice } from "./devices";
+import { addRealtimeClient, realtimeClientCount } from "./realtime";
 
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
 
 const server = Bun.serve({
   port,
+  websocket: {
+    open(ws) {
+      addRealtimeClient(ws);
+      ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
+    },
+    message(ws, message) {
+      try {
+        const parsed = JSON.parse(String(message));
+        if (parsed?.type === "ping") {
+          ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
+        }
+      } catch {
+        ws.send(JSON.stringify({ type: "error", message: "Invalid realtime message" }));
+      }
+    },
+  },
   async fetch(request) {
     const url = new URL(request.url);
 
     if (request.method === "GET" && url.pathname === "/health") {
-      return Response.json({ ok: true, service: "frosh-api" });
+      return Response.json({ ok: true, service: "frosh-api", realtimeClients: realtimeClientCount() });
+    }
+
+    if (request.method === "GET" && url.pathname === "/v1/realtime") {
+      if (server.upgrade(request, { data: {} })) return undefined;
+      return new Response("WebSocket upgrade required", { status: 426 });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/chat") {
