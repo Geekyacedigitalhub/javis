@@ -33,7 +33,6 @@ export function connectFroshRealtime(
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
       if (parsed.type === "device.command" && parsed.command === "media_state") {
-        const result = await executeMediaAction({ action: "play" } as any);
         const state = await (async () => {
           try {
             const module = require("../modules/frosh-media/src").default;
