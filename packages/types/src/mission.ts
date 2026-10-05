@@ -1,4 +1,4 @@
-export type FroshMissionStatus = "planning" | "running" | "waiting_approval" | "completed" | "failed" | "paused";
+export type FroshMissionStatus = "planning" | "running" | "waiting_approval" | "completed" | "failed" | "paused" | "cancelled";
 export type FroshMissionPriority = "low" | "normal" | "high";
 
 export interface FroshMissionStep {
