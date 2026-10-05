@@ -688,6 +688,17 @@ const server = Bun.serve({
         let mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="completed")return Response.json({mission});
+        const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
+        const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
+        if(requestedWorkerId){
+          if(mission.leaseOwner!==requestedWorkerId || !mission.leaseUntil || Date.parse(mission.leaseUntil)<=Date.now()){
+            return Response.json({error:"Mission lease is missing or expired"},{status:409});
+          }
+        }else{
+          const claimed=await store.claim(id,userId,executionOwner);
+          if(!claimed)return Response.json({error:"Mission is already being executed by another worker"},{status:409});
+          mission=claimed;
+        }
 
         let steps=mission.steps.length?mission.steps:planMission(mission.goal);
         let lastRunId=mission.activeRunId;
