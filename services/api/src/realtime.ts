@@ -9,9 +9,9 @@ type Client = {
 
 const clients = new Map<string, Client>();
 
-export function addRealtimeClient(socket: WebSocket) {
+export function addRealtimeClient(socket: WebSocket, deviceId?: string) {
   const id = crypto.randomUUID();
-  clients.set(id, { id, socket });
+  clients.set(id, { id, socket, deviceId });
 
   socket.addEventListener("close", () => clients.delete(id));
   return id;
