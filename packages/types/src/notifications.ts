@@ -59,3 +59,20 @@ export interface FroshMessageDigest {
   urgent: number;
   insights: FroshMessageInsight[];
 }
+
+
+export type FroshMessagePriority = "low" | "normal" | "high" | "urgent";
+
+export interface FroshMessageInsight extends FroshUnifiedMessage {
+  priority: FroshMessagePriority;
+  likelyNeedsReply: boolean;
+  reason?: string;
+}
+
+export interface FroshMessagingSummary {
+  total: number;
+  needsReply: number;
+  urgent: number;
+  byProvider: Record<string, number>;
+  highlights: FroshMessageInsight[];
+}
