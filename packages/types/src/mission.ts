@@ -71,6 +71,7 @@ export interface FroshMissionStore {
   create(input: Omit<FroshMission, "id" | "createdAt" | "updatedAt">): Promise<FroshMission>;
   update(id: string, userId: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission>;
   delete(id: string, userId: string): Promise<boolean>;
+  deleteIfIdle(id: string, userId: string): Promise<boolean>;
   claim(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   claimApprovalContinuation(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   claimStepRetry(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
