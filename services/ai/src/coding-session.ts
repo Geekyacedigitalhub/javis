@@ -1,5 +1,5 @@
 import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/javis";
-import { executeToolCall, listTools } from "../../tools/src";
+import { executeToolCall, listTools, approvalStore, resolveApproval } from "../../tools/src";
 import type { ProviderClient } from "./provider";
 import { createAgentRunStore } from "./run-store-factory";
 
@@ -15,9 +15,7 @@ export class CodingSessionManager {
       status: "running",
       toolCalls: [],
     });
-
-    const result = await this.step(run.id, input.messages);
-    return result;
+    return this.step(run.id, input.messages);
   }
 
   async step(runId: string, messages: FroshMessage[]) {
@@ -42,9 +40,8 @@ export class CodingSessionManager {
     const calls: FroshToolCall[] = [...run.toolCalls];
 
     for (const call of result.toolCalls ?? []) {
-      const executed = await executeToolCall(call);
+      const executed = await executeToolCall(call, { runId });
       calls.push(executed);
-
       const value = executed.result;
       const approvalId =
         typeof value === "object" && value !== null && "approvalId" in value
@@ -66,6 +63,60 @@ export class CodingSessionManager {
       toolCalls: calls,
       result: result.message,
       pendingApprovalId: undefined,
+    });
+  }
+
+  async approveAndResume(approvalId: string, messages: FroshMessage[]) {
+    const approval = await approvalStore.get(approvalId);
+    if (!approval) throw new Error("Approval request not found");
+    if (!approval.runId) throw new Error("Approval is not attached to an agent run");
+
+    const run = await agentRunStore.get(approval.runId);
+    if (!run) throw new Error("Agent run not found");
+    if (run.status !== "waiting_approval" || run.pendingApprovalId !== approvalId) {
+      throw new Error("Agent run is not waiting for this approval");
+    }
+
+    const resolved = await resolveApproval(approvalId, "approved");
+    const toolCall: FroshToolCall = {
+      id: `approved-${approvalId}`,
+      name: approval.toolName,
+      arguments: approval.arguments,
+      status: "completed",
+      result: resolved.result,
+    };
+
+    await agentRunStore.update(run.id, {
+      status: "running",
+      pendingApprovalId: undefined,
+      toolCalls: [...run.toolCalls, toolCall],
+    });
+
+    return this.step(run.id, [
+      ...messages,
+      {
+        role: "tool",
+        name: approval.toolName,
+        toolCallId: toolCall.id,
+        content: JSON.stringify(resolved.result),
+      },
+    ]);
+  }
+
+  async reject(approvalId: string) {
+    const approval = await approvalStore.get(approvalId);
+    if (!approval) throw new Error("Approval request not found");
+    if (!approval.runId) throw new Error("Approval is not attached to an agent run");
+
+    const resolved = await resolveApproval(approvalId, "rejected");
+    const run = await agentRunStore.get(approval.runId);
+    if (!run) throw new Error("Agent run not found");
+
+    return agentRunStore.update(run.id, {
+      status: "failed",
+      pendingApprovalId: undefined,
+      result: "The requested action was rejected by the user.",
+      error: "User rejected approval",
     });
   }
 }
