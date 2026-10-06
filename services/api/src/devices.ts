@@ -73,11 +73,12 @@ export async function initializeDeviceStore() {
   if (!schemaReady) throw new Error("Device store schema initialization failed");
 }
 
-export async function registerDevice(input: FroshDeviceRegistration) {
+export async function registerDevice(input: FroshDeviceRegistration, options: { allowExisting?: boolean } = {}) {
   const client = db();
   if (!client) {
     const now = new Date().toISOString();
     const existing = [...devices.values()].find(device => device.name === input.name && device.platform === input.platform);
+    if (existing && !options.allowExisting) throw new Error("A device with this name and platform is already registered.");
     const device: FroshDevice = {
       id: existing?.id ?? crypto.randomUUID(),
       name: input.name,
@@ -92,13 +93,27 @@ export async function registerDevice(input: FroshDeviceRegistration) {
   await ensureSchema();
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
-  const rows = await client.unsafe<FroshDevice[]>(
-    `INSERT INTO frosh_devices(id,name,platform,status,capabilities,last_seen_at)
-     VALUES($1,$2,$3,'online',$4::jsonb,$5)
-     ON CONFLICT(name,platform) DO UPDATE SET status='online',capabilities=EXCLUDED.capabilities,last_seen_at=EXCLUDED.last_seen_at
-     RETURNING id,name,platform,status,capabilities,last_seen_at AS "lastSeenAt"`,
-    [id, input.name, input.platform, JSON.stringify([...new Set(input.capabilities)]), now],
-  );
+  if (!options.allowExisting) {
+    const existing = await client.unsafe<{ id: string }[]>(
+      `SELECT id FROM frosh_devices WHERE name=$1 AND platform=$2 LIMIT 1`,
+      [input.name, input.platform],
+    );
+    if (existing[0]) throw new Error("A device with this name and platform is already registered.");
+  }
+  const rows = options.allowExisting
+    ? await client.unsafe<FroshDevice[]>(
+        `INSERT INTO frosh_devices(id,name,platform,status,capabilities,last_seen_at)
+         VALUES($1,$2,$3,'online',$4::jsonb,$5)
+         ON CONFLICT(name,platform) DO UPDATE SET status='online',capabilities=EXCLUDED.capabilities,last_seen_at=EXCLUDED.last_seen_at
+         RETURNING id,name,platform,status,capabilities,last_seen_at AS "lastSeenAt"`,
+        [id, input.name, input.platform, JSON.stringify([...new Set(input.capabilities)]), now],
+      )
+    : await client.unsafe<FroshDevice[]>(
+        `INSERT INTO frosh_devices(id,name,platform,status,capabilities,last_seen_at)
+         VALUES($1,$2,$3,'online',$4::jsonb,$5)
+         RETURNING id,name,platform,status,capabilities,last_seen_at AS "lastSeenAt"`,
+        [id, input.name, input.platform, JSON.stringify([...new Set(input.capabilities)]), now],
+      );
   return rows[0];
 }
 
