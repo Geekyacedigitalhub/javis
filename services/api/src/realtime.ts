@@ -68,6 +68,34 @@ const commandTimeoutResult = {
   data: { outcome: "unknown", retryable: false },
 };
 
+function isValidDeviceCommand(message: unknown): message is Extract<FroshDeviceCommand, { type: "device.command" }> {
+  if (!message || typeof message !== "object") return false;
+  const command = message as Record<string, unknown>;
+  if (command.type !== "device.command" || typeof command.requestId !== "string" || !command.requestId || typeof command.deviceId !== "string" || !command.deviceId || typeof command.command !== "string") return false;
+  switch (command.command) {
+    case "open_app":
+      return typeof command.appName === "string" && command.appName.trim().length > 0;
+    case "media_control":
+      return typeof command.action === "string" && command.action.trim().length > 0;
+    case "media_state":
+    case "message_inbox":
+    case "open_dialer":
+      return true;
+    case "contacts_search":
+      return typeof command.query === "string";
+    case "call_number":
+      return typeof command.phoneNumber === "string" && command.phoneNumber.trim().length > 0;
+    case "message_reply":
+      return typeof command.notificationId === "string" && command.notificationId.trim().length > 0 && typeof command.message === "string";
+    case "send_message":
+      return typeof command.provider === "string" && command.provider.trim().length > 0 &&
+        typeof command.recipient === "string" && command.recipient.trim().length > 0 &&
+        typeof command.message === "string" && command.message.trim().length > 0;
+    default:
+      return false;
+  }
+}
+
 export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
   const latestId = latestClientByDevice.get(deviceId);
   const client = latestId ? clients.get(latestId) : undefined;
@@ -94,6 +122,7 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
 }
 
 export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: "device.command.result" }) {
+  if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
   if (pending.deviceId !== message.deviceId) return;
