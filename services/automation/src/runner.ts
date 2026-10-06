@@ -46,7 +46,8 @@ export function startAutomationRunner() {
           });
         }
       } catch (error) {
-        console.error("FROSH automation failed", item.id, error);
+        const errorName = error instanceof Error && error.name ? error.name : "UnknownError";
+        console.error("FROSH automation failed", item.id, errorName);
       }
     }
     } finally {
