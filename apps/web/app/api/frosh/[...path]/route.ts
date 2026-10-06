@@ -38,12 +38,16 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
     cache: "no-store",
   });
 
+  const responseHeaders = new Headers(upstream.headers);
+  responseHeaders.set("cache-control", "no-store");
+
   return new Response(upstream.body, {
     status: upstream.status,
-    headers: upstream.headers,
+    headers: responseHeaders,
   });
 }
 
 export const GET = handler;
 export const POST = handler;
+export const PATCH = handler;
 export const DELETE = handler;
