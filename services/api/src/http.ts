@@ -201,12 +201,17 @@ const server = Bun.serve({
     const suppliedWebToken = request.headers.get("x-frosh-web-token");
     const enrollmentToken = process.env.FROSH_DEVICE_ENROLLMENT_TOKEN?.trim();
     const suppliedEnrollmentToken = request.headers.get("x-frosh-device-enrollment-token");
-    const webAuthenticated = Boolean(webToken && suppliedWebToken && suppliedWebToken === webToken);
-    const deviceEnrollmentAuthorized = Boolean(
+    const validEnrollmentToken = Boolean(
       enrollmentToken &&
+      enrollmentToken.length <= 512 &&
+      !/[\u0000-\u001f\u007f]/.test(enrollmentToken) &&
       suppliedEnrollmentToken &&
+      suppliedEnrollmentToken.length <= 512 &&
+      !/[\u0000-\u001f\u007f]/.test(suppliedEnrollmentToken) &&
       suppliedEnrollmentToken === enrollmentToken
     );
+    const webAuthenticated = Boolean(webToken && suppliedWebToken && suppliedWebToken === webToken);
+    const deviceEnrollmentAuthorized = validEnrollmentToken;
     const publicPath =
       url.pathname === "/health" ||
       url.pathname === "/v1/realtime";
@@ -623,8 +628,11 @@ const server = Bun.serve({
     const capabilityMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/capabilities$/);
     if (capabilityMatch && request.method === "POST") {
       try {
-        if (!webAuthenticated && deviceId !== capabilityMatch[1]) {
-          return Response.json({ error: "Device credential cannot update another device." }, { status: 403 });
+        // Capabilities are trust policy, not device-reported authority. Only the
+        // trusted web console may grant/revoke them; a device credential must
+        // never be able to self-escalate into a privileged capability.
+        if (!webAuthenticated) {
+          return Response.json({ error: "Only trusted web authentication may change device capabilities." }, { status: 403 });
         }
         const body = await parseBoundedJson(request);
         if (!Array.isArray(body?.capabilities) || body.capabilities.length > 100) {
