@@ -5,6 +5,7 @@ import {
   completeDeviceCommandLedger,
   createDeviceCommandLedger,
   getDeviceCommandLedger,
+  getDeviceCommandLedgerByIdempotency,
   markDeviceCommandUnknown,
   markDeviceCommandDispatched,
   markDeviceOffline,
@@ -183,23 +184,41 @@ async function hashCommandPayload(payload: unknown) {
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
-async function createCommandLedgerOrFail(input: {
+async function prepareCommandLedger(input: {
   requestId: string;
   deviceId: string;
   command: string;
   payload: unknown;
+  idempotencyKey?: string;
 }) {
   const payloadHash = await hashCommandPayload(input.payload);
+  const idempotencyKey = input.idempotencyKey?.trim() || input.requestId;
+  if (idempotencyKey.length > 200) return { kind: "error" as const, reason: "idempotency_key_too_long" };
   try {
     const created = await createDeviceCommandLedger({
       requestId: input.requestId,
       deviceId: input.deviceId,
       command: input.command,
       payloadHash,
+      idempotencyKey,
     });
-    return created ? payloadHash : null;
+    if (created) return { kind: "new" as const, payloadHash, idempotencyKey };
+    const existing = await getDeviceCommandLedgerByIdempotency(input.deviceId, idempotencyKey);
+    if (!existing || existing.command !== input.command || existing.payloadHash !== payloadHash) {
+      return { kind: "conflict" as const, reason: "idempotency_key_reused_with_different_command" };
+    }
+    if (existing.state === "completed") {
+      return { kind: "completed" as const, payloadHash, idempotencyKey, result: {
+        accepted: existing.accepted === true,
+        message: existing.message ?? "The command result was recovered from durable storage.",
+        data: existing.data,
+      }};
+    }
+    return { kind: "unknown" as const, payloadHash, idempotencyKey, reason: existing.state === "unknown"
+      ? "idempotency_key_already_has_unknown_outcome"
+      : "idempotency_key_already_in_progress" };
   } catch {
-    return null;
+    return { kind: "error" as const, reason: "ledger_write_failed" };
   }
 }
 
@@ -215,7 +234,7 @@ const commandTimeoutResult = {
   data: { outcome: "unknown", retryable: false },
 };
 
-export async function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
+export async function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string, idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
@@ -226,13 +245,10 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
     command,
     ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}),
   };
-  const payloadHash = await createCommandLedgerOrFail({ requestId, deviceId, command, payload });
-  if (!payloadHash) {
-    return {
-      accepted: false,
-      message: "The command could not be durably recorded before dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
-      data: { outcome: "unknown", retryable: false, reason: "ledger_write_failed" },
-    };
+  const ledger = await prepareCommandLedger({ requestId, deviceId, command, payload, idempotencyKey });
+  if (ledger.kind === "completed") return ledger.result;
+  if (ledger.kind !== "new") {
+    return { accepted: false, message: ledger.kind === "unknown" ? "This idempotency key already has an unresolved command outcome. Do not automatically retry it." : "The command could not be safely recorded or the idempotency key conflicts with another command.", data: { outcome: "unknown", retryable: false, reason: ledger.reason } };
   }
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -250,11 +266,7 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
       void markCommandUnknown(requestId, "The command could not be confirmed after dispatch. The outcome is unknown.");
-      pending.resolve({
-        accepted: false,
-        message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
-        data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
-      });
+      pending.resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
     }
   });
 }
@@ -303,15 +315,15 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
   pending.resolve(result);
 }
 
-export async function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
+export async function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms", idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
   const requestId = crypto.randomUUID();
   const payload = { type: "device.command", deviceId, command: "send_message", provider, recipient, message };
-  if (!await createCommandLedgerOrFail({ requestId, deviceId, command: "send_message", payload })) {
-    return { accepted: false, message: "The command could not be durably recorded before dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "ledger_write_failed" } };
-  }
+  const ledger = await prepareCommandLedger({ requestId, deviceId, command: "send_message", payload, idempotencyKey });
+  if (ledger.kind === "completed") return ledger.result;
+  if (ledger.kind !== "new") return { accepted: false, message: ledger.kind === "unknown" ? "This idempotency key already has an unresolved message outcome. Do not automatically retry it." : "The message command could not be safely recorded or the idempotency key conflicts with another command.", data: { outcome: "unknown", retryable: false, reason: ledger.reason } };
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
       const pending = pendingCommands.get(requestId);
@@ -337,15 +349,15 @@ export function requestMessageInbox(deviceId: string) {
   return sendDeviceCommand(deviceId, "message_inbox");
 }
 
-export async function replyToMessageCommand(deviceId: string, notificationId: string, message: string) {
+export async function replyToMessageCommand(deviceId: string, notificationId: string, message: string, idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
   const requestId = crypto.randomUUID();
   const payload = { type: "device.command", deviceId, command: "message_reply", notificationId, message };
-  if (!await createCommandLedgerOrFail({ requestId, deviceId, command: "message_reply", payload })) {
-    return { accepted: false, message: "The command could not be durably recorded before dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "ledger_write_failed" } };
-  }
+  const ledger = await prepareCommandLedger({ requestId, deviceId, command: "message_reply", payload, idempotencyKey });
+  if (ledger.kind === "completed") return ledger.result;
+  if (ledger.kind !== "new") return { accepted: false, message: ledger.kind === "unknown" ? "This idempotency key already has an unresolved reply outcome. Do not automatically retry it." : "The reply command could not be safely recorded or the idempotency key conflicts with another command.", data: { outcome: "unknown", retryable: false, reason: ledger.reason } };
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
       const pending = pendingCommands.get(requestId);
