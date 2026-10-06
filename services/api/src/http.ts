@@ -555,7 +555,7 @@ const server = Bun.serve({
         );
       }
       try {
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         if (
           typeof body?.name !== "string" ||
           (body?.platform !== "android" &&
