@@ -796,7 +796,8 @@ const server = Bun.serve({
     const missionControlMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/(pause|resume|cancel)$/);
     if(missionControlMatch && request.method==="POST"){
       const {getMissionStore}=await import("../../missions/src");
-      const userId=decodeURIComponent(missionControlMatch[1]);
+      const userId=decodeBoundedUserId(missionControlMatch[1]);
+      if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
       const id=decodeURIComponent(missionControlMatch[2]);
       const action=missionControlMatch[3];
       const store=getMissionStore();
@@ -864,7 +865,8 @@ const server = Bun.serve({
 
     const missionRerunStepMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun-from-step\/([^/]+)$/);
     if(missionRerunStepMatch && request.method==="POST"){
-      const userId=decodeURIComponent(missionRerunStepMatch[1]);
+      const userId=decodeBoundedUserId(missionRerunStepMatch[1]);
+      if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
       const id=decodeURIComponent(missionRerunStepMatch[2]);
       const stepId=decodeURIComponent(missionRerunStepMatch[3]);
       const store=(await import("../../missions/src")).getMissionStore();
@@ -906,7 +908,8 @@ const server = Bun.serve({
 
     const missionRerunMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun$/);
     if(missionRerunMatch && request.method==="POST"){
-      const userId=decodeURIComponent(missionRerunMatch[1]);
+      const userId=decodeBoundedUserId(missionRerunMatch[1]);
+      if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
       const id=decodeURIComponent(missionRerunMatch[2]);
       const store=(await import("../../missions/src")).getMissionStore();
       const source=await store.get(id,userId);
@@ -920,7 +923,8 @@ const server = Bun.serve({
     const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
     const missionEventStreamMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events\/stream$/);
     if(missionEventStreamMatch && request.method==="GET"){
-      const userId=decodeURIComponent(missionEventStreamMatch[1]);
+      const userId=decodeBoundedUserId(missionEventStreamMatch[1]);
+      if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
       const id=decodeURIComponent(missionEventStreamMatch[2]);
       const {getMissionStore}=await import("../../missions/src");
       const mission=await getMissionStore().get(id,userId);
@@ -950,7 +954,8 @@ const server = Bun.serve({
     const missionEventsMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/events$/);
     if(missionEventsMatch && request.method==="GET"){
       const {getMissionStore}=await import("../../missions/src");
-      const userId=decodeURIComponent(missionEventsMatch[1]);
+      const userId=decodeBoundedUserId(missionEventsMatch[1]);
+      if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
       const id=decodeURIComponent(missionEventsMatch[2]);
       const mission=await getMissionStore().get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -967,7 +972,8 @@ const server = Bun.serve({
     const missionPriorityMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/priority$/);
     if(missionPriorityMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionPriorityMatch[1]);
+        const userId=decodeBoundedUserId(missionPriorityMatch[1]);
+        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeURIComponent(missionPriorityMatch[2]);
         const body=await parseBoundedJson(request);
         const priority=body?.priority;
@@ -986,7 +992,8 @@ const server = Bun.serve({
     const missionBudgetProfileMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/budget-profile$/);
     if(missionBudgetProfileMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionBudgetProfileMatch[1]);
+        const userId=decodeBoundedUserId(missionBudgetProfileMatch[1]);
+        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeURIComponent(missionBudgetProfileMatch[2]);
         const body=await parseBoundedJson(request);
         const budgetProfile=body?.budgetProfile;
@@ -1005,7 +1012,8 @@ const server = Bun.serve({
     if(missionMatch && request.method==="DELETE"){
       const {getMissionStore}=await import("../../missions/src");
       const store=getMissionStore();
-      const userId=decodeURIComponent(missionMatch[1]);
+      const userId=decodeBoundedUserId(missionMatch[1]);
+       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
       const id=decodeURIComponent(missionMatch[2]);
       const mission=await store.get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -1016,7 +1024,8 @@ const server = Bun.serve({
 
     if(missionMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionMatch[1]);
+        const userId=decodeBoundedUserId(missionMatch[1]);
+       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeURIComponent(missionMatch[2]);
         const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
         const missionEvaluator=new OpenAIProvider();
@@ -1486,7 +1495,8 @@ const server = Bun.serve({
     const missionRetryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/steps\/([^/]+)\/retry$/);
     if(missionRetryMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionRetryMatch[1]);
+        const userId=decodeBoundedUserId(missionRetryMatch[1]);
+        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeURIComponent(missionRetryMatch[2]);
         const stepId=decodeURIComponent(missionRetryMatch[3]);
         const {getMissionStore}=await import("../../missions/src");
@@ -1518,7 +1528,8 @@ const server = Bun.serve({
     const missionRecoveryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/recover$/);
     if(missionRecoveryMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionRecoveryMatch[1]);
+        const userId=decodeBoundedUserId(missionRecoveryMatch[1]);
+        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeURIComponent(missionRecoveryMatch[2]);
         const {getMissionStore}=await import("../../missions/src");
         const mission=await getMissionStore().get(id,userId);
@@ -1555,7 +1566,8 @@ const server = Bun.serve({
     const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
     if(missionContinueMatch && request.method==="POST"){
       try{
-        const userId=decodeURIComponent(missionContinueMatch[1]);
+        const userId=decodeBoundedUserId(missionContinueMatch[1]);
+        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeURIComponent(missionContinueMatch[2]);
         const {getMissionStore}=await import("../../missions/src");
         const store=getMissionStore();
