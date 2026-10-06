@@ -69,11 +69,17 @@ async function shutdownApi() {
   shuttingDown = true;
   clearInterval(credentialCleanupTimer);
   try {
+    await stopAutomationRunner();
     shutdownRealtime();
     await server.stop(true);
   } catch (error) {
     logOperationalError("FROSH realtime/API server shutdown failed", error);
   } finally {
+    try {
+      await closeAutomationStore();
+    } catch (error) {
+      logOperationalError("FROSH automation store shutdown failed", error);
+    }
     try {
       await closeDeviceStore();
     } catch (error) {
