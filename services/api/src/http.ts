@@ -484,7 +484,7 @@ const server = Bun.serve({
         if (!webAuthenticated && deviceId !== messageReplyMatch[1]) {
           return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
         }
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
         const idempotencyKey =
