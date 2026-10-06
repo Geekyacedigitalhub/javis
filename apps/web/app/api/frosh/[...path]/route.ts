@@ -11,6 +11,7 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
 
   const headers = new Headers(request.headers);
   headers.delete("host");
+  headers.delete("authorization");
   headers.set("x-frosh-web-token", WEB_TOKEN);
 
   let body: string | undefined;
