@@ -128,7 +128,13 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
     } catch (error) {
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
-      reject(error instanceof Error ? error : new Error(String(error)));
+      pendingCommands.delete(requestId);
+      clearTimeout(timeout);
+      pending.resolve({
+        accepted: false,
+        message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
+        data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
+      });
       return;
     }
   });
@@ -168,7 +174,13 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
     } catch (error) {
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
-      reject(error instanceof Error ? error : new Error(String(error)));
+      pendingCommands.delete(requestId);
+      clearTimeout(timeout);
+      pending.resolve({
+        accepted: false,
+        message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
+        data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
+      });
       return;
     }
   });
@@ -196,7 +208,13 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
     } catch (error) {
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
-      reject(error instanceof Error ? error : new Error(String(error)));
+      pendingCommands.delete(requestId);
+      clearTimeout(timeout);
+      pending.resolve({
+        accepted: false,
+        message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
+        data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
+      });
       return;
     }
   });
