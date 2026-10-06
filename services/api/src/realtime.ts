@@ -125,7 +125,7 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
       pendingCommands.delete(requestId);
       pending.resolve(commandTimeoutResult);
     }, 15000);
-    pendingCommands.set(requestId, { deviceId, resolve, reject, timeout });
+    pendingCommands.set(requestId, { clientId: latestId, deviceId, resolve, reject, timeout });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
     } catch (error) {
@@ -153,7 +153,7 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
       pendingCommands.delete(requestId);
       pending.resolve(commandTimeoutResult);
     }, 15000);
-    pendingCommands.set(requestId, { deviceId, resolve, reject, timeout });
+    pendingCommands.set(requestId, { clientId: latestId, deviceId, resolve, reject, timeout });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
     } catch (error) {
