@@ -91,7 +91,7 @@ export class PostgresMissionStore implements FroshMissionStore {
     return rows[0]??null;
   }
   async renewLease(id:string,userId:string,leaseOwner:string){
-    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET lease_until=NOW()+INTERVAL '2 minutes',updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='running' AND lease_owner=$3 RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
+    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET lease_until=NOW()+INTERVAL '2 minutes',updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='running' AND lease_owner=$3 AND lease_until>NOW() RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
   }
   async releaseLeaseIfOwned(id:string,userId:string,leaseOwner:string){
