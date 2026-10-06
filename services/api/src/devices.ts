@@ -64,6 +64,10 @@ function normalizeDevice(row: DeviceRow): FroshDevice {
   };
 }
 
+export async function initializeDeviceStore() {
+  await ensureSchema();
+}
+
 export async function registerDevice(input: FroshDeviceRegistration) {
   const client = db();
   if (!client) {
