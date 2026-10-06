@@ -103,6 +103,23 @@ function isSafetyPausedMission(mission:FroshMission){
   return mission.status==="paused" && (mission.result??"").startsWith("Mission paused after restart because an approval outcome or approved action was not durably reconciled.");
 }
 
+const MAX_DEVICE_COMMAND_HTTP_BODY_BYTES = 64 * 1024;
+
+async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_HTTP_BODY_BYTES): Promise<unknown> {
+  const contentLength = request.headers.get("content-length");
+  if (contentLength !== null) {
+    const declaredLength = Number(contentLength);
+    if (!Number.isFinite(declaredLength) || declaredLength < 0 || declaredLength > maxBytes) {
+      throw new Error("request_body_too_large");
+    }
+  }
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > maxBytes) {
+    throw new Error("request_body_too_large");
+  }
+  return JSON.parse(raw);
+}
+
 const server = Bun.serve({
   port,
   websocket: {
