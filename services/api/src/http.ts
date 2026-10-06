@@ -169,7 +169,7 @@ const server = Bun.serve({
           clearTimeout(ws.data?.authTimeout);
           const realtimeClientId = addRealtimeClient(ws, parsed.deviceId, parsed.token);
           ws.data = { authenticated: true, authenticating: false, closed: false, malformedMessages: 0, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
-          ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
+          ws.send(JSON.stringify({ type: "connected", authenticated: true, timestamp: new Date().toISOString() }));
           return;
         }
         if (parsed?.type === "device.command.result") {
