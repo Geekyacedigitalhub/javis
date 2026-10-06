@@ -49,7 +49,11 @@ export function calculateNextRun(schedule: FroshAutomationSchedule, from = new D
   if (!validateAutomationSchedule(schedule)) throw new Error("Invalid automation schedule");
   const next = new Date(from);
   if (schedule.type === "once") return new Date(schedule.runAt).toISOString();
-  if (schedule.type === "interval") {\n    const nextMs = from.getTime() + schedule.minutes * 60000;\n    if (!Number.isFinite(nextMs)) throw new Error("Invalid automation interval");\n    return new Date(nextMs).toISOString();\n  }
+  if (schedule.type === "interval") {
+    const nextMs = from.getTime() + schedule.minutes * 60000;
+    if (!Number.isFinite(nextMs)) throw new Error("Invalid automation interval");
+    return new Date(nextMs).toISOString();
+  }
   if (schedule.type === "daily") {
     next.setHours(schedule.hour, schedule.minute, 0, 0);
     if (next.getTime() <= from.getTime()) next.setDate(next.getDate() + 1);
