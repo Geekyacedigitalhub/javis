@@ -1025,7 +1025,10 @@ const server = Bun.serve({
           },60000);
           let run;
           try {
-            run=await codingSessions.approveAndResume(mission.pendingApprovalId);
+            run=await codingSessions.approveAndResume(mission.pendingApprovalId,async()=>{
+              const current=await store.get(id,userId);
+              return Boolean(current && current.leaseOwner===executionOwner && current.leaseUntil && Date.parse(current.leaseUntil)>Date.now());
+            });
           } catch(error) {
             clearInterval(leaseRenewTimer);
             const continuationDurationMs=Date.now()-continuationStartedAt;
