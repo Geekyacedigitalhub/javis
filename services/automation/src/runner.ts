@@ -53,17 +53,25 @@ export function startAutomationRunner() {
         }
 
         if (claimed.schedule.type === "once") {
-          await store.update(claimed.id, userId, {
+          const finalized = await store.updateOwned(claimed.id, userId, owner, {
             status: "completed",
             lastRunAt: new Date().toISOString(),
             nextRunAt: undefined,
           });
+          if (!finalized) {
+            console.error("FROSH automation lease lost during finalization", claimed.id);
+            continue;
+          }
         } else {
           const next = calculateNextRun(claimed.schedule, new Date());
-          await store.update(claimed.id, userId, {
+          const finalized = await store.updateOwned(claimed.id, userId, owner, {
             lastRunAt: new Date().toISOString(),
             nextRunAt: next,
           });
+          if (!finalized) {
+            console.error("FROSH automation lease lost during finalization", claimed.id);
+            continue;
+          }
         }
       } catch (error) {
         const errorName = error instanceof Error && error.name ? error.name : "UnknownError";
