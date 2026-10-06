@@ -966,27 +966,66 @@ const server = Bun.serve({
           },30000);
           let run;
           try{
-            run=await codingSessions.start({
-              goal:step.title+"\nOverall objective: "+mission.goal,
-              messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}],
-              canPersist:async()=>{
-                const current=await store.get(id,userId);
-                return Boolean(current && current.leaseOwner===executionOwner && current.leaseUntil && Date.parse(current.leaseUntil)>Date.now());
-              },
-              onRunCreated:async(createdRun)=>{
-                activeRunId=createdRun.id;
-                const updated=await updateOwned({
-                  status:"running",
-                  steps:steps.map((item,i)=>i===index?{...item,runId:createdRun.id,updatedAt:new Date().toISOString()}:item),
-                  activeRunId:createdRun.id,
-                  pendingApprovalId:lastApproval,
-                  result:lastResult
-                });
-                steps=updated.steps;
+            try{
+              run=await codingSessions.start({
+                goal:step.title+"\nOverall objective: "+mission.goal,
+                messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}],
+                canPersist:async()=>{
+                  const current=await store.get(id,userId);
+                  return Boolean(current && current.leaseOwner===executionOwner && current.leaseUntil && Date.parse(current.leaseUntil)>Date.now());
+                },
+                onRunCreated:async(createdRun)=>{
+                  activeRunId=createdRun.id;
+                  const updated=await updateOwned({
+                    status:"running",
+                    steps:steps.map((item,i)=>i===index?{...item,runId:createdRun.id,updatedAt:new Date().toISOString()}:item),
+                    activeRunId:createdRun.id,
+                    pendingApprovalId:lastApproval,
+                    result:lastResult
+                  });
+                  steps=updated.steps;
+                }
+              });
+            }catch(error){
+              if(leaseLost){
+                await store.releaseLeaseIfOwned(id,userId,executionOwner);
+                return Response.json({error:"Mission execution lease was lost before an agent run could be established"},{status:409});
               }
-            });
+              if(!activeRunId){
+                const message=error instanceof Error?error.message:"Agent run creation failed";
+                steps=steps.map((item,i)=>i===index?{
+                  ...item,
+                  status:"failed",
+                  runId:undefined,
+                  result:message,
+                  updatedAt:new Date().toISOString()
+                }:item);
+                await updateOwned({
+                  status:"running",
+                  steps,
+                  activeRunId:lastRunId,
+                  pendingApprovalId:lastApproval,
+                  result:message
+                });
+                await emit("mission.step.failed","Agent run creation failed: "+message,step.id);
+              }
+              throw error;
+            }
           }finally{
             clearInterval(leaseRenewTimer);
+          }
+          if(!run){
+            return Response.json({error:"Agent run was not established for the mission step"},{status:500});
+          }
+          if(activeRunId!==run.id){
+            const message="Mission step agent-run binding is inconsistent; execution was stopped to prevent state corruption.";
+            if(!leaseLost){
+              steps=steps.map((item,i)=>i===index?{...item,status:"failed",runId:undefined,result:message,updatedAt:new Date().toISOString()}:item);
+              await updateOwned({status:"running",steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:message}).catch(()=>undefined);
+              await agentRunStore.update(run.id,{status:"failed",result:message,error:message}).catch(()=>undefined);
+            }
+            await store.releaseLeaseIfOwned(id,userId,executionOwner);
+            return Response.json({error:message},{status:409});
           }
           const runDurationMs=Date.now()-runStartedAt;
           if(leaseLost){
