@@ -8,13 +8,18 @@ type Client = {
 };
 
 const clients = new Map<string, Client>();
+const latestClientByDevice = new Map<string, string>();
 
 export function addRealtimeClient(socket: WebSocket, deviceId?: string) {
   const id = crypto.randomUUID();
   clients.set(id, { id, socket, deviceId });
+  if (deviceId) latestClientByDevice.set(deviceId, id);
 
   socket.addEventListener("close", () => {
     clients.delete(id);
+    if (deviceId && latestClientByDevice.get(deviceId) === id) {
+      latestClientByDevice.delete(deviceId);
+    }
     for (const [requestId, pending] of pendingCommands) {
       if (pending.deviceId !== deviceId) continue;
       pendingCommands.delete(requestId);
@@ -29,7 +34,11 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string) {
 }
 
 export function removeRealtimeClient(id: string) {
+  const client = clients.get(id);
   clients.delete(id);
+  if (client?.deviceId && latestClientByDevice.get(client.deviceId) === id) {
+    latestClientByDevice.delete(client.deviceId);
+  }
 }
 
 export function broadcast(event: FroshEvent) {
@@ -60,7 +69,8 @@ const commandTimeoutResult = {
 };
 
 export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
-  const client = [...clients.values()].find((item) => item.deviceId === deviceId);
+  const latestId = latestClientByDevice.get(deviceId);
+  const client = latestId ? clients.get(latestId) : undefined;
   if (!client || client.socket.readyState !== WebSocket.OPEN) {
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
@@ -96,7 +106,8 @@ export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: 
 }
 
 export function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
-  const client = [...clients.values()].find((item) => item.deviceId === deviceId);
+  const latestId = latestClientByDevice.get(deviceId);
+  const client = latestId ? clients.get(latestId) : undefined;
   if (!client || client.socket.readyState !== WebSocket.OPEN) {
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
@@ -124,7 +135,8 @@ export function requestMessageInbox(deviceId: string) {
 }
 
 export function replyToMessageCommand(deviceId: string, notificationId: string, message: string) {
-  const client = [...clients.values()].find((item) => item.deviceId === deviceId);
+  const latestId = latestClientByDevice.get(deviceId);
+  const client = latestId ? clients.get(latestId) : undefined;
   if (!client || client.socket.readyState !== WebSocket.OPEN) return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   const requestId = crypto.randomUUID();
   return new Promise<DeviceCommandResult>((resolve, reject) => {
