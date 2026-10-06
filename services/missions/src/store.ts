@@ -103,11 +103,16 @@ export class PostgresMissionStore implements FroshMissionStore {
   }
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
     const id=crypto.randomUUID();
-    const rows=await this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`INSERT INTO frosh_mission_events(id,mission_id,user_id,type,message,step_id,run_id,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb) RETURNING id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt"`,[id,input.missionId,input.userId,input.type,input.message,input.stepId??null,input.runId??null,input.metadata?JSON.stringify(input.metadata):null]);
+    const rows=await this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`INSERT INTO frosh_mission_events(id,mission_id,user_id,type,message,step_id,run_id,metadata)
+      SELECT $1,m.id,$3,$4,$5,$6,$7,$8::jsonb
+      FROM frosh_missions m
+      WHERE m.id=$2 AND m.user_id=$3
+      RETURNING id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt"`,[id,input.missionId,input.userId,input.type,input.message,input.stepId??null,input.runId??null,input.metadata?JSON.stringify(input.metadata):null]);
+    if(!rows[0]) throw new Error("Mission not found for event");
     return rows[0];
   }
   async listEvents(missionId:string,userId:string,limit=100){
-    return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),500)]);
+    return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),500)]);
   }
   async delete(id:string,userId:string){const result=await this.sql.unsafe("DELETE FROM frosh_missions WHERE id=$1 AND user_id=$2",[id,userId]);return result.count>0;}
   async deleteIfIdle(id:string,userId:string){const result=await this.sql.unsafe("DELETE FROM frosh_missions WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW())",[id,userId]);return result.count>0;}
@@ -133,6 +138,8 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async renewLease(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="running"||mission.leaseOwner!==leaseOwner||!mission.leaseUntil||Date.parse(mission.leaseUntil)<=Date.now())return null;const next={...mission,leaseUntil:new Date(Date.now()+120000).toISOString(),updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async releaseLeaseIfOwned(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.leaseOwner!==leaseOwner)return false;const next={...mission,leaseUntil:undefined,leaseOwner:undefined,updatedAt:new Date().toISOString()};this.items.set(id,next);return true;}
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
+    const mission=await this.get(input.missionId,input.userId);
+    if(!mission) throw new Error("Mission not found for event");
     const event={...input,id:crypto.randomUUID(),createdAt:new Date().toISOString()};
     const list=this.events.get(input.missionId)??[];
     list.unshift(event);
