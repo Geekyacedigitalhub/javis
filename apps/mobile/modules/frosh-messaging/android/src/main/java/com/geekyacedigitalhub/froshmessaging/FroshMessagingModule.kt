@@ -7,6 +7,16 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class FroshMessagingModule : Module() {
+  private companion object {
+    const val MAX_PHONE_NUMBER_LENGTH = 512
+    const val MAX_MESSAGE_LENGTH = 8000
+  }
+
+  private fun validText(value: String, maxLength: Int): Boolean =
+    value.isNotBlank() &&
+      value.length <= maxLength &&
+      !value.any { it.code < 0x20 || it.code == 0x7f }
+
   override fun definition() = ModuleDefinition {
     Name("FroshMessaging")
     Function("getPermissionStatus") {
@@ -21,8 +31,10 @@ class FroshMessagingModule : Module() {
     }
     Function("send") { phoneNumber: String, message: String ->
       val context = appContext.reactContext ?: return@Function mapOf("accepted" to false, "message" to "Android context is unavailable.")
+      if (!validText(phoneNumber, MAX_PHONE_NUMBER_LENGTH) || !validText(message, MAX_MESSAGE_LENGTH)) {
+        return@Function mapOf("accepted" to false, "message" to "Phone number or message is invalid or too large.")
+      }
       if (context.checkSelfPermission(Manifest.permission.SEND_SMS) != PackageManager.PERMISSION_GRANTED) return@Function mapOf("accepted" to false, "message" to "SMS permission is required.")
-      if (phoneNumber.isBlank() || message.isBlank()) return@Function mapOf("accepted" to false, "message" to "A phone number and message are required.")
       return@Function try {
         SmsManager.getDefault().sendTextMessage(phoneNumber, null, message, null, null)
         mapOf("accepted" to true, "message" to "Message sent.")
