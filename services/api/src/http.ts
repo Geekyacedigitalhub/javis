@@ -516,17 +516,20 @@ const server = Bun.serve({
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       if(action==="pause"){
         if(["completed","failed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be paused in its current state"},{status:409});
+        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         const updated=await store.update(id,userId,{status:"paused",leaseUntil:undefined,leaseOwner:undefined});
         await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
         return Response.json({mission:updated});
       }
       if(action==="resume"){
         if(mission.status!=="paused")return Response.json({error:"Only paused missions can be resumed"},{status:409});
-        const updated=await store.update(id,userId,{status:"running"});
+        if(isSafetyPausedMission(mission))return Response.json({error:"Mission is paused for safety review after an unreconciled approval/action outcome; review the mission before resuming it."},{status:409});
+        const updated=await store.update(id,userId,{status:"running",result:undefined});
         await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Mission resumed by user."});
         return Response.json({mission:updated});
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
+      if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
       const updated=await store.update(id,userId,{status:"cancelled",leaseUntil:undefined,pendingApprovalId:undefined});
       await store.addEvent({missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user."});
       return Response.json({mission:updated});
@@ -822,7 +825,17 @@ const server = Bun.serve({
             return Response.json({mission,budgetExceeded:true});
           }
           const index=steps.findIndex(step=>step.status==="pending" && (!step.nextRetryAt || Date.parse(step.nextRetryAt)<=Date.now()));
-          if(index<0)break;
+          if(index<0){
+            const hasPending=steps.some(step=>step.status==="pending");
+            const hasFailed=steps.some(step=>step.status==="failed");
+            const hasBlocked=steps.some(step=>step.status==="blocked");
+            if(!hasPending && !hasFailed && !hasBlocked && steps.length>0){
+              mission=await updateOwned({status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
+              await emit("mission.completed","Mission completed.");
+              return Response.json({mission});
+            }
+            break;
+          }
 
           const now=new Date().toISOString();
           steps=steps.map((step,i)=>i===index?{...step,status:"running",updatedAt:now}:step);
@@ -903,8 +916,10 @@ const server = Bun.serve({
               steps=steps.map(item=>item.id===step.id?{...item,status:"pending",retryCount:retries+1,nextRetryAt:retryAt,updatedAt:new Date().toISOString()}:item);
               await emit("mission.step.retry","Automatic retry scheduled in "+Math.ceil(retryDelayMs/1000)+"s: "+step.title,step.id,run.id,{retryCount:retries+1,retryAt});
             }else{
-              steps.push(createRecoveryStep(step.title,run.result));
-              await emit("mission.recovered","Retry limit reached; added recovery work for: "+step.title,step.id,run.id);
+              const recovery=createRecoveryStep(step.title,run.result);
+              const recoveryNow=new Date().toISOString();
+              steps=steps.map(item=>item.id===step.id?{...recovery,id:item.id,context:[item.context??"","Previous attempt failed and exhausted automatic retries.",run.result??""].filter(Boolean).join("\n\n").slice(-12000),createdAt:item.createdAt,updatedAt:recoveryNow}:item);
+              await emit("mission.recovered","Retry limit reached; converted the failed step into explicit recovery work: "+step.title,step.id,run.id);
             }
           }
           if(run.status==="waiting_approval") await emit("mission.approval.required","Approval required to continue: "+step.title,step.id,run.id);
