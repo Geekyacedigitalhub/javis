@@ -87,6 +87,9 @@ const server = Bun.serve({
       ws.data = { authenticated: false, deviceId: undefined as string | undefined, realtimeClientId: undefined as string | undefined, authTimeout };
       ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
     },
+    close(ws) {
+      clearTimeout(ws.data?.authTimeout);
+    },
     message(ws, message) {
       try {
         const parsed = JSON.parse(String(message));
