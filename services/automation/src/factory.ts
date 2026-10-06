@@ -11,17 +11,21 @@ export function getAutomationStore() {
   return store;
 }
 
+export async function closeAutomationStore(): Promise<void> {
+  const current = store;
+  store = undefined;
+  if (current instanceof PostgresAutomationStore) await current.close();
+}
+
 export function calculateNextRun(schedule: import("../../../packages/types/src/automation").FroshAutomationSchedule, from = new Date()) {
   const next = new Date(from);
   if (schedule.type === "once") return new Date(schedule.runAt).toISOString();
   if (schedule.type === "interval") return new Date(from.getTime() + schedule.minutes * 60000).toISOString();
-
   if (schedule.type === "daily") {
     next.setHours(schedule.hour, schedule.minute, 0, 0);
     if (next.getTime() <= from.getTime()) next.setDate(next.getDate() + 1);
     return next.toISOString();
   }
-
   next.setHours(schedule.hour, schedule.minute, 0, 0);
   let delta = (schedule.dayOfWeek - next.getDay() + 7) % 7;
   if (delta === 0 && next.getTime() <= from.getTime()) delta = 7;
