@@ -568,19 +568,46 @@ const server = Bun.serve({
         return Response.json({mission:updated});
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
+      let cancelledApprovalId:string|undefined;
+      let cancelledApprovalRunId:string|undefined;
       if(mission.pendingApprovalId){
         const approval=await approvalStore.get(mission.pendingApprovalId);
-        if(approval?.status==="pending"){
-          try{
-            await approvalStore.resolve(approval.id,"rejected");
-          }catch(error){
-            return Response.json({error:error instanceof Error?error.message:"Pending approval could not be safely cancelled"},{status:409});
+        if(approval){
+          cancelledApprovalId=approval.id;
+          cancelledApprovalRunId=approval.runId;
+          if(approval.status==="pending"){
+            try{
+              await approvalStore.resolve(approval.id,"rejected");
+            }catch(error){
+              return Response.json({error:error instanceof Error?error.message:"Pending approval could not be safely cancelled"},{status:409});
+            }
           }
         }
       }
       const updated=await store.cancelIfIdle(id,userId);
       if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
-      await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user.",metadata:{approvalCancelled:Boolean(mission.pendingApprovalId)}});
+      let approvalRunStopped=false;
+      if(cancelledApprovalId && cancelledApprovalRunId){
+        try{
+          const stopped=await agentRunStore.stopWaitingApproval(
+            cancelledApprovalRunId,
+            cancelledApprovalId,
+            "The mission was cancelled before the approval action could continue.",
+            "Mission cancelled by user",
+          );
+          approvalRunStopped=Boolean(stopped);
+          if(!stopped)console.warn("FROSH cancelled mission approval run was not waiting anymore",id,cancelledApprovalRunId);
+        }catch(error){
+          console.error("FROSH cancelled mission approval run cleanup failed",id,cancelledApprovalRunId,error);
+        }
+      }
+      await addMissionEventWithRetry(store, {
+        missionId:id,
+        userId,
+        type:"mission.cancelled",
+        message:"Mission cancelled by user.",
+        metadata:{approvalCancelled:Boolean(cancelledApprovalId),approvalRunStopped}
+      });
       return Response.json({mission:updated});
     }
 
