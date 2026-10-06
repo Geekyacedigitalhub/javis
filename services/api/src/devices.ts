@@ -438,6 +438,28 @@ export async function getDeviceCommandLedger(requestId: string) {
   return rows[0] ? normalizeCommandLedgerRow(rows[0]) : null;
 }
 
+export async function purgeExpiredDeviceCommandLedger() {
+  const configuredRetention = Number(process.env.FROSH_DEVICE_COMMAND_LEDGER_RETENTION_MS ?? 90 * 24 * 60 * 60 * 1000);
+  const retentionMs = Number.isFinite(configuredRetention)
+    ? Math.min(365 * 24 * 60 * 60 * 1000, Math.max(24 * 60 * 60 * 1000, Math.floor(configuredRetention)))
+    : 90 * 24 * 60 * 60 * 1000;
+  const cutoff = new Date(Date.now() - retentionMs);
+  const client = db();
+  if (!client) {
+    for (const [requestId, record] of memoryCommandLedger) {
+      if (new Date(record.updatedAt).getTime() < cutoff.getTime()) {
+        memoryCommandLedger.delete(requestId);
+      }
+    }
+    return;
+  }
+  await ensureSchema();
+  await client.unsafe(
+    `DELETE FROM frosh_device_command_ledger WHERE updated_at < $1`,
+    [cutoff.toISOString()],
+  );
+}
+
 export async function purgeExpiredDeviceCredentials() {
   const client = db();
   if (!client) {
