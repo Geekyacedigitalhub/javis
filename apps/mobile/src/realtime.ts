@@ -83,7 +83,7 @@ export function connectFroshRealtime(
     }));
     onStatus?.("open");
   };
-  socket.onmessage = (message) => {
+  socket.onmessage = async (message) => {
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
       if (parsed.type === "device.command") {
@@ -123,7 +123,7 @@ export function connectFroshRealtime(
           const result = await replyToUnifiedMessage(String(parsed.notificationId ?? ""), String(parsed.message ?? ""));
           await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         } catch (error) {
-          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to reply to the message." }));
+          await sendCommandResult(socket, parsed, { accepted: false, message: error instanceof Error ? error.message : "Unable to reply to the message." });
         }
         return;
       }
@@ -133,7 +133,7 @@ export function connectFroshRealtime(
           const result = await executePhoneAction({ action: "compose_message", value: String(parsed.recipient ?? ""), message: String(parsed.message ?? "") } as never);
           await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         } catch (error) {
-          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to send the message." }));
+          await sendCommandResult(socket, parsed, { accepted: false, message: error instanceof Error ? error.message : "Unable to send the message." });
         }
         return;
       }
@@ -144,7 +144,7 @@ export function connectFroshRealtime(
       }
       if (parsed.type === "device.command" && parsed.command === "contacts_search") {
         const contacts = searchContacts(String(parsed.query ?? ""));
-        socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: true, message: contacts.length ? "Contact search completed." : "No matching contacts found.", data: contacts }));
+        await sendCommandResult(socket, parsed, { accepted: true, message: contacts.length ? "Contact search completed." : "No matching contacts found.", data: contacts });
         return;
       }
       if (parsed.type === "device.command" && parsed.command === "media_state") {
@@ -165,24 +165,12 @@ export function connectFroshRealtime(
       }
       if (parsed.type === "device.command" && parsed.command === "media_control") {
         const result = await executeMediaAction({ action: String(parsed.action ?? "play") } as any);
-        socket.send(JSON.stringify({
-          type: "device.command.result",
-          requestId: parsed.requestId,
-          deviceId: parsed.deviceId,
-          accepted: result.accepted,
-          message: result.message
-        }));
+        await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         return;
       }
       if (parsed.type === "device.command" && parsed.command === "open_app") {
         const result = launchAppByName(String(parsed.appName ?? ""));
-        socket.send(JSON.stringify({
-          type: "device.command.result",
-          requestId: parsed.requestId,
-          deviceId: parsed.deviceId,
-          accepted: result.accepted,
-          message: result.message
-        }));
+        await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         return;
       }
       if (parsed.type === "connected") {
