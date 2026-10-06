@@ -504,7 +504,7 @@ const server = Bun.serve({
         if (!webAuthenticated && deviceId !== commandMatch[1]) {
           return Response.json({ error: "Device credential cannot command another device." }, { status: 403 });
         }
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const command = typeof body?.command === "string" ? body.command : "";
         const allowed = ["open_dialer", "media_control", "media_state", "open_app", "contacts_search", "message_inbox"];
         if (!allowed.includes(command)) {
