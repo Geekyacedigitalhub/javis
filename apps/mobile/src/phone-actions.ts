@@ -5,6 +5,13 @@ import { openCallDialer, placeDirectCall } from "../modules/frosh-calls/src";
 import { searchContacts } from "../modules/frosh-contacts/src";
 import { sendSms } from "../modules/frosh-messaging/src";
 
+const MAX_PHONE_VALUE_LENGTH = 512;
+const MAX_MESSAGE_LENGTH = 8000;
+
+function validInput(value: string | undefined, maxLength: number) {
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\\u0000-\\u001f\\u007f]/.test(value);
+}
+
 export async function executePhoneAction(
   request: FroshPhoneActionRequest,
 ): Promise<FroshPhoneActionResult> {
@@ -18,7 +25,7 @@ export async function executePhoneAction(
   }
 
   if (request.action === "call_number") {
-    if (!request.value) {
+    if (!validInput(request.value, MAX_PHONE_VALUE_LENGTH)) {
       return { action: request.action, accepted: false, message: "A phone number is required." };
     }
     const matches = searchContacts(request.value);
@@ -28,7 +35,7 @@ export async function executePhoneAction(
   }
 
   if (request.action === "send_message") {
-    if (!request.value || !request.message) return { action: request.action, accepted: false, message: "A phone number and message are required." };
+    if (!validInput(request.value, MAX_PHONE_VALUE_LENGTH) || !validInput(request.message, MAX_MESSAGE_LENGTH)) return { action: request.action, accepted: false, message: "A phone number and message are required." };
     const matches = searchContacts(request.value);
     const number = matches.length === 1 && matches[0].phones.length === 1 ? matches[0].phones[0].number : request.value;
     const result = sendSms(number, request.message);
@@ -36,7 +43,7 @@ export async function executePhoneAction(
   }
 
   if (request.action === "compose_message") {
-    if (!request.value) {
+    if (!validInput(request.value, MAX_PHONE_VALUE_LENGTH)) {
       return { action: request.action, accepted: false, message: "A phone number is required." };
     }
     await Linking.openURL(`sms:${request.value}`);
@@ -44,7 +51,7 @@ export async function executePhoneAction(
   }
 
   if (request.action === "open_app") {
-    if (!request.packageName) {
+    if (!validInput(request.packageName, 255)) {
       return { action: request.action, accepted: false, message: "An Android package name is required." };
     }
     const result = launchApp(request.packageName);
