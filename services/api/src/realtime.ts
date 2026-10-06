@@ -15,10 +15,14 @@ const latestClientByDevice = new Map<string, string>();
 
 export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceToken?: string) {
   const id = crypto.randomUUID();
+  const configuredInterval = Number(process.env.FROSH_DEVICE_AUTH_CHECK_INTERVAL_MS ?? 5000);
+  const authCheckInterval = Number.isFinite(configuredInterval)
+    ? Math.min(60000, Math.max(1000, Math.floor(configuredInterval)))
+    : 5000;
   const authCheck = deviceId && deviceToken
     ? setInterval(() => {
         if (!authenticateDevice(deviceId, deviceToken)) socket.close();
-      }, 30000)
+      }, authCheckInterval)
     : undefined;
   clients.set(id, { id, socket, deviceId, deviceToken, authCheck });
   if (deviceId) latestClientByDevice.set(deviceId, id);
