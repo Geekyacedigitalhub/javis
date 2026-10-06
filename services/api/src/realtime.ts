@@ -273,8 +273,6 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
 
 export async function handleDeviceCommandResult(clientId: string, message: FroshDeviceCommand & { type: "device.command.result" }) {
   if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
-  const pending = pendingCommands.get(message.requestId);
-  if (!pending) return;
   const client = clients.get(clientId);
   if (
     !client ||
@@ -282,7 +280,14 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
     client.socket.readyState !== WebSocket.OPEN ||
     latestClientByDevice.get(message.deviceId) !== clientId
   ) return;
-  if (pending.clientId !== clientId || pending.deviceId !== message.deviceId || pending.command !== message.command) return;
+
+  const pending = pendingCommands.get(message.requestId);
+  const ledger = await getDeviceCommandLedger(message.requestId).catch(() => null);
+  if (!ledger || ledger.deviceId !== message.deviceId || ledger.command !== message.command) return;
+  if (ledger.state === "completed") return;
+
+  if (pending && (pending.clientId !== clientId || pending.deviceId !== message.deviceId || pending.command !== message.command)) return;
+
   const result = {
     accepted: message.accepted,
     message: message.message,
@@ -290,18 +295,17 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
   };
   const stored = await completeDeviceCommandLedger(message.requestId, result).catch(() => false);
   if (!stored) {
-    const ledger = await getDeviceCommandLedger(message.requestId).catch(() => null);
-    if (ledger?.state === "completed") {
-      pendingCommands.delete(message.requestId);
-      clearTimeout(pending.timeout);
+    const current = await getDeviceCommandLedger(message.requestId).catch(() => null);
+    if (!pending) return;
+    pendingCommands.delete(message.requestId);
+    clearTimeout(pending.timeout);
+    if (current?.state === "completed") {
       pending.resolve({
-        accepted: ledger.accepted === true,
-        message: ledger.message ?? "The command result was recovered from durable storage.",
-        data: ledger.data,
+        accepted: current.accepted === true,
+        message: current.message ?? "The command result was recovered from durable storage.",
+        data: current.data,
       });
     } else {
-      pendingCommands.delete(message.requestId);
-      clearTimeout(pending.timeout);
       pending.resolve({
         accepted: false,
         message: "The Android command result could not be durably recorded. The outcome is unknown; do not automatically retry a side-effecting action.",
@@ -310,11 +314,12 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
     }
     return;
   }
+
+  if (!pending) return;
   pendingCommands.delete(message.requestId);
   clearTimeout(pending.timeout);
   pending.resolve(result);
 }
-
 export async function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms", idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
