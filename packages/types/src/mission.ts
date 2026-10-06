@@ -79,6 +79,9 @@ export interface FroshMissionStore {
   recoverFailedIfIdle(id: string, userId: string, leaseOwner: string, steps: FroshMission["steps"]): Promise<FroshMission | null>;
   updatePriorityIfIdle(id: string, userId: string, priority: FroshMissionPriority): Promise<FroshMission | null>;
   updateBudgetProfileIfIdle(id: string, userId: string, budgetProfile: FroshMissionBudgetProfile): Promise<FroshMission | null>;
+  pauseIfIdle(id: string, userId: string): Promise<FroshMission | null>;
+  resumeIfPaused(id: string, userId: string): Promise<FroshMission | null>;
+  cancelIfIdle(id: string, userId: string): Promise<FroshMission | null>;
   renewLease(id: string, userId: string, leaseOwner: string): Promise<FroshMission | null>;
   releaseLeaseIfOwned(id: string, userId: string, leaseOwner: string): Promise<boolean>;
   addEvent(input: Omit<FroshMissionEvent, "id" | "createdAt">): Promise<FroshMissionEvent>;
