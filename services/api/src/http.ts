@@ -1026,7 +1026,11 @@ const server = Bun.serve({
 
     if(missionMatch && request.method==="GET"){
       const {getMissionStore}=await import("../../missions/src");
-      const mission=await getMissionStore().get(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
+      const userId = decodeBoundedUserId(missionMatch[1]);
+      const id = decodeBoundedResourceId(missionMatch[2], "mission ID");
+      if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
+      if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
+      const mission=await getMissionStore().get(id,userId);
       return mission?Response.json({mission}):Response.json({error:"Mission not found"},{status:404});
     }
 
@@ -1562,8 +1566,10 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionRetryMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionRetryMatch[2]);
-        const stepId=decodeURIComponent(missionRetryMatch[3]);
+        const id=decodeBoundedResourceId(missionRetryMatch[2], "mission ID");
+        if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
+        const stepId=decodeBoundedResourceId(missionRetryMatch[3], "step ID");
+        if (!stepId) return Response.json({error:"Invalid step ID"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
         const store=getMissionStore();
         const mission=await store.get(id,userId);
@@ -1595,7 +1601,8 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionRecoveryMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionRecoveryMatch[2]);
+        const id=decodeBoundedResourceId(missionRecoveryMatch[2], "mission ID");
+        if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -1633,7 +1640,8 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionContinueMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionContinueMatch[2]);
+        const id=decodeBoundedResourceId(missionContinueMatch[2], "mission ID");
+        if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
         const store=getMissionStore();
         const mission=await store.get(id,userId);
