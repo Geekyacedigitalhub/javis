@@ -7,7 +7,7 @@ const USER_ID = process.env.FROSH_USER_ID ?? "default-user";
 async function handler(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   const relativePath = path.join("/");
-  const userScopedMatch = relativePath.match(/^(v1\\/(?:memory|automations|missions)\\/users\\/)([^/]+)(.*)$/);
+  const userScopedMatch = relativePath.match(/^(v1\/(?:memory|automations|missions)\/users\/)([^/]+)(.*)$/);
   const effectivePath = userScopedMatch
     ? userScopedMatch[1] + encodeURIComponent(USER_ID) + userScopedMatch[3]
     : relativePath;
