@@ -504,7 +504,7 @@ const server = Bun.serve({
         if (!name) {
           return Response.json({ error: "Device name cannot be empty." }, { status: 400 });
         }
-        const existingDevice = await listDevices().find(
+        const existingDevice = (await listDevices()).find(
           (item) => item.name === name && item.platform === platform,
         );
         if (existingDevice && !webAuthenticated) {
@@ -516,6 +516,7 @@ const server = Bun.serve({
         const device = await registerDevice({
           name,
           platform,
+          allowExisting: webAuthenticated,
           capabilities: body.capabilities.filter(
             (capability: unknown): capability is string =>
               typeof capability === "string",
