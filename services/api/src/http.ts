@@ -530,7 +530,7 @@ const server = Bun.serve({
         if(isSafetyPausedMission(mission))return Response.json({error:"Mission is paused for safety review after an unreconciled approval/action outcome; review the mission before resuming it."},{status:409});
         const updated=await store.resumeIfPaused(id,userId);
         if(!updated)return Response.json({error:"Mission is no longer paused; refresh and try again"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Mission resumed by user."});
+        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:updated.status==="waiting_approval"?"Mission resumed into its pending approval state.":"Mission resumed by user.",metadata:{resumedStatus:updated.status}});
         return Response.json({mission:updated});
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
@@ -656,7 +656,7 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         const updated=await store.updatePriorityIfIdle(id,userId,priority);
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Priority changed to "+priority+"."});
+        await store.addEvent({missionId:id,userId,type:"mission.updated",message:"Priority changed to "+priority+".",metadata:{field:"priority",value:priority}});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Priority update failed"},{status:400});}
     }
@@ -675,7 +675,7 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         const updated=await store.updateBudgetProfileIfIdle(id,userId,budgetProfile);
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Budget profile changed to "+budgetProfile+"."});
+        await store.addEvent({missionId:id,userId,type:"mission.updated",message:"Budget profile changed to "+budgetProfile+".",metadata:{field:"budgetProfile",value:budgetProfile}});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Budget profile update failed"},{status:400});}
     }
