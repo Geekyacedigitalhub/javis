@@ -188,6 +188,12 @@ export async function issueDeviceCredential(deviceId: string) {
       [deviceId, await hashToken(token), new Date(expiresAt).toISOString()],
     );
   }
+
+  // Credential replacement invalidates every existing realtime session immediately.
+  // Do this after durable credential replacement so no old session remains trusted.
+  const { disconnectDeviceClients } = await import("./realtime");
+  disconnectDeviceClients(deviceId);
+
   return { deviceId, token, expiresAt: new Date(expiresAt).toISOString() };
 }
 
