@@ -51,10 +51,13 @@ async function loadCommandRecord(requestId: string): Promise<CommandRecord | nul
 }
 
 async function saveCommandRecord(requestId: string, record: CommandRecord) {
-  commandRecords.set(requestId, record);
   try {
     await SecureStore.setItemAsync(commandRecordPrefix + requestId, JSON.stringify(record));
-  } catch {}
+    commandRecords.set(requestId, record);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function sendCommandResult(
@@ -172,7 +175,17 @@ export function connectFroshRealtime(
             releaseCommand();
             return;
           }
-          await saveCommandRecord(requestId, { state: "started", command: commandType, createdAt: Date.now() });
+          const startedPersisted = await saveCommandRecord(requestId, { state: "started", command: commandType, createdAt: Date.now() });
+          if (!startedPersisted) {
+            await sendCommandResult(socket, parsed, {
+              accepted: false,
+              message: "The Android device could not durably record this command before execution. The action was not started; do not retry automatically until storage is healthy.",
+              data: { outcome: "unknown", retryable: false, reason: "command_record_persist_failed" },
+            }).catch(() => undefined);
+            inFlightCommands.delete(requestId);
+            releaseCommand();
+            return;
+          }
       }
 
       try {
