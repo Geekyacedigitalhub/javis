@@ -461,8 +461,12 @@ const server = Bun.serve({
         const body = await request.json();
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
+        const idempotencyKey =
+          (typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : "") ||
+          request.headers.get("Idempotency-Key")?.trim() ||
+          undefined;
         const { replyToMessageCommand } = await import("./realtime");
-        return Response.json(await replyToMessageCommand(messagesMatch?.[1] ?? messageReplyMatch[1], decodeURIComponent(messageReplyMatch[2]), message));
+        return Response.json(await replyToMessageCommand(messagesMatch?.[1] ?? messageReplyMatch[1], decodeURIComponent(messageReplyMatch[2]), message, idempotencyKey));
       } catch (error) {
         return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message reply failed" }, { status: 400 });
       }
@@ -495,10 +499,15 @@ const server = Bun.serve({
         if (command === "contacts_search" && !value?.trim()) {
           return Response.json({ error: "query is required." }, { status: 400 });
         }
+        const idempotencyKey =
+          (typeof body?.idempotencyKey === "string" ? body.idempotencyKey.trim() : "") ||
+          request.headers.get("Idempotency-Key")?.trim() ||
+          undefined;
         const result = await sendDeviceCommand(
           commandMatch[1],
           command as "open_dialer" | "media_control" | "media_state" | "open_app" | "contacts_search" | "message_inbox",
           value,
+          idempotencyKey,
         );
         return Response.json(result);
       } catch (error) {
