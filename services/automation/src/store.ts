@@ -10,6 +10,7 @@ export class PostgresAutomationStore implements FroshAutomationStore {
     const rows = await this.sql.unsafe<FroshAutomation[]>(
       `SELECT id, user_id AS "userId", name, prompt, schedule, status,
         next_run_at AS "nextRunAt", last_run_at AS "lastRunAt",
+        lease_owner AS "leaseOwner", lease_until AS "leaseUntil",
         created_at AS "createdAt", updated_at AS "updatedAt"
        FROM frosh_automations WHERE user_id=$1 ORDER BY next_run_at NULLS LAST, created_at DESC`,
       [userId]
@@ -36,6 +37,7 @@ export class PostgresAutomationStore implements FroshAutomationStore {
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
        RETURNING id,user_id AS "userId",name,prompt,schedule,status,
        next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",
+       lease_owner AS "leaseOwner", lease_until AS "leaseUntil",
        created_at AS "createdAt",updated_at AS "updatedAt"`,
       [id,input.userId,input.name,input.prompt,JSON.stringify(input.schedule),input.status,input.nextRunAt ?? null,input.lastRunAt ?? null]
     );
@@ -53,6 +55,41 @@ export class PostgresAutomationStore implements FroshAutomationStore {
       [id,userId,next.name,next.prompt,JSON.stringify(next.schedule),next.status,next.nextRunAt ?? null,next.lastRunAt ?? null]
     );
     return rows[0];
+  }
+
+  async claimDue(id: string, userId: string, owner: string, leaseMs: number) {
+    const rows = await this.sql.unsafe<FroshAutomation[]>(
+      `UPDATE frosh_automations
+       SET lease_owner=$3, lease_until=NOW() + ($4 * INTERVAL '1 millisecond'), updated_at=NOW()
+       WHERE id=$1 AND user_id=$2 AND status='active'
+         AND next_run_at IS NOT NULL AND next_run_at <= NOW()
+         AND (lease_until IS NULL OR lease_until <= NOW())
+       RETURNING id,user_id AS "userId",name,prompt,schedule,status,
+       next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",
+       lease_owner AS "leaseOwner",lease_until AS "leaseUntil",
+       created_at AS "createdAt",updated_at AS "updatedAt"`,
+      [id,userId,owner,leaseMs]
+    );
+    return rows[0] ?? null;
+  }
+
+  async renewLease(id: string, userId: string, owner: string, leaseMs: number) {
+    const result = await this.sql.unsafe(
+      `UPDATE frosh_automations
+       SET lease_until=NOW() + ($4 * INTERVAL '1 millisecond'), updated_at=NOW()
+       WHERE id=$1 AND user_id=$2 AND lease_owner=$3 AND lease_until > NOW()`,
+      [id,userId,owner,leaseMs]
+    );
+    return result.count > 0;
+  }
+
+  async releaseLease(id: string, userId: string, owner: string) {
+    const result = await this.sql.unsafe(
+      `UPDATE frosh_automations SET lease_owner=NULL, lease_until=NULL, updated_at=NOW()
+       WHERE id=$1 AND user_id=$2 AND lease_owner=$3`,
+      [id,userId,owner]
+    );
+    return result.count > 0;
   }
 
   async delete(id: string, userId: string) {
@@ -74,6 +111,23 @@ export class InMemoryAutomationStore implements FroshAutomationStore {
   async update(id:string,userId:string,patch:Partial<Pick<FroshAutomation,"name"|"prompt"|"schedule"|"status"|"nextRunAt"|"lastRunAt">>){
     const item=await this.get(id,userId); if(!item) throw new Error("Automation not found");
     const next={...item,...patch,updatedAt:new Date().toISOString()}; this.items.set(id,next); return next;
+  }
+  async claimDue(id:string,userId:string,owner:string,leaseMs:number){
+    const item=await this.get(id,userId);
+    if(!item || item.status!=="active" || !item.nextRunAt || Date.parse(item.nextRunAt)>Date.now()) return null;
+    if(item.leaseUntil && Date.parse(item.leaseUntil)>Date.now()) return null;
+    const next={...item,leaseOwner:owner,leaseUntil:new Date(Date.now()+leaseMs).toISOString(),updatedAt:new Date().toISOString()};
+    this.items.set(id,next); return next;
+  }
+  async renewLease(id:string,userId:string,owner:string,leaseMs:number){
+    const item=await this.get(id,userId);
+    if(!item || item.leaseOwner!==owner || !item.leaseUntil || Date.parse(item.leaseUntil)<=Date.now()) return false;
+    this.items.set(id,{...item,leaseUntil:new Date(Date.now()+leaseMs).toISOString(),updatedAt:new Date().toISOString()}); return true;
+  }
+  async releaseLease(id:string,userId:string,owner:string){
+    const item=await this.get(id,userId);
+    if(!item || item.leaseOwner!==owner) return false;
+    this.items.set(id,{...item,leaseOwner:undefined,leaseUntil:undefined,updatedAt:new Date().toISOString()}); return true;
   }
   async delete(id:string,userId:string){ const item=await this.get(id,userId); if(!item)return false; this.items.delete(id); return true; }
 }
