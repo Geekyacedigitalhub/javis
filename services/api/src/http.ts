@@ -724,7 +724,9 @@ const server = Bun.serve({
     const automationUsers = url.pathname.match(/^\/v1\/automations\/users\/([^/]+)$/);
     if (automationUsers && request.method === "GET") {
       const { getAutomationStore } = await import("../../automation/src");
-      return Response.json({ automations: await getAutomationStore().list(decodeURIComponent(automationUsers[1])) });
+      const userId = decodeBoundedUserId(automationUsers[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      return Response.json({ automations: await getAutomationStore().list(userId) });
     }
 
     if (automationUsers && request.method === "POST") {
@@ -736,6 +738,9 @@ const server = Bun.serve({
         const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
         const schedule = body?.schedule;
         if (!name || !prompt || !schedule?.type) return Response.json({ error: "name, prompt and schedule are required" }, { status: 400 });
+        if (name.length > 120 || new TextEncoder().encode(name).byteLength > 512) return Response.json({ error: "Automation name is too large." }, { status: 400 });
+        if (prompt.length > 8000 || new TextEncoder().encode(prompt).byteLength > 32 * 1024) return Response.json({ error: "Automation prompt is too large." }, { status: 400 });
+        if (new TextEncoder().encode(JSON.stringify(schedule)).byteLength > 8 * 1024) return Response.json({ error: "Automation schedule is too large." }, { status: 400 });
 
         const { calculateNextRun, getAutomationStore } = await import("../../automation/src");
         const valid =
@@ -761,12 +766,25 @@ const server = Bun.serve({
         const id = decodeURIComponent(automationMatch[2]);
         const body = await parseBoundedJson(request);
         const patch: Record<string, unknown> = {};
+        if (body && typeof body === "object" && !Array.isArray(body) && Object.keys(body as Record<string, unknown>).length > 10) return Response.json({ error: "Automation update contains too many fields." }, { status: 400 });
         if (typeof body?.name === "string") patch.name = body.name.trim();
         if (typeof body?.prompt === "string") patch.prompt = body.prompt.trim();
+        if (typeof patch.name === "string" && (patch.name.length > 120 || new TextEncoder().encode(patch.name).byteLength > 512)) return Response.json({ error: "Automation name is too large." }, { status: 400 });
+        if (typeof patch.prompt === "string" && (patch.prompt.length > 8000 || new TextEncoder().encode(patch.prompt).byteLength > 32 * 1024)) return Response.json({ error: "Automation prompt is too large." }, { status: 400 });
         if (body?.status === "active" || body?.status === "paused" || body?.status === "completed") patch.status = body.status;
         if (body?.schedule?.type) patch.schedule = body.schedule;
         const { calculateNextRun, getAutomationStore } = await import("../../automation/src");
-        if (patch.schedule) patch.nextRunAt = calculateNextRun(patch.schedule as any);
+        if (patch.schedule) {
+          if (new TextEncoder().encode(JSON.stringify(patch.schedule)).byteLength > 8 * 1024) return Response.json({ error: "Automation schedule is too large." }, { status: 400 });
+          const schedule = patch.schedule as Record<string, unknown>;
+          const valid =
+            schedule.type === "once" && typeof schedule.runAt === "string" ||
+            schedule.type === "daily" && Number.isInteger(schedule.hour) && Number.isInteger(schedule.minute) ||
+            schedule.type === "weekly" && Number.isInteger(schedule.dayOfWeek) && Number.isInteger(schedule.hour) && Number.isInteger(schedule.minute) ||
+            schedule.type === "interval" && Number.isInteger(schedule.minutes) && Number(schedule.minutes) >= 60;
+          if (!valid) return Response.json({ error: "Invalid schedule. Interval must be at least 60 minutes." }, { status: 400 });
+          patch.nextRunAt = calculateNextRun(patch.schedule as any);
+        }
         const automation = await getAutomationStore().update(id, userId, patch as any);
         return Response.json({ automation });
       } catch (error) {
