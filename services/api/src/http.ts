@@ -350,7 +350,7 @@ const server = Bun.serve({
                 }
               }
             } catch (error) {
-              send({ type: "error", message: error instanceof Error ? error.message : "Streaming request failed" });
+              send({ type: "error", message: "Streaming request failed" });
             } finally {
               controller.close();
             }
@@ -365,7 +365,7 @@ const server = Bun.serve({
           }
         });
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Streaming request failed" }, { status: 500 });
+        return Response.json({ error: "Streaming request failed" }, { status: 500 });
       }
     }
 
@@ -387,7 +387,7 @@ const server = Bun.serve({
         }
         return Response.json(await postChat(chatBody));
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Request failed";
+        const message = "Request failed";
         return Response.json(
           { error: message },
           { status: message === "message is required" ? 400 : 500 },
@@ -423,7 +423,7 @@ const server = Bun.serve({
         const candidate = await resolveUserMemoryCandidate(userId, candidateId, status);
         return Response.json(candidate);
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Memory candidate update failed" }, { status: 400 });
+        return Response.json({ error: "Memory candidate update failed" }, { status: 400 });
       }
     }
 
@@ -449,7 +449,7 @@ const server = Bun.serve({
         const { requestMessageInbox } = await import("./realtime");
         return Response.json(await requestMessageInbox(messagesMatch[1]));
       } catch (error) {
-        return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message inbox failed" }, { status: 400 });
+        return Response.json({ accepted: false, message: "Message inbox failed" }, { status: 400 });
       }
     }
 
@@ -467,7 +467,7 @@ const server = Bun.serve({
         const { suggestMessageReplies } = await import("../../ai/src/message-replies");
         return Response.json({ suggestions: await suggestMessageReplies({ provider, sender, message }) });
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Reply suggestion failed" }, { status: 400 });
+        return Response.json({ error: "Reply suggestion failed" }, { status: 400 });
       }
     }
 
@@ -503,7 +503,7 @@ const server = Bun.serve({
           highlights: insights.slice(0, 30)
         });
       } catch (error) {
-        return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message intelligence failed" }, { status: 400 });
+        return Response.json({ accepted: false, message: "Message intelligence failed" }, { status: 400 });
       }
     }
 
@@ -523,7 +523,7 @@ const server = Bun.serve({
         const { replyToMessageCommand } = await import("./realtime");
         return Response.json(await replyToMessageCommand(messagesMatch?.[1] ?? messageReplyMatch[1], decodeURIComponent(messageReplyMatch[2]), message, idempotencyKey));
       } catch (error) {
-        return Response.json({ accepted: false, message: error instanceof Error ? error.message : "Message reply failed" }, { status: 400 });
+        return Response.json({ accepted: false, message: "Message reply failed" }, { status: 400 });
       }
     }
 
@@ -566,7 +566,7 @@ const server = Bun.serve({
         );
         return Response.json(result);
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Device command failed" }, { status: 400 });
+        return Response.json({ error: "Device command failed" }, { status: 400 });
       }
     }
 
@@ -627,7 +627,7 @@ const server = Bun.serve({
         const credential = await issueDeviceCredential(device.id);
         return Response.json({ device, credential }, { status: 201 });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Device registration failed";
+        const message = "Device registration failed";
         const code = typeof error === "object" && error !== null && "code" in error
           ? String((error as { code?: unknown }).code ?? "")
           : "";
@@ -665,7 +665,7 @@ const server = Bun.serve({
           ? Response.json(device)
           : Response.json({ error: "Device not found" }, { status: 404 });
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Capability update failed" }, { status: 400 });
+        return Response.json({ error: "Capability update failed" }, { status: 400 });
       }
     }
 
@@ -720,7 +720,7 @@ const server = Bun.serve({
         const automation = await getAutomationStore().create({ userId, name, prompt, schedule, status: "active", nextRunAt });
         return Response.json({ automation }, { status: 201 });
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Automation creation failed" }, { status: 400 });
+        return Response.json({ error: "Automation creation failed" }, { status: 400 });
       }
     }
 
@@ -740,7 +740,7 @@ const server = Bun.serve({
         const automation = await getAutomationStore().update(id, userId, patch as any);
         return Response.json({ automation });
       } catch (error) {
-        return Response.json({ error: error instanceof Error ? error.message : "Automation update failed" }, { status: 400 });
+        return Response.json({ error: "Automation update failed" }, { status: 400 });
       }
     }
 
@@ -766,7 +766,7 @@ const server = Bun.serve({
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
       await getMissionStore().addEvent({missionId:mission.id,userId,type:"mission.created",message:"Mission created: "+goal});
         return Response.json({mission},{status:201});
-      } catch(error){return Response.json({error:error instanceof Error?error.message:"Mission creation failed"},{status:400});}
+      } catch(error){return Response.json({error:"Mission creation failed"},{status:400});}
     }
 
     const missionControlMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/(pause|resume|cancel)$/);
@@ -956,7 +956,7 @@ const server = Bun.serve({
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.updated",message:"Priority changed to "+priority+".",metadata:{field:"priority",value:priority}});
         return Response.json({mission:updated});
-      }catch(error){return Response.json({error:error instanceof Error?error.message:"Priority update failed"},{status:400});}
+      }catch(error){return Response.json({error:"Priority update failed"},{status:400});}
     }
 
     const missionBudgetProfileMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/budget-profile$/);
@@ -975,7 +975,7 @@ const server = Bun.serve({
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.updated",message:"Budget profile changed to "+budgetProfile+".",metadata:{field:"budgetProfile",value:budgetProfile}});
         return Response.json({mission:updated});
-      }catch(error){return Response.json({error:error instanceof Error?error.message:"Budget profile update failed"},{status:400});}
+      }catch(error){return Response.json({error:"Budget profile update failed"},{status:400});}
     }
 
     if(missionMatch && request.method==="DELETE"){
@@ -1308,7 +1308,7 @@ const server = Bun.serve({
                 return Response.json({error:"Mission execution lease was lost before an agent run could be established"},{status:409});
               }
               if(!activeRunId){
-                const message=error instanceof Error?error.message:"Agent run creation failed";
+                const message="Agent run creation failed";
                 steps=steps.map((item,i)=>i===index?{
                   ...item,
                   status:"failed",
@@ -1456,7 +1456,7 @@ const server = Bun.serve({
             await updateOwned({leaseUntil:undefined,leaseOwner:undefined});
           }
         }catch{}
-        return Response.json({error:error instanceof Error?error.message:"Mission execution failed"},{status:400});
+        return Response.json({error:"Mission execution failed"},{status:400});
       }
     }
     const missionRetryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/steps\/([^/]+)\/retry$/);
@@ -1488,7 +1488,7 @@ const server = Bun.serve({
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
         await store.releaseLeaseIfOwned(id,userId,executionOwner);
         return Response.json({mission:await store.get(id,userId)});
-      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission retry failed"},{status:400});}
+      }catch(error){return Response.json({error:"Mission retry failed"},{status:400});}
     }
 
     const missionRecoveryMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/recover$/);
@@ -1525,7 +1525,7 @@ const server = Bun.serve({
         }
         const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
         return next;
-      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission recovery failed"},{status:400});}
+      }catch(error){return Response.json({error:"Mission recovery failed"},{status:400});}
     }
 
     const missionContinueMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/continue$/);
@@ -1604,9 +1604,9 @@ const server = Bun.serve({
               leaseOwner:undefined,
               executionDurationMs,
               toolCallsUsed:existingToolCount,
-              result:error instanceof Error?error.message:"Mission approval continuation failed"
+              result:"Mission approval continuation failed"
             });
-            await emit("mission.failed","Approval continuation failed: "+(error instanceof Error?error.message:"Unknown error"),mission.activeRunId,{executionDurationMs});
+            await emit("mission.failed","Approval continuation failed: "+("Unknown error"),mission.activeRunId,{executionDurationMs});
             return Response.json({mission:failed},{status:500});
           }
 
@@ -1671,7 +1671,7 @@ const server = Bun.serve({
         }
         const response=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
         return response;
-      }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission continuation failed"},{status:400});}
+      }catch(error){return Response.json({error:"Mission continuation failed"},{status:400});}
     }
 
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
@@ -1699,7 +1699,7 @@ const server = Bun.serve({
 
         return Response.json(run, { status: 201 });
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Agent run failed";
+        const message = "Agent run failed";
         return Response.json({ error: message }, { status: 500 });
       }
     }
