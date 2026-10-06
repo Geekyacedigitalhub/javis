@@ -21,7 +21,7 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string) {
       latestClientByDevice.delete(deviceId);
     }
     for (const [requestId, pending] of pendingCommands) {
-      if (pending.deviceId !== deviceId) continue;
+      if (pending.clientId !== id) continue;
       pendingCommands.delete(requestId);
       clearTimeout(pending.timeout);
       pending.resolve({
@@ -56,6 +56,7 @@ export function realtimeClientCount() {
 type DeviceCommandResult = { accepted: boolean; message: string; data?: unknown };
 
 type PendingCommand = {
+  clientId: string;
   deviceId: string;
   resolve: (value: DeviceCommandResult) => void;
   reject: (error: Error) => void;
@@ -84,7 +85,7 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
       pendingCommands.delete(requestId);
       pending.resolve(commandTimeoutResult);
     }, 15000);
-    pendingCommands.set(requestId, { deviceId, resolve, reject, timeout });
+    pendingCommands.set(requestId, { clientId: latestId, deviceId, resolve, reject, timeout });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
     } catch (error) {
@@ -96,11 +97,11 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
   });
 }
 
-export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: "device.command.result" }) {
+export function handleDeviceCommandResult(clientId: string, message: FroshDeviceCommand & { type: "device.command.result" }) {
   if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
-  if (pending.deviceId !== message.deviceId) return;
+  if (pending.clientId !== clientId || pending.deviceId !== message.deviceId) return;
   pendingCommands.delete(message.requestId);
   clearTimeout(pending.timeout);
   pending.resolve({
