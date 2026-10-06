@@ -9,7 +9,7 @@ const MAX_PHONE_VALUE_LENGTH = 512;
 const MAX_MESSAGE_LENGTH = 8000;
 
 function validInput(value: string | undefined, maxLength: number) {
-  return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\\u0000-\\u001f\\u007f]/.test(value);
+  return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value);
 }
 
 export async function executePhoneAction(
