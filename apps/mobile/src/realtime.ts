@@ -340,7 +340,7 @@ async function sendCommandResult(
   );
 }
 
-export function connectFroshRealtime(
+function connectFroshRealtimeSession(
   onEvent: (event: FroshEvent) => void,
   onStatus?: (status: "connecting" | "open" | "closed") => void,
 ) {
@@ -620,5 +620,53 @@ export function connectFroshRealtime(
     credentialListenerCleanup?.();
     credentialListenerCleanup = undefined;
     socket.close();
+  };
+}
+
+export function connectFroshRealtime(
+  onEvent: (event: FroshEvent) => void,
+  onStatus?: (status: "connecting" | "open" | "closed") => void,
+) {
+  let stopped = false;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let cleanupSession: (() => void) | undefined;
+  let reconnectAttempt = 0;
+
+  const scheduleReconnect = () => {
+    if (stopped || reconnectTimer) return;
+    void loadDeviceCredential().then((currentCredential) => {
+      if (stopped || !currentCredential) {
+        onStatus?.("closed");
+        return;
+      }
+      const delay = Math.min(30000, 1000 * (2 ** Math.min(reconnectAttempt, 5)));
+      reconnectAttempt += 1;
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = undefined;
+        start();
+      }, delay);
+    }).catch(() => {
+      if (!stopped) scheduleReconnect();
+    });
+  };
+
+  const start = () => {
+    if (stopped) return;
+    cleanupSession?.();
+    cleanupSession = connectFroshRealtimeSession(onEvent, (status) => {
+      onStatus?.(status);
+      if (status === "open") reconnectAttempt = 0;
+      if (status === "closed") scheduleReconnect();
+    });
+  };
+
+  start();
+
+  return () => {
+    stopped = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+    cleanupSession?.();
+    cleanupSession = undefined;
   };
 }
