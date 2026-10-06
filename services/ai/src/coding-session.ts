@@ -31,11 +31,13 @@ export class CodingSessionManager {
       return await this.step(run.id, input.messages, input.canPersist);
     } catch (error) {
       try {
-        await agentRunStore.update(run.id, {
-          status: "failed",
-          error: error instanceof Error ? error.message : "Agent run failed before provider execution",
-          result: "The run was stopped before provider execution could begin.",
-        });
+        if (!input.canPersist || await input.canPersist()) {
+          await agentRunStore.update(run.id, {
+            status: "failed",
+            error: error instanceof Error ? error.message : "Agent run failed before provider execution",
+            result: "The run was stopped before provider execution could begin.",
+          });
+        }
       } catch {}
       throw error;
     }
