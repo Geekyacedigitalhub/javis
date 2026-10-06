@@ -711,6 +711,7 @@ const server = Bun.serve({
         const staleRunningSteps=steps.filter(step=>step.status==="running");
         if(staleRunningSteps.length){
           const reconciled=new Set<string>();
+          let recoveryRequiresReview=false;
           for(const staleStep of staleRunningSteps){
             if(!staleStep.runId) continue;
             const savedRun=await agentRunStore.get(staleStep.runId);
@@ -732,6 +733,7 @@ const server = Bun.serve({
                     :"The pending approval expired before execution restarted. The interrupted agent run was stopped safely.";
                 steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
                 reconciled.add(staleStep.id);
+                recoveryRequiresReview=true;
                 await store.update(savedRun.id,userId,{
                   status:"failed",
                   pendingApprovalId:undefined,
@@ -746,6 +748,7 @@ const server = Bun.serve({
               if(approval?.status==="approved"){
                 steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:"An approved action was in progress when execution stopped. Its outcome is unknown, so FROSH will not replay it automatically.",updatedAt:new Date().toISOString()}:step);
                 reconciled.add(staleStep.id);
+                recoveryRequiresReview=true;
                 await store.update(savedRun.id,userId,{
                   status:"failed",
                   pendingApprovalId:undefined,
@@ -766,6 +769,20 @@ const server = Bun.serve({
             steps=steps.map(step=>interrupted.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,retryCount:(step.retryCount??0)+1,nextRetryAt:undefined,updatedAt:new Date().toISOString()}:step);
           }
           await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Reconciled "+reconciled.size+" interrupted run(s); reset "+interrupted.length+" unfinished step(s).",metadata:{reconciledStepIds:[...reconciled],resetStepIds:interrupted.map(step=>step.id)}});
+        }
+        if(recoveryRequiresReview){
+          const paused=await updateOwned({
+            status:"paused",
+            progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,
+            steps,
+            activeRunId:mission.activeRunId,
+            pendingApprovalId:undefined,
+            result:"Mission paused after restart because an approval outcome or approved action was not durably reconciled. Review the mission before allowing another execution attempt.",
+            leaseUntil:undefined,
+            leaseOwner:undefined
+          });
+          await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused after restart because an approval/action outcome could not be safely reconciled."});
+          return Response.json({mission:paused});
         }
         if(steps.length>0 && steps.every(step=>step.status==="completed")){
           const recoveredResult=steps[steps.length-1]?.result??mission.result;
