@@ -1120,6 +1120,7 @@ const server = Bun.serve({
             return Response.json({mission:failed},{status:500});
           }
 
+          clearInterval(leaseRenewTimer);
           const continuationDurationMs=Date.now()-continuationStartedAt;
           const executionDurationMs=existingDurationMs+continuationDurationMs;
           if(continuationLeaseLost){
