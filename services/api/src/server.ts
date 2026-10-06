@@ -21,6 +21,14 @@ export async function handleFroshRequest(input: FroshHttpRequest) {
     ? await memory.getConversation(input.conversationId)
     : null;
 
+  if (conversation?.userId && input.userId && conversation.userId !== input.userId) {
+    throw new Error("Conversation belongs to another user");
+  }
+
+  if (conversation?.userId && !input.userId) {
+    throw new Error("Conversation owner is required");
+  }
+
   const currentConversation =
     conversation ??
     (await memory.createConversation({
