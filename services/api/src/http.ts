@@ -770,6 +770,37 @@ const server = Bun.serve({
               reconciled.add(staleStep.id);
               continue;
             }else if(savedRun.status==="running"){
+              let orphanApproval:null|Awaited<ReturnType<typeof approvalStore.findPendingByRun>>=null;
+              for(const toolCall of savedRun.toolCalls){
+                if(toolCall.status!=="planned") continue;
+                orphanApproval=await approvalStore.findPendingByRun(savedRun.id,toolCall.name,JSON.stringify(toolCall.arguments));
+                if(orphanApproval) break;
+              }
+              if(orphanApproval){
+                const restored=await agentRunStore.restoreApprovalWait(savedRun.id,orphanApproval.id,savedRun.toolCalls);
+                if(restored){
+                  steps=steps.map(step=>step.id===staleStep.id?{...step,status:"blocked",runId:savedRun.id,result:restored.result,updatedAt:new Date().toISOString()}:step);
+                  await updateOwned({
+                    status:"waiting_approval",
+                    steps,
+                    activeRunId:savedRun.id,
+                    pendingApprovalId:orphanApproval.id,
+                    result:restored.result,
+                    leaseUntil:undefined,
+                    leaseOwner:undefined
+                  });
+                  await store.addEvent({
+                    missionId:id,
+                    userId,
+                    type:"mission.recovered",
+                    message:"Recovered a pending approval that was created before the agent run durably recorded its approval wait state.",
+                    stepId:staleStep.id,
+                    runId:savedRun.id,
+                    metadata:{approvalId:orphanApproval.id}
+                  });
+                  return Response.json({mission:await store.get(id,userId)});
+                }
+              }
               const plannedApproval=savedRun.toolCalls.find(call=>call.status==="planned" && call.id.startsWith("approved-"));
               const plannedApprovalId=plannedApproval?.id.slice("approved-".length);
               const approval=plannedApprovalId?await approvalStore.get(plannedApprovalId):null;
