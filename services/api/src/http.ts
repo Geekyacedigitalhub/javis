@@ -90,14 +90,14 @@ const server = Bun.serve({
             ws.close();
             return;
           }
-          ws.data = { authenticated: true, deviceId: parsed.deviceId };
-          addRealtimeClient(ws, parsed.deviceId);
+          const realtimeClientId = addRealtimeClient(ws, parsed.deviceId);
+          ws.data = { authenticated: true, deviceId: parsed.deviceId, realtimeClientId };
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
           return;
         }
         if (parsed?.type === "device.command.result") {
           if (!ws.data?.authenticated || ws.data.deviceId !== parsed.deviceId) return;
-          handleDeviceCommandResult(parsed);
+          handleDeviceCommandResult(ws.data.realtimeClientId, parsed);
           return;
         }
         if (parsed?.type === "ping") {
