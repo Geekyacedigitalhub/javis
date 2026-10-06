@@ -130,10 +130,16 @@ const server = Bun.serve({
     const deviceToken = request.headers.get("x-frosh-device-token");
     const webToken = process.env.FROSH_WEB_TOKEN?.trim();
     const suppliedWebToken = request.headers.get("x-frosh-web-token");
+    const enrollmentToken = process.env.FROSH_DEVICE_ENROLLMENT_TOKEN?.trim();
+    const suppliedEnrollmentToken = request.headers.get("x-frosh-device-enrollment-token");
     const webAuthenticated = Boolean(webToken && suppliedWebToken && suppliedWebToken === webToken);
+    const deviceEnrollmentAuthorized = Boolean(
+      enrollmentToken &&
+      suppliedEnrollmentToken &&
+      suppliedEnrollmentToken === enrollmentToken
+    );
     const publicPath =
       url.pathname === "/health" ||
-      (request.method === "POST" && url.pathname === "/v1/devices") ||
       url.pathname === "/v1/realtime";
     if (!publicPath && !webAuthenticated && (!deviceId || !deviceToken || !authenticateDevice(deviceId, deviceToken))) {
       return Response.json({ error: "FROSH authentication required" }, { status: 401 });
@@ -427,6 +433,12 @@ const server = Bun.serve({
     }
 
     if (request.method === "POST" && url.pathname === "/v1/devices") {
+      if (!webAuthenticated && !deviceEnrollmentAuthorized) {
+        return Response.json(
+          { error: "Device enrollment authorization required." },
+          { status: 401 }
+        );
+      }
       try {
         const body = await request.json();
         if (
