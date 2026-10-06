@@ -213,6 +213,16 @@ export function connectFroshRealtime(
         return;
       }
       onEvent(parsed as unknown as FroshEvent);
+      } catch (error) {
+        if (commandRequestId) {
+          await sendCommandResult(socket, parsed, {
+            accepted: false,
+            message: error instanceof Error
+              ? `The Android command failed before a definitive outcome could be confirmed: ${error.message}`
+              : "The Android command failed before a definitive outcome could be confirmed. The outcome is unknown; do not retry automatically.",
+            data: { outcome: "unknown", retryable: false, reason: "command_execution_exception" },
+          }).catch(() => undefined);
+        }
       } finally {
         if (commandRequestId) {
           inFlightCommands.delete(commandRequestId);
