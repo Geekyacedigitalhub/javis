@@ -192,15 +192,20 @@ export async function authenticateDevice(deviceId: string, token: string) {
     return true;
   }
   await ensureSchema();
-  const rows = await client.unsafe<{ tokenHash: string; expiresAt: string }[]>(
-    `SELECT token_hash AS "tokenHash",expires_at AS "expiresAt" FROM frosh_device_credentials WHERE device_id=$1 LIMIT 1`,
-    [deviceId],
-  );
-  if (!rows[0] || new Date(rows[0].expiresAt).getTime() <= Date.now()) return false;
-  if (rows[0].tokenHash !== await hashToken(token)) return false;
+  const tokenHash = await hashToken(token);
   const updated = await client.unsafe(
-    `UPDATE frosh_devices SET status='online',last_seen_at=NOW() WHERE id=$1`,
-    [deviceId],
+    `UPDATE frosh_devices
+     SET status='online',last_seen_at=NOW()
+     WHERE id=$1
+       AND EXISTS (
+         SELECT 1
+         FROM frosh_device_credentials
+         WHERE device_id=$1
+           AND token_hash=$2
+           AND expires_at>NOW()
+       )
+     RETURNING id`,
+    [deviceId, tokenHash],
   );
   return updated.count > 0;
 }
