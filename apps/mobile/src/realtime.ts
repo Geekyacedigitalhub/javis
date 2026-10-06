@@ -1,7 +1,7 @@
 import * as SecureStore from "expo-secure-store";
 import type { FroshEvent } from "../../../packages/types/src/events";
 import { FROSH_API_URL } from "./api";
-import { loadDeviceCredential } from "./session";
+import { loadDeviceCredential, onDeviceCredentialChange } from "./session";
 import { launchAppByName } from "../modules/frosh-apps/src";
 import { executeMediaAction } from "./media";
 import { searchContacts } from "../modules/frosh-contacts/src";
@@ -347,6 +347,13 @@ export function connectFroshRealtime(
   onStatus?.("connecting");
   const socket = new WebSocket(websocketUrl());
   let authenticatedDeviceId: string | undefined;
+  let credentialListenerCleanup: (() => void) | undefined;
+  credentialListenerCleanup = onDeviceCredentialChange((nextCredential) => {
+    if (!nextCredential || nextCredential.deviceId !== authenticatedDeviceId) {
+      authenticatedDeviceId = undefined;
+      try { socket.close(); } catch { /* already closed */ }
+    }
+  });
 
   socket.onopen = async () => {
     const credential = await loadDeviceCredential();
@@ -597,7 +604,15 @@ export function connectFroshRealtime(
     }
   };
   socket.onerror = () => onStatus?.("closed");
-  socket.onclose = () => onStatus?.("closed");
+  socket.onclose = () => {
+    credentialListenerCleanup?.();
+    credentialListenerCleanup = undefined;
+    onStatus?.("closed");
+  };
 
-  return () => socket.close();
+  return () => {
+    credentialListenerCleanup?.();
+    credentialListenerCleanup = undefined;
+    socket.close();
+  };
 }
