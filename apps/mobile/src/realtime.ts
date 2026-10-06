@@ -21,12 +21,25 @@ const commandRecordPrefix = "frosh:device-command:";
 
 async function loadCommandRecord(requestId: string): Promise<CommandRecord | null> {
   const cached = commandRecords.get(requestId);
-  if (cached) return cached;
+  if (cached) {
+    if (cached.state === "started") return cached;
+    if (Date.now() - cached.createdAt <= 24 * 60 * 60 * 1000) return cached;
+    commandRecords.delete(requestId);
+  }
   try {
     const raw = await SecureStore.getItemAsync(commandRecordPrefix + requestId);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CommandRecord;
-    if (!parsed || typeof parsed.createdAt !== "number" || typeof parsed.command !== "string" || Date.now() - parsed.createdAt > 24 * 60 * 60 * 1000) {
+    if (!parsed || typeof parsed.createdAt !== "number" || typeof parsed.command !== "string") {
+      await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
+      return null;
+    }
+    if (parsed.state === "started") {
+      // A started side-effect may have completed before a crash. Never expire this fence.
+      commandRecords.set(requestId, parsed);
+      return parsed;
+    }
+    if (Date.now() - parsed.createdAt > 24 * 60 * 60 * 1000) {
       await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
       return null;
     }
