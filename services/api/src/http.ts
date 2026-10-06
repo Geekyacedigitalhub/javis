@@ -130,7 +130,8 @@ async function withMissionCreationAdmission<T>(userId: string, create: () => Pro
   const previous = missionCreationLocks.get(userId) ?? Promise.resolve();
   let release!: () => void;
   const current = new Promise<void>((resolve) => { release = resolve; });
-  missionCreationLocks.set(userId, previous.then(() => current));
+  const queued = previous.then(() => current);
+  missionCreationLocks.set(userId, queued);
   await previous;
   try {
     const store = (await import("../../missions/src")).getMissionStore();
@@ -141,7 +142,7 @@ async function withMissionCreationAdmission<T>(userId: string, create: () => Pro
     return await create();
   } finally {
     release();
-    if (missionCreationLocks.get(userId) === current) missionCreationLocks.delete(userId);
+    if (missionCreationLocks.get(userId) === queued) missionCreationLocks.delete(userId);
   }
 }
 
