@@ -2,7 +2,7 @@ import { postChat } from "./routes";
 import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore } from "./devices";
+import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials } from "./devices";
 import { addRealtimeClient, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
@@ -10,6 +10,7 @@ import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memo
 const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
 await initializeDeviceStore();
+void purgeExpiredDeviceCredentials().catch((error) => console.warn("Initial device credential cleanup failed:", error));
 import { startAutomationRunner } from "../../automation/src";
 import { startMissionRunner } from "../../missions/src";
 startAutomationRunner();
