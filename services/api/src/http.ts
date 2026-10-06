@@ -35,6 +35,19 @@ async function recoverMissionsOnStartup(){
 setTimeout(()=>void recoverMissionsOnStartup(),2000);
 
 
+async function addMissionEventWithRetry(store:FroshMissionStore,input:Omit<FroshMissionEvent,"id"|"createdAt">){
+  let lastError:unknown;
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      return await store.addEvent(input);
+    }catch(error){
+      lastError=error;
+      if(attempt<3) await new Promise((resolve)=>setTimeout(resolve,100*attempt));
+    }
+  }
+  throw lastError instanceof Error?lastError:new Error("Mission audit event could not be persisted");
+}
+
 function isSafetyPausedMission(mission:FroshMission){
   return mission.status==="paused" && (mission.result??"").startsWith("Mission paused after restart because an approval outcome or approved action was not durably reconciled.");
 }
@@ -522,7 +535,7 @@ const server = Bun.serve({
         if(["completed","failed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be paused in its current state"},{status:409});
         const updated=await store.pauseIfIdle(id,userId);
         if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
+        await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
         return Response.json({mission:updated});
       }
       if(action==="resume"){
@@ -530,7 +543,7 @@ const server = Bun.serve({
         if(isSafetyPausedMission(mission))return Response.json({error:"Mission is paused for safety review after an unreconciled approval/action outcome; review the mission before resuming it."},{status:409});
         const updated=await store.resumeIfPaused(id,userId);
         if(!updated)return Response.json({error:"Mission is no longer paused; refresh and try again"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.recovered",message:updated.status==="waiting_approval"?"Mission resumed into its pending approval state.":"Mission resumed by user.",metadata:{resumedStatus:updated.status}});
+        await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:updated.status==="waiting_approval"?"Mission resumed into its pending approval state.":"Mission resumed by user.",metadata:{resumedStatus:updated.status}});
         return Response.json({mission:updated});
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
@@ -546,7 +559,7 @@ const server = Bun.serve({
       }
       const updated=await store.cancelIfIdle(id,userId);
       if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
-      await store.addEvent({missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user.",metadata:{approvalCancelled:Boolean(mission.pendingApprovalId)}});
+      await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user.",metadata:{approvalCancelled:Boolean(mission.pendingApprovalId)}});
       return Response.json({mission:updated});
     }
 
@@ -582,7 +595,7 @@ const server = Bun.serve({
         progress:steps.length?completedBefore/steps.length:0,
         steps
       });
-      await store.addEvent({
+      await addMissionEventWithRetry(store, {
         missionId:rerunMission.id,
         userId,
         type:"mission.created",
@@ -601,7 +614,7 @@ const server = Bun.serve({
       if(!source)return Response.json({error:"Mission not found"},{status:404});
       if(!["completed","failed","cancelled"].includes(source.status))return Response.json({error:"Only completed, failed, or cancelled missions can be rerun"},{status:409});
       const rerunMission=await store.create({userId,goal:source.goal,status:"planning",priority:source.priority,budgetProfile:source.budgetProfile,progress:0,steps:[]});
-      await store.addEvent({missionId:rerunMission.id,userId,type:"mission.created",message:"Mission rerun created from "+source.id,metadata:{sourceMissionId:source.id}});
+      await addMissionEventWithRetry(store, {missionId:rerunMission.id,userId,type:"mission.created",message:"Mission rerun created from "+source.id,metadata:{sourceMissionId:source.id}});
       return Response.json({mission:rerunMission});
     }
 
@@ -666,7 +679,7 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         const updated=await store.updatePriorityIfIdle(id,userId,priority);
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.updated",message:"Priority changed to "+priority+".",metadata:{field:"priority",value:priority}});
+        await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.updated",message:"Priority changed to "+priority+".",metadata:{field:"priority",value:priority}});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Priority update failed"},{status:400});}
     }
@@ -685,7 +698,7 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         const updated=await store.updateBudgetProfileIfIdle(id,userId,budgetProfile);
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
-        await store.addEvent({missionId:id,userId,type:"mission.updated",message:"Budget profile changed to "+budgetProfile+".",metadata:{field:"budgetProfile",value:budgetProfile}});
+        await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.updated",message:"Budget profile changed to "+budgetProfile+".",metadata:{field:"budgetProfile",value:budgetProfile}});
         return Response.json({mission:updated});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Budget profile update failed"},{status:400});}
     }
@@ -750,7 +763,7 @@ const server = Bun.serve({
               const approval=await approvalStore.get(savedRun.pendingApprovalId);
               if(approval?.status==="pending"){
                 await updateOwned({status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
-                await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
+                await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
                 return Response.json({mission:await store.get(id,userId)});
               }
               if(approval?.status==="approved" || approval?.status==="rejected" || approval?.status==="expired"){
@@ -799,7 +812,7 @@ const server = Bun.serve({
                     leaseUntil:undefined,
                     leaseOwner:undefined
                   });
-                  await store.addEvent({
+                  await addMissionEventWithRetry(store, {
                     missionId:id,
                     userId,
                     type:"mission.recovered",
@@ -837,7 +850,7 @@ const server = Bun.serve({
           if(interrupted.length){
             steps=steps.map(step=>interrupted.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,retryCount:(step.retryCount??0)+1,nextRetryAt:undefined,updatedAt:new Date().toISOString()}:step);
           }
-          await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Reconciled "+reconciled.size+" interrupted run(s); reset "+interrupted.length+" unfinished step(s).",metadata:{reconciledStepIds:[...reconciled],resetStepIds:interrupted.map(step=>step.id)}});
+          await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:"Reconciled "+reconciled.size+" interrupted run(s); reset "+interrupted.length+" unfinished step(s).",metadata:{reconciledStepIds:[...reconciled],resetStepIds:interrupted.map(step=>step.id)}});
         }
         const blockedSteps=steps.filter(step=>step.status==="blocked"&&step.runId);
         for(const blockedStep of blockedSteps){
@@ -854,7 +867,7 @@ const server = Bun.serve({
                 leaseUntil:undefined,
                 leaseOwner:undefined
               });
-              await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered a blocked step that is still waiting for approval.",stepId:blockedStep.id,runId:blockedRun.id});
+              await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:"Recovered a blocked step that is still waiting for approval.",stepId:blockedStep.id,runId:blockedRun.id});
               return Response.json({mission:await store.get(id,userId)});
             }
             if(approval?.status==="approved"){
@@ -875,7 +888,7 @@ const server = Bun.serve({
             nextRetryAt:undefined,
             updatedAt:now
           }:step);
-          await store.addEvent({
+          await addMissionEventWithRetry(store, {
             missionId:id,
             userId,
             type:"mission.recovered",
@@ -894,13 +907,13 @@ const server = Bun.serve({
             leaseUntil:undefined,
             leaseOwner:undefined
           });
-          await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused after restart because an approval/action outcome could not be safely reconciled."});
+          await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.paused",message:"Mission paused after restart because an approval/action outcome could not be safely reconciled."});
           return Response.json({mission:paused});
         }
         if(steps.length>0 && steps.every(step=>step.status==="completed")){
           const recoveredResult=steps[steps.length-1]?.result??mission.result;
           const completedMission=await updateOwned({status:"completed",progress:1,steps,activeRunId:mission.activeRunId,pendingApprovalId:undefined,result:recoveredResult,leaseUntil:undefined,leaseOwner:undefined});
-          await store.addEvent({missionId:id,userId,type:"mission.completed",message:"Mission completed during recovery reconciliation."});
+          await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.completed",message:"Mission completed during recovery reconciliation."});
           return Response.json({mission:completedMission});
         }
         let lastRunId=mission.activeRunId;
@@ -916,7 +929,7 @@ const server = Bun.serve({
         const missionStartedAt=Date.now();
         const initialToolCount=mission.toolCallsUsed??0;        const initialDurationMs=mission.executionDurationMs??0;
         let toolCount=initialToolCount;
-        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.step.retry"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await store.addEvent({missionId:id,userId,type,message,stepId,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.step.retry"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await addMissionEventWithRetry(store, {missionId:id,userId,type,message,stepId,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
         await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
@@ -1179,7 +1192,7 @@ const server = Bun.serve({
           await store.releaseLeaseIfOwned(id,userId,executionOwner);
           return Response.json({error:"Mission retry lease was lost before the retry could be recorded"},{status:409});
         }
-        await store.addEvent({missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
+        await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
         await store.releaseLeaseIfOwned(id,userId,executionOwner);
         return Response.json({mission:await store.get(id,userId)});
       }catch(error){return Response.json({error:error instanceof Error?error.message:"Mission retry failed"},{status:400});}
@@ -1241,7 +1254,7 @@ const server = Bun.serve({
           const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
           const existingToolCount=mission.toolCallsUsed??0;
           const existingDurationMs=mission.executionDurationMs??0;
-          const emit=async(type:"mission.approval.required"|"mission.budget.exceeded"|"mission.failed",message:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await store.addEvent({missionId:id,userId,type,message,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+          const emit=async(type:"mission.approval.required"|"mission.budget.exceeded"|"mission.failed",message:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await addMissionEventWithRetry(store, {missionId:id,userId,type,message,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
           const executionOwner="approval-continuation:"+crypto.randomUUID();
           if(!mission.activeRunId){
             return Response.json({error:"Mission has no active agent run for the pending approval"},{status:409});
