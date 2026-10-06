@@ -42,10 +42,14 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
   clients.set(id, { id, socket, deviceId, deviceToken, authCheck });
   if (deviceId) {
     const previousClientId = latestClientByDevice.get(deviceId);
+    // Make the new socket authoritative before retiring the old one. Otherwise
+    // removing the old socket can briefly mark the device offline while the new
+    // socket is already connected, and its async offline write can race the new
+    // connection's online state.
+    latestClientByDevice.set(deviceId, id);
     if (previousClientId && previousClientId !== id) {
       removeRealtimeClient(previousClientId);
     }
-    latestClientByDevice.set(deviceId, id);
   }
 
   socket.addEventListener("close", () => {
