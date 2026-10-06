@@ -6,12 +6,19 @@ import android.media.session.MediaController
 import android.media.session.MediaSessionManager
 import android.os.Build
 import android.content.Intent
-import android.provider.Settings
-import androidx.annotation.RequiresApi
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class FroshMediaModule : Module() {
+  private companion object {
+    const val MAX_ACTION_LENGTH = 32
+    const val MAX_STATE_TEXT_LENGTH = 512
+  }
+
+  private fun validAction(action: String): Boolean =
+    action.length <= MAX_ACTION_LENGTH &&
+      !action.any { it.code < 0x20 || it.code == 0x7f }
+
   private fun controllers(): List<MediaController> {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return emptyList()
     val context = appContext.reactContext ?: return emptyList()
@@ -23,7 +30,6 @@ class FroshMediaModule : Module() {
     }
   }
 
-  @RequiresApi(Build.VERSION_CODES.LOLLIPOP)
   override fun definition() = ModuleDefinition {
     Name("FroshMedia")
 
@@ -59,15 +65,16 @@ class FroshMediaModule : Module() {
       mapOf(
         "available" to true,
         "isPlaying" to (state?.state == android.media.session.PlaybackState.STATE_PLAYING),
-        "title" to metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE),
-        "artist" to metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST),
-        "album" to metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM),
-        "durationMs" to (metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L),
-        "positionMs" to (state?.position ?: 0L)
+        "title" to metadata?.getString(android.media.MediaMetadata.METADATA_KEY_TITLE)?.take(MAX_STATE_TEXT_LENGTH),
+        "artist" to metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ARTIST)?.take(MAX_STATE_TEXT_LENGTH),
+        "album" to metadata?.getString(android.media.MediaMetadata.METADATA_KEY_ALBUM)?.take(MAX_STATE_TEXT_LENGTH),
+        "durationMs" to (metadata?.getLong(android.media.MediaMetadata.METADATA_KEY_DURATION) ?: 0L).coerceIn(0L, 24L * 60L * 60L * 1000L),
+        "positionMs" to (state?.position ?: 0L).coerceAtLeast(0L)
       )
     }
 
     AsyncFunction("control") { action: String ->
+      if (!validAction(action)) return@AsyncFunction mapOf("accepted" to false, "message" to "Media action is invalid or too long.")
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
         return@AsyncFunction mapOf("accepted" to false, "message" to "Android media sessions are unsupported.")
       }
@@ -93,6 +100,7 @@ class FroshMediaModule : Module() {
     }
 
     AsyncFunction("volume") { direction: String ->
+      if (direction != "up" && direction != "down") return@AsyncFunction mapOf("accepted" to false, "message" to "Unsupported volume direction.")
       val context = appContext.reactContext ?: return@AsyncFunction mapOf("accepted" to false, "message" to "Android context unavailable.")
       val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
       val adjustment = if (direction == "up") AudioManager.ADJUST_RAISE else AudioManager.ADJUST_LOWER
