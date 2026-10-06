@@ -494,7 +494,7 @@ export function connectFroshRealtime(
 
       if (parsed.type === "device.command" && parsed.command === "send_message") {
         try {
-          const result = await executePhoneAction({ action: "compose_message", value: String(parsed.recipient ?? ""), message: String(parsed.message ?? "") } as never);
+          const result = await executePhoneAction({ action: "send_message", value: String(parsed.recipient ?? ""), message: String(parsed.message ?? "") });
           await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         } catch (error) {
           await sendCommandResult(socket, parsed, { accepted: false, message: error instanceof Error ? error.message : "Unable to send the message." });
