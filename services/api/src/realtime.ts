@@ -296,11 +296,12 @@ const MAX_COMMAND_RESULT_DATA_BYTES = 64 * 1024;
 export async function handleDeviceCommandResult(clientId: string, message: FroshDeviceCommand & { type: "device.command.result" }) {
   if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || !commandRequestIdPattern.test(message.requestId) || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
   if (message.message.length > MAX_COMMAND_RESULT_MESSAGE_LENGTH) return;
+  if (new TextEncoder().encode(message.message).byteLength > MAX_COMMAND_RESULT_MESSAGE_LENGTH * 4) return;
   let resultData: unknown = undefined;
   if ("data" in message && message.data !== undefined) {
     try {
       const serialized = JSON.stringify(message.data);
-      if (serialized.length > MAX_COMMAND_RESULT_DATA_BYTES) return;
+      if (new TextEncoder().encode(serialized).byteLength > MAX_COMMAND_RESULT_DATA_BYTES) return;
       resultData = message.data;
     } catch {
       return;
