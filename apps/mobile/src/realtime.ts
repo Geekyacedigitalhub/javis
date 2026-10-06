@@ -36,7 +36,7 @@ const SUPPORTED_COMMANDS = new Set([
   "open_app",
 ]);
 const SUPPORTED_MEDIA_ACTIONS = new Set([
-  "play", "pause", "play_pause", "next", "previous", "stop",
+  "play", "pause", "toggle", "next", "previous", "stop",
 ]);
 const commandRecordWrites = new Map<string, Promise<void>>();
 const commandRecordPrefix = "frosh:device-command:";
@@ -63,7 +63,7 @@ function validateCommandArguments(command: Record<string, unknown>): string | nu
     if (!isBoundedText(command.notificationId, 200) || !isBoundedText(command.message, 8000) || !command.notificationId || !command.message) return "message_reply_arguments_invalid";
   }
   if (commandType === "send_message") {
-    if (!isBoundedText(command.recipient, 320) || !isBoundedText(command.message, 8000) || !command.recipient || !command.message) return "send_message_arguments_invalid";
+    if (!isBoundedText(command.provider, 40) || !isBoundedText(command.recipient, 320) || !isBoundedText(command.message, 8000) || !command.provider || !command.recipient || !command.message) return "send_message_arguments_invalid";
   }
   if (commandType === "call_number" && !isBoundedText(command.phoneNumber, 512)) return "call_number_arguments_invalid";
   if (commandType === "contacts_search" && !isBoundedText(command.query, 512)) return "contacts_search_arguments_invalid";
@@ -225,6 +225,13 @@ async function sendCommandResult(
   const requestId = String(command.requestId ?? "");
   const deviceId = String(command.deviceId ?? "");
   const commandType = String(command.command ?? "");
+  if (!isSafeCommandRequestId(requestId) || !isBoundedText(deviceId, MAX_DEVICE_ID_LENGTH)) {
+    return;
+  }
+  if (!isBoundedText(result.message, MAX_COMMAND_RESULT_MESSAGE_LENGTH) || jsonByteLength(result.data) > MAX_COMMAND_RESULT_DATA_BYTES) {
+    await sendUnknownCommandResult(socket, command, "command_result_too_large", "The command result was too large to persist safely.");
+    return;
+  }
   const validationError = validateCommandArguments(command);
   if (validationError) {
     await sendUnknownCommandResult(socket, command, validationError, "The Android device rejected an invalid or unsupported command. No action was executed.");
