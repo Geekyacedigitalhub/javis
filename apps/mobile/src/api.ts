@@ -2,6 +2,7 @@ import type { FroshDevice, FroshDeviceCredential } from "../../../packages/types
 import type { FroshAgentRun } from "../../../packages/types/src/agent-run";
 import type { FroshApprovalRequest } from "../../../packages/types/src/approval";
 import type { FroshResponse } from "../../../packages/types/src/javis";
+import { clearDeviceCredential, saveDeviceCredential } from "./session";
 
 export const FROSH_API_URL =
   process.env.EXPO_PUBLIC_FROSH_API_URL ?? "http://localhost:3001";
@@ -17,6 +18,11 @@ export function hasDeviceCredential() {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  if (credential && Date.parse(credential.expiresAt) <= Date.now()) {
+    credential = null;
+    await clearDeviceCredential().catch(() => undefined);
+    throw new Error("Device credential has expired. Re-pair this phone.");
+  }
   const response = await fetch(`${FROSH_API_URL}${path}`, {
     ...init,
     headers: {
@@ -29,7 +35,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   const body = await response.json();
-  if (!response.ok) throw new Error(body?.error ?? `Request failed: ${response.status}`);
+  if (!response.ok) {
+    if (response.status === 401 && credential) {
+      credential = null;
+      await clearDeviceCredential().catch(() => undefined);
+    }
+    throw new Error(body?.error ?? `Request failed: ${response.status}`);
+  }
   return body as T;
 }
 
@@ -71,6 +83,7 @@ export async function registerDevice(name: string, capabilities: string[]) {
     method: "POST",
     body: JSON.stringify({ name, platform: "android", capabilities }),
   });
+  await saveDeviceCredential(result.credential);
   setDeviceCredential(result.credential);
   return result.device;
 }
