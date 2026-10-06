@@ -79,6 +79,10 @@ export class OpenAIProvider {
     }
 
     const executedCalls: FroshToolCall[] = [];
+    const continuationToolOutputs = new Map<string, string>();
+    if (options.continuation?.toolOutput) {
+      continuationToolOutputs.set(options.continuation.toolOutput.callId, options.continuation.toolOutput.output);
+    }
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       const stream = await client.responses.create({
@@ -137,6 +141,16 @@ export class OpenAIProvider {
         };
 
         yield { type: "tool", name: item.name, status: "planned", toolCallId: callId };
+
+        const continuationOutput = continuationToolOutputs.get(planned.id);
+        if (continuationOutput !== undefined) {
+          continuationInput.push({
+            type: "function_call_output",
+            call_id: planned.id,
+            output: continuationOutput,
+          });
+          continue;
+        }
 
         const result = await executeTimedToolCall(planned, options.runId);
         executedCalls.push(result);
@@ -229,6 +243,7 @@ export class OpenAIProvider {
     }));
 
     const executedCalls: FroshToolCall[] = [];
+    const continuationToolOutputs = new Map<string, string>();
     let previousResponseId: string | undefined;
     let continuationInput: any[] | undefined;
 
@@ -247,6 +262,7 @@ export class OpenAIProvider {
           call_id: options.continuation.toolOutput.callId,
           output: options.continuation.toolOutput.output,
         });
+        continuationToolOutputs.set(options.continuation.toolOutput.callId, options.continuation.toolOutput.output);
       }
     } else {
       continuationInput = input.messages.map((message) => ({
@@ -293,6 +309,16 @@ export class OpenAIProvider {
           arguments: args,
           status: "planned",
         };
+
+        const continuationOutput = continuationToolOutputs.get(planned.id);
+        if (continuationOutput !== undefined) {
+          continuationInput.push({
+            type: "function_call_output",
+            call_id: planned.id,
+            output: continuationOutput,
+          });
+          continue;
+        }
 
         const result = await executeTimedToolCall(planned, options.runId);
         executedCalls.push(result);
