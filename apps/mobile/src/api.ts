@@ -87,6 +87,7 @@ export async function registerDevice(name: string, capabilities: string[], enrol
   }
   const result = await request<{ device: FroshDevice; credential: FroshDeviceCredential }>("/v1/devices", {
     method: "POST",
+    headers: { "x-frosh-device-enrollment-token": token },
     body: JSON.stringify({ name, platform: "android", capabilities }),
   });
   await saveDeviceCredential(result.credential);
