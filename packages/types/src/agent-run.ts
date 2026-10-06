@@ -31,4 +31,5 @@ export interface FroshAgentRunStore {
   touch(id: string): Promise<FroshAgentRun>;
   claimApproval(id: string, approvalId: string, toolCall: FroshToolCall): Promise<FroshAgentRun | null>;
   restoreApprovalWait(id: string, approvalId: string, toolCalls: FroshToolCall[]): Promise<FroshAgentRun | null>;
+  stopWaitingApproval(id: string, approvalId: string, result: string, error: string): Promise<FroshAgentRun | null>;
 }
