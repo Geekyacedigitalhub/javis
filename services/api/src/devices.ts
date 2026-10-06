@@ -330,7 +330,7 @@ export async function completeDeviceCommandLedger(requestId: string, result: { a
   const now = new Date().toISOString();
   if (!client) {
     const record = memoryCommandLedger.get(requestId);
-    if (!record || (record.state !== "pending" && record.state !== "dispatched")) return false;
+    if (!record || !["pending", "dispatched", "unknown"].includes(record.state)) return false;
     memoryCommandLedger.set(requestId, {
       ...record,
       state: "completed",
@@ -346,7 +346,7 @@ export async function completeDeviceCommandLedger(requestId: string, result: { a
   const resultRow = await client.unsafe(
     `UPDATE frosh_device_command_ledger
      SET state='completed',accepted=$2,message=$3,data=$4::jsonb,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
-     WHERE request_id=$1 AND state IN ('pending','dispatched')
+     WHERE request_id=$1 AND state IN ('pending','dispatched','unknown')
      RETURNING request_id`,
     [requestId, result.accepted, result.message, JSON.stringify(result.data ?? null)],
   );
