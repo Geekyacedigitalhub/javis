@@ -3,7 +3,7 @@ import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, markAllDevicesOffline, closeDeviceStore } from "./devices";
-import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
+import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 
@@ -12,7 +12,7 @@ const port = Number(process.env.PORT ?? 3001);
 await initializeDeviceStore();
 await markAllDevicesOffline();
 void purgeExpiredDeviceCredentials().catch((error) => console.warn("Initial device credential cleanup failed:", error));
-setInterval(() => {
+const credentialCleanupTimer = setInterval(() => {
   void purgeExpiredDeviceCredentials().catch((error) => console.warn("Scheduled device credential cleanup failed:", error));
 }, 60 * 60 * 1000);
 import { startAutomationRunner } from "../../automation/src";
@@ -65,11 +65,18 @@ let shuttingDown = false;
 async function shutdownApi() {
   if (shuttingDown) return;
   shuttingDown = true;
+  clearInterval(credentialCleanupTimer);
   try {
-    await closeDeviceStore();
+    shutdownRealtime();
+    await server.stop(true);
   } catch (error) {
-    console.error("FROSH device store shutdown failed:", error);
+    console.error("FROSH realtime/API server shutdown failed:", error);
   } finally {
+    try {
+      await closeDeviceStore();
+    } catch (error) {
+      console.error("FROSH device store shutdown failed:", error);
+    }
     process.exit(0);
   }
 }
