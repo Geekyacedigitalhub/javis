@@ -778,6 +778,26 @@ const server = Bun.serve({
           }
           await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Reconciled "+reconciled.size+" interrupted run(s); reset "+interrupted.length+" unfinished step(s).",metadata:{reconciledStepIds:[...reconciled],resetStepIds:interrupted.map(step=>step.id)}});
         }
+        const blockedSteps=steps.filter(step=>step.status==="blocked"&&step.runId);
+        for(const blockedStep of blockedSteps){
+          const blockedRun=await agentRunStore.get(blockedStep.runId!);
+          if(blockedRun?.status==="waiting_approval"&&blockedRun.pendingApprovalId){
+            const approval=await approvalStore.get(blockedRun.pendingApprovalId);
+            if(approval?.status==="pending"){
+              await updateOwned({
+                status:"waiting_approval",
+                steps,
+                activeRunId:blockedRun.id,
+                pendingApprovalId:blockedRun.pendingApprovalId,
+                result:blockedRun.result,
+                leaseUntil:undefined,
+                leaseOwner:undefined
+              });
+              await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered a blocked step that is still waiting for approval.",stepId:blockedStep.id,runId:blockedRun.id});
+              return Response.json({mission:await store.get(id,userId)});
+            }
+          }
+        }
         if(recoveryRequiresReview){
           const paused=await updateOwned({
             status:"paused",
@@ -1057,7 +1077,7 @@ const server = Bun.serve({
           return next;
         }
         if(mission.status==="failed"){
-          const recoverableSteps=mission.steps.filter(step=>step.status==="failed"||step.status==="blocked"||step.status==="running");
+          const recoverableSteps=mission.steps.filter(step=>step.status!=="completed");
           if(recoverableSteps.length){
             const now=new Date().toISOString();
             const steps=mission.steps.map(step=>recoverableSteps.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,nextRetryAt:undefined,updatedAt:now}:step);
