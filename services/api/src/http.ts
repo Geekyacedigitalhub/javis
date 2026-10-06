@@ -2,7 +2,7 @@ import { postChat } from "./routes";
 import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice } from "./devices";
+import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential } from "./devices";
 import { addRealtimeClient, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
@@ -552,6 +552,17 @@ const server = Bun.serve({
       } catch (error) {
         return Response.json({ error: error instanceof Error ? error.message : "Capability update failed" }, { status: 400 });
       }
+    }
+
+    const credentialRevokeMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/credential$/);
+    if (credentialRevokeMatch && request.method === "DELETE") {
+      if (!webAuthenticated) {
+        return Response.json({ error: "Trusted web authentication required." }, { status: 401 });
+      }
+      const revoked = revokeDeviceCredential(credentialRevokeMatch[1]);
+      return revoked
+        ? Response.json({ revoked: true })
+        : Response.json({ error: "Device not found" }, { status: 404 });
     }
 
     const deviceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)$/);
