@@ -89,18 +89,9 @@ export default function Home() {
           if (event.type === "error") throw new Error(event.message ?? "Streaming request failed.");
         }
       }
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "FROSH request failed.");
-
-      setConversationId(data.conversationId);
-      setMessages((current) => [
-        ...current,
-        {
-          role: "assistant",
-          content: data.message ?? "FROSH returned no message.",
-          toolCalls: data.toolCalls ?? []
-        }
-      ]);
+      if (!assistant && !toolCalls.length) {
+        throw new Error("FROSH stream ended without a response.");
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Could not reach FROSH.");
     } finally {
