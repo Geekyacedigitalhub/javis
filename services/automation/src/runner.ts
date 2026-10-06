@@ -107,9 +107,14 @@ function scheduleTick(): void {
   if (tickRunning || stopping) return;
   const promise = tick();
   activeTick = promise;
-  void promise.finally(() => {
-    if (activeTick === promise) activeTick = undefined;
-  });
+  void promise
+    .catch((error) => {
+      const errorName = error instanceof Error && error.name ? error.name : "UnknownError";
+      console.error("FROSH automation runner tick failed", errorName);
+    })
+    .finally(() => {
+      if (activeTick === promise) activeTick = undefined;
+    });
 }
 
 export function startAutomationRunner() {
