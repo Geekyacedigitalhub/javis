@@ -18,6 +18,26 @@ type CommandRecord =
 
 const commandRecords = new Map<string, CommandRecord>();
 const inFlightCommands = new Map<string, Promise<void>>();
+const MAX_REALTIME_FRAME_BYTES = 128 * 1024;
+const MAX_COMMAND_TYPE_LENGTH = 64;
+const MAX_DEVICE_ID_LENGTH = 200;
+const MAX_COMMAND_ARGUMENT_BYTES = 32 * 1024;
+const MAX_COMMAND_RESULT_MESSAGE_LENGTH = 4000;
+const MAX_COMMAND_RESULT_DATA_BYTES = 64 * 1024;
+const SUPPORTED_COMMANDS = new Set([
+  "message_inbox",
+  "message_reply",
+  "send_message",
+  "open_dialer",
+  "call_number",
+  "contacts_search",
+  "media_state",
+  "media_control",
+  "open_app",
+]);
+const SUPPORTED_MEDIA_ACTIONS = new Set([
+  "play", "pause", "play_pause", "next", "previous", "stop",
+]);
 const commandRecordWrites = new Map<string, Promise<void>>();
 const commandRecordPrefix = "frosh:device-command:";
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -26,20 +46,52 @@ function isSafeCommandRequestId(value: string): boolean {
   return requestIdPattern.test(value);
 }
 
+function isBoundedText(value: unknown, maxLength: number): value is string {
+  return typeof value === "string" && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+function jsonByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+function validateCommandArguments(command: Record<string, unknown>): string | null {
+  const commandType = typeof command.command === "string" ? command.command : "";
+  if (!SUPPORTED_COMMANDS.has(commandType)) return "unsupported_command";
+  if (!isBoundedText(commandType, MAX_COMMAND_TYPE_LENGTH)) return "command_invalid";
+
+  if (commandType === "message_reply") {
+    if (!isBoundedText(command.notificationId, 200) || !isBoundedText(command.message, 8000) || !command.notificationId || !command.message) return "message_reply_arguments_invalid";
+  }
+  if (commandType === "send_message") {
+    if (!isBoundedText(command.recipient, 320) || !isBoundedText(command.message, 8000) || !command.recipient || !command.message) return "send_message_arguments_invalid";
+  }
+  if (commandType === "call_number" && !isBoundedText(command.phoneNumber, 512)) return "call_number_arguments_invalid";
+  if (commandType === "contacts_search" && !isBoundedText(command.query, 512)) return "contacts_search_arguments_invalid";
+  if (commandType === "open_app" && !isBoundedText(command.appName, 512)) return "open_app_arguments_invalid";
+  if (commandType === "media_control" && (!isBoundedText(command.action, 32) || !SUPPORTED_MEDIA_ACTIONS.has(command.action))) return "media_action_invalid";
+  return null;
+}
+
+function stableCommandPayload(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableCommandPayload).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .filter(([key]) => key !== "requestId")
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableCommandPayload(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
 async function hashCommandPayload(command: Record<string, unknown>): Promise<string> {
-  const payload = Object.keys(command)
-    .filter((key) => key !== "requestId")
-    .sort()
-    .reduce<Record<string, unknown>>((result, key) => {
-      result[key] = command[key];
-      return result;
-    }, {});
-  const bytes = new TextEncoder().encode(JSON.stringify(payload));
+  const bytes = new TextEncoder().encode(stableCommandPayload(command));
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   return Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function parseCommandRecord(raw: string): CommandRecord {
+  if (new TextEncoder().encode(raw).byteLength > MAX_REALTIME_FRAME_BYTES) throw new Error("Durable command record is too large");
   const parsed = JSON.parse(raw) as Partial<CommandRecord>;
   if (
     !parsed ||
@@ -48,7 +100,12 @@ function parseCommandRecord(raw: string): CommandRecord {
     !Number.isFinite(parsed.createdAt) ||
     parsed.createdAt <= 0 ||
     typeof parsed.command !== "string" ||
-    !parsed.command.trim()
+    !parsed.command.trim() ||
+    !isBoundedText(parsed.command, MAX_COMMAND_TYPE_LENGTH) ||
+    !SUPPORTED_COMMANDS.has(parsed.command) ||
+    (parsed.deviceId !== undefined && !isBoundedText(parsed.deviceId, MAX_DEVICE_ID_LENGTH)) ||
+    (parsed.payloadHash !== undefined && !/^[0-9a-f]{64}$/i.test(parsed.payloadHash)) ||
+    (parsed.state === "completed" && (!isBoundedText(parsed.message, MAX_COMMAND_RESULT_MESSAGE_LENGTH) || typeof parsed.accepted !== "boolean" || (parsed.data !== undefined && jsonByteLength(parsed.data) > MAX_COMMAND_RESULT_DATA_BYTES)))
   ) {
     // Never delete malformed command history: corruption is not proof that the
     // side-effect did not start. Fail closed so a duplicate cannot execute it.
@@ -168,6 +225,12 @@ async function sendCommandResult(
   const requestId = String(command.requestId ?? "");
   const deviceId = String(command.deviceId ?? "");
   const commandType = String(command.command ?? "");
+  const validationError = validateCommandArguments(command);
+  if (validationError) {
+    await sendUnknownCommandResult(socket, command, validationError, "The Android device rejected an invalid or unsupported command. No action was executed.");
+    return;
+  }
+  if (jsonByteLength(command) > MAX_COMMAND_ARGUMENT_BYTES) throw new Error("Command payload is too large");
   const payloadHash = await hashCommandPayload(command);
 
   let existing: CommandRecord | null;
@@ -273,7 +336,12 @@ export function connectFroshRealtime(
   };
   socket.onmessage = async (message) => {
     try {
-      const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      const rawMessage = typeof message.data === "string" ? message.data : String(message.data ?? "");
+      if (new TextEncoder().encode(rawMessage).byteLength > MAX_REALTIME_FRAME_BYTES) {
+        try { socket.close(); } catch { /* already closed */ }
+        return;
+      }
+      const parsed = JSON.parse(rawMessage) as Record<string, unknown>;
       let releaseCommand: (() => void) | undefined;
       let commandRequestId: string | undefined;
 
@@ -285,7 +353,15 @@ export function connectFroshRealtime(
         }
         commandRequestId = requestId;
           const commandType = typeof parsed.command === "string" ? parsed.command : "";
-          if (!commandType) return;
+          const validationError = validateCommandArguments(parsed);
+          if (validationError) {
+            await sendUnknownCommandResult(socket, parsed, validationError, "The Android device rejected an invalid or unsupported command. No action was executed.");
+            return;
+          }
+          if (jsonByteLength(parsed) > MAX_COMMAND_ARGUMENT_BYTES) {
+            await sendUnknownCommandResult(socket, parsed, "command_payload_too_large", "The Android command payload is too large. No action was executed.");
+            return;
+          }
           const payloadHash = await hashCommandPayload(parsed);
           const existingInFlight = inFlightCommands.get(requestId);
           if (existingInFlight) {
@@ -456,6 +532,10 @@ export function connectFroshRealtime(
       }
       if (parsed.type === "connected") {
         onStatus?.("open");
+        return;
+      }
+      if (parsed.type === "device.command") {
+        await sendUnknownCommandResult(socket, parsed, "unsupported_command", "The Android device does not support this command. No action was executed.");
         return;
       }
       onEvent(parsed as unknown as FroshEvent);
