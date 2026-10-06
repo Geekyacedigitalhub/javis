@@ -67,8 +67,8 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
 export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: "device.command.result" }) {
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
-  pendingCommands.delete(message.requestId);
   if (pending.deviceId !== message.deviceId) return;
+  pendingCommands.delete(message.requestId);
   pending.resolve({ accepted: message.accepted, message: message.message, data: "data" in message ? message.data : undefined });
 }
 
@@ -78,14 +78,20 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
-  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve) => {
-    pendingCommands.set(requestId, { deviceId, resolve, reject: () => undefined });
+  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve, reject) => {
+    pendingCommands.set(requestId, { deviceId, resolve, reject });
+    try {
+      client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
+    } catch (error) {
+      pendingCommands.delete(requestId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
     setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
-      resolve(commandTimeoutResult);
+      pending.resolve(commandTimeoutResult);
     }, 15000);
   });
 }
@@ -98,14 +104,20 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
   const client = [...clients.values()].find((item) => item.deviceId === deviceId);
   if (!client || client.socket.readyState !== WebSocket.OPEN) return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   const requestId = crypto.randomUUID();
-  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
-  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve) => {
-    pendingCommands.set(requestId, { resolve, reject: () => undefined });
+  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve, reject) => {
+    pendingCommands.set(requestId, { deviceId, resolve, reject });
+    try {
+      client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
+    } catch (error) {
+      pendingCommands.delete(requestId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
     setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
-      resolve(commandTimeoutResult);
+      pending.resolve(commandTimeoutResult);
     }, 15000);
   });
 }
