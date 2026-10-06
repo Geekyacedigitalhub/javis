@@ -805,7 +805,7 @@ const server = Bun.serve({
           }
         }
         const recoverableInterruptedSteps=steps.filter(step=>step.status==="failed"||step.status==="blocked");
-        if(recoverableInterruptedSteps.length&&!mission.pendingApprovalId){
+        if(recoverableInterruptedSteps.length&&!mission.pendingApprovalId&&!recoveryRequiresReview){
           const now=new Date().toISOString();
           steps=steps.map(step=>recoverableInterruptedSteps.some(item=>item.id===step.id)?{
             ...step,
@@ -1101,7 +1101,7 @@ const server = Bun.serve({
           return next;
         }
         if(mission.status==="failed"){
-          const recoverableSteps=mission.steps.filter(step=>step.status!=="completed");
+          const recoverableSteps=mission.steps.filter(step=>step.status==="failed"||step.status==="running");
           if(recoverableSteps.length){
             const now=new Date().toISOString();
             const steps=mission.steps.map(step=>recoverableSteps.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,nextRetryAt:undefined,updatedAt:now}:step);
