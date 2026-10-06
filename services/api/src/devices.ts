@@ -101,7 +101,7 @@ export async function closeDeviceStore() {
 }
 
 export async function registerDevice(input: FroshDeviceRegistration, options: { allowExisting?: boolean } = {}) {
-  const name = name.trim();
+  const name = input.name.trim();
   const capabilities = [...new Set(input.capabilities.filter((item): item is string => typeof item === "string").map(item => item.trim()).filter(Boolean))];
   if (!name || name.length > 120 || new TextEncoder().encode(name).byteLength > 512) {
     throw new Error("Device name is invalid or too large.");
@@ -519,7 +519,12 @@ export async function revokeDeviceCredential(deviceId: string) {
   const client = db();
   if (!client) {
     if (!devices.has(deviceId)) return false;
-    return credentials.delete(deviceId);
+    const revoked = credentials.delete(deviceId);
+    if (revoked) {
+      const { disconnectDeviceClients } = await import("./realtime");
+      disconnectDeviceClients(deviceId);
+    }
+    return revoked;
   }
   await ensureSchema();
   const result = await client.unsafe(`DELETE FROM frosh_device_credentials WHERE device_id=$1`, [deviceId]);
