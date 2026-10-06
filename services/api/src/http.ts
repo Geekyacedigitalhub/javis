@@ -116,6 +116,13 @@ function logOperationalError(context: string, error: unknown): void {
 
 const MAX_USER_ID_LENGTH = 200;
 
+function decodeBoundedResourceId(value: string, label: string): string | null {
+  let decoded: string;
+  try { decoded = decodeURIComponent(value); } catch { return null; }
+  if (!decoded || decoded.length > 200 || new TextEncoder().encode(decoded).byteLength > 512 || /[\u0000-\u001f\u007f]/.test(decoded)) return null;
+  return decoded;
+}
+
 function decodeBoundedUserId(value: string): string | null {
   let decoded: string;
   try {
@@ -818,7 +825,9 @@ const server = Bun.serve({
     const missionUsers = url.pathname.match(/^\/v1\/missions\/users\/([^/]+)$/);
     if (missionUsers && request.method === "GET") {
       const { getMissionStore } = await import("../../missions/src");
-      return Response.json({ missions: await getMissionStore().list(decodeURIComponent(missionUsers[1])) });
+      const userId = decodeBoundedUserId(missionUsers[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      return Response.json({ missions: await getMissionStore().list(userId) });
     }
 
     if (missionUsers && request.method === "POST") {
@@ -827,7 +836,9 @@ const server = Bun.serve({
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const body=await parseBoundedJson(request);
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
-        if(!goal)return Response.json({error:"goal is required"},{status:400});        const { getMissionStore }=await import("../../missions/src");
+        if(!goal)return Response.json({error:"goal is required"},{status:400});
+        if(goal.length > 12000 || new TextEncoder().encode(goal).byteLength > 48 * 1024)return Response.json({error:"Mission goal is too large"},{status:400});
+        const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
       const budgetProfile=body?.budgetProfile==="extended"||body?.budgetProfile==="intensive"?body.budgetProfile:"standard";
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
@@ -841,7 +852,8 @@ const server = Bun.serve({
       const {getMissionStore}=await import("../../missions/src");
       const userId=decodeBoundedUserId(missionControlMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionControlMatch[2]);
+      const id=decodeBoundedResourceId(missionControlMatch[2],"mission ID");
+      if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
       const action=missionControlMatch[3];
       const store=getMissionStore();
       const mission=await store.get(id,userId);
@@ -910,8 +922,10 @@ const server = Bun.serve({
     if(missionRerunStepMatch && request.method==="POST"){
       const userId=decodeBoundedUserId(missionRerunStepMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionRerunStepMatch[2]);
-      const stepId=decodeURIComponent(missionRerunStepMatch[3]);
+      const id=decodeBoundedResourceId(missionRerunStepMatch[2],"mission ID");
+      if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
+      const stepId=decodeBoundedResourceId(missionRerunStepMatch[3],"step ID");
+      if (!stepId) return Response.json({error:"Invalid step ID"},{status:400});
       const store=(await import("../../missions/src")).getMissionStore();
       const source=await store.get(id,userId);
       if(!source)return Response.json({error:"Mission not found"},{status:404});
@@ -953,7 +967,8 @@ const server = Bun.serve({
     if(missionRerunMatch && request.method==="POST"){
       const userId=decodeBoundedUserId(missionRerunMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionRerunMatch[2]);
+      const id=decodeBoundedResourceId(missionRerunMatch[2],"mission ID");
+      if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
       const store=(await import("../../missions/src")).getMissionStore();
       const source=await store.get(id,userId);
       if(!source)return Response.json({error:"Mission not found"},{status:404});
@@ -968,7 +983,8 @@ const server = Bun.serve({
     if(missionEventStreamMatch && request.method==="GET"){
       const userId=decodeBoundedUserId(missionEventStreamMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionEventStreamMatch[2]);
+      const id=decodeBoundedResourceId(missionEventStreamMatch[2],"mission ID");
+      if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
       const {getMissionStore}=await import("../../missions/src");
       const mission=await getMissionStore().get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -999,11 +1015,13 @@ const server = Bun.serve({
       const {getMissionStore}=await import("../../missions/src");
       const userId=decodeBoundedUserId(missionEventsMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionEventsMatch[2]);
+      const id=decodeBoundedResourceId(missionEventsMatch[2],"mission ID");
+      if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
       const mission=await getMissionStore().get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
-      const limit=Number(url.searchParams.get("limit")??"100");
-      return Response.json({events:await getMissionStore().listEvents(id,userId,Number.isFinite(limit)?limit:100)});
+      const parsedLimit=Number(url.searchParams.get("limit")??"100");
+      const limit=Number.isInteger(parsedLimit)?Math.min(200,Math.max(1,parsedLimit)):100;
+      return Response.json({events:await getMissionStore().listEvents(id,userId,limit)});
     }
 
     if(missionMatch && request.method==="GET"){
@@ -1017,7 +1035,8 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionPriorityMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionPriorityMatch[2]);
+        const id=decodeBoundedResourceId(missionPriorityMatch[2],"mission ID");
+        if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
         const body=await parseBoundedJson(request);
         const priority=body?.priority;
         if(priority!=="low"&&priority!=="normal"&&priority!=="high")return Response.json({error:"priority must be low, normal, or high"},{status:400});
@@ -1037,7 +1056,8 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionBudgetProfileMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionBudgetProfileMatch[2]);
+        const id=decodeBoundedResourceId(missionBudgetProfileMatch[2],"mission ID");
+        if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
         const body=await parseBoundedJson(request);
         const budgetProfile=body?.budgetProfile;
         if(budgetProfile!=="standard"&&budgetProfile!=="extended"&&budgetProfile!=="intensive")return Response.json({error:"invalid budget profile"},{status:400});
@@ -1057,7 +1077,8 @@ const server = Bun.serve({
       const store=getMissionStore();
       const userId=decodeBoundedUserId(missionMatch[1]);
        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionMatch[2]);
+      const id=decodeBoundedResourceId(missionMatch[2],"mission ID");
+       if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
       const mission=await store.get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       const deleted=await store.deleteIfIdle(id,userId);
@@ -1069,7 +1090,8 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionMatch[1]);
        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionMatch[2]);
+        const id=decodeBoundedResourceId(missionMatch[2],"mission ID");
+       if (!id) return Response.json({error:"Invalid mission ID"},{status:400});
         const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
         const missionEvaluator=new OpenAIProvider();
         const store=getMissionStore();
