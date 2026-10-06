@@ -24,6 +24,7 @@ export default function App() {
   const [paired, setPaired] = useState(false);
   const [pairing, setPairing] = useState(false);
   const [deviceName, setDeviceName] = useState("My Android Phone");
+  const [enrollmentToken, setEnrollmentToken] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [mediaMessage, setMediaMessage] = useState("Media controls unavailable until Android MediaSession access is connected.");
   const [notifications, setNotifications] = useState<Array<{ id: string; packageName: string; title?: string; text?: string }>>([]);
@@ -126,6 +127,8 @@ export default function App() {
             <Text style={styles.cardTitle}>Pair This Phone</Text>
             <Text style={styles.reply}>Connect this Android device to your private FROSH account before using protected capabilities.</Text>
             <TextInput value={deviceName} onChangeText={setDeviceName} placeholder="Device name" placeholderTextColor="#6b7280" style={styles.inputSingle} />
+            <TextInput value={enrollmentToken} onChangeText={setEnrollmentToken} placeholder="Enrollment token" placeholderTextColor="#6b7280" secureTextEntry autoCapitalize="none" autoCorrect={false} style={styles.inputSingle} />
+            <Text style={styles.muted}>The enrollment token is used only to pair this phone and is not saved on the device.</Text>
             <Pressable style={styles.primary} onPress={pairPhone} disabled={pairing}>
               {pairing ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>PAIR PHONE</Text>}
             </Pressable>
