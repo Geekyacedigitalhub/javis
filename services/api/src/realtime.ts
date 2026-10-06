@@ -40,7 +40,13 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
       }, authCheckInterval)
     : undefined;
   clients.set(id, { id, socket, deviceId, deviceToken, authCheck });
-  if (deviceId) latestClientByDevice.set(deviceId, id);
+  if (deviceId) {
+    const previousClientId = latestClientByDevice.get(deviceId);
+    if (previousClientId && previousClientId !== id) {
+      removeRealtimeClient(previousClientId);
+    }
+    latestClientByDevice.set(deviceId, id);
+  }
 
   socket.addEventListener("close", () => {
     if (authCheck) clearInterval(authCheck);
