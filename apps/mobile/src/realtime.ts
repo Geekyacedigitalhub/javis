@@ -44,6 +44,10 @@ const SUPPORTED_MEDIA_ACTIONS = new Set([
 ]);
 const commandRecordWrites = new Map<string, Promise<void>>();
 const commandRecordPrefix = "frosh:device-command:";
+const commandRecordIndexKey = "frosh:device-command-index";
+const COMPLETED_COMMAND_RECORD_RETENTION_MS = 24 * 60 * 60 * 1000;
+const STARTED_COMMAND_RECORD_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_COMMAND_RECORD_INDEX_ENTRIES = 256;
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isSafeCommandRequestId(value: string): boolean {
@@ -141,6 +145,66 @@ async function readDurableCommandRecord(requestId: string): Promise<CommandRecor
   return raw ? parseCommandRecord(raw) : null;
 }
 
+async function loadCommandRecordIndex(): Promise<string[]> {
+  try {
+    const raw = await SecureStore.getItemAsync(commandRecordIndexKey);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string" || !isSafeCommandRequestId(item))) return [];
+    return [...new Set(parsed)].slice(-MAX_COMMAND_RECORD_INDEX_ENTRIES);
+  } catch {
+    return [];
+  }
+}
+
+async function saveCommandRecordIndex(ids: string[]) {
+  const normalized = [...new Set(ids.filter(isSafeCommandRequestId))].slice(-MAX_COMMAND_RECORD_INDEX_ENTRIES);
+  try {
+    await SecureStore.setItemAsync(commandRecordIndexKey, JSON.stringify(normalized));
+  } catch {
+    // Command durability remains authoritative; index failure only disables future cleanup for unindexed records.
+  }
+}
+
+async function indexCommandRecord(requestId: string) {
+  const index = await loadCommandRecordIndex();
+  if (index.includes(requestId)) return;
+  await saveCommandRecordIndex([...index, requestId]);
+}
+
+async function purgeExpiredCommandRecords() {
+  const index = await loadCommandRecordIndex();
+  if (!index.length) return;
+  const now = Date.now();
+  const survivors: string[] = [];
+  for (const requestId of index) {
+    try {
+      const record = await readDurableCommandRecord(requestId);
+      if (!record) continue;
+      const age = now - record.createdAt;
+      const retention = record.state === "completed"
+        ? COMPLETED_COMMAND_RECORD_RETENTION_MS
+        : STARTED_COMMAND_RECORD_RETENTION_MS;
+      if (age > retention) {
+        // Completed records contain potentially sensitive result data and can be
+        // removed sooner. Started fences are retained much longer because deleting
+        // one can turn an old replay into a fresh side effect.
+        if (record.state === "completed") {
+          await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
+          commandRecords.delete(requestId);
+          continue;
+        }
+      }
+      survivors.push(requestId);
+    } catch {
+      // Never delete a record we cannot parse or verify. Corruption must fail closed.
+      survivors.push(requestId);
+    }
+  }
+  await saveCommandRecordIndex(survivors);
+}
+
+
 async function loadCommandRecord(requestId: string): Promise<CommandRecord | null> {
   const cached = commandRecords.get(requestId);
   if (cached) return cached;
@@ -186,6 +250,7 @@ async function saveCommandRecord(requestId: string, record: CommandRecord) {
     }
 
     await SecureStore.setItemAsync(commandRecordPrefix + requestId, JSON.stringify(record));
+    await indexCommandRecord(requestId);
     commandRecords.set(requestId, record);
     return true;
   } catch {
@@ -360,6 +425,7 @@ function connectFroshRealtimeSession(
   });
 
   socket.onopen = async () => {
+    void purgeExpiredCommandRecords();
     const credential = await loadDeviceCredential();
     if (!credential) {
       onStatus?.("closed");
