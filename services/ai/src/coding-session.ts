@@ -10,6 +10,7 @@ const CODING_SYSTEM = [
   "Inspect before changing.",
   "Use safe tools automatically.",
   "Sensitive actions require explicit user approval.",
+  "If a tool result reports outcome=unknown or retryable=false after a timeout or disconnect, treat the real-world action as potentially completed. Never automatically retry the same side-effecting action; tell the user the outcome is unknown and require verification before another attempt.",
   "After approved changes, validate with tests, typecheck, lint, or build.",
   "If validation fails, diagnose and propose the next correction.",
   "Never claim success without tool evidence.",
