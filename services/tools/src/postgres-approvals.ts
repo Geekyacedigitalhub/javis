@@ -45,7 +45,7 @@ export class PostgresApprovalStore implements FroshApprovalStore {
 
     if (record.status === "pending" && Date.now() >= Date.parse(record.expiresAt)) {
       const expired = await this.query(
-        'UPDATE frosh_approvals SET status=$2, resolved_at=NOW() WHERE id=$1 AND status=$3 AND expires_at>NOW() RETURNING id, run_id AS "runId", tool_name AS "toolName", arguments, reason, status, created_at AS "createdAt", expires_at AS "expiresAt", resolved_at AS "resolvedAt"',
+        'UPDATE frosh_approvals SET status=$2, resolved_at=NOW() WHERE id=$1 AND status=$3 AND expires_at<=NOW() RETURNING id, run_id AS "runId", tool_name AS "toolName", arguments, reason, status, created_at AS "createdAt", expires_at AS "expiresAt", resolved_at AS "resolvedAt"',
         [id, "expired", "pending"],
       );
       return expired[0] ? this.normalize(expired[0]) : record;
