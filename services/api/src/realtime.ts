@@ -209,6 +209,12 @@ async function prepareCommandLedger(input: {
   const payloadHash = await hashCommandPayload(input.payload);
   const idempotencyKey = input.idempotencyKey?.trim() || input.requestId;
   if (idempotencyKey.length > 200) return { kind: "error" as const, reason: "idempotency_key_too_long" };
+  if (new TextEncoder().encode(idempotencyKey).byteLength > 512) {
+    return { kind: "error" as const, reason: "idempotency_key_too_large" };
+  }
+  if (/[\u0000-\u001f\u007f]/.test(idempotencyKey)) {
+    return { kind: "error" as const, reason: "idempotency_key_invalid" };
+  }
   try {
     const created = await createDeviceCommandLedger({
       requestId: input.requestId,
