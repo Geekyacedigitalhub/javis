@@ -12,6 +12,9 @@ import { controlMedia, readMediaState } from "./src/media-bridge";
 import { listInstalledApps } from "./modules/frosh-apps/src";
 import { getMediaState, openMediaAccessSettings } from "./src/media";
 import { getNotificationCapability, getRecentNotifications, openNotificationSettings, replyToNotification } from "./modules/frosh-notifications/src";
+import { getCallPermissionStatus } from "./modules/frosh-calls/src";
+import { getContactsCapability } from "./modules/frosh-contacts/src";
+import { getMessagingPermissionStatus } from "./modules/frosh-messaging/src";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -62,22 +65,23 @@ export default function App() {
   async function pairPhone() {
     setPairing(true);
     try {
-      const device = await registerDevice(deviceName.trim() || "My Android Phone", [
-        "chat",
-        "agent-runs",
-        "approvals",
-        "realtime",
+      const capabilities = [
         "device.info",
         "apps.launch",
-        "media.control",
         "calls.dialer",
-        "calls.direct",
         "messages.compose",
-        "messages.send",
-        "contacts.read",
-        "notifications.read",
-        "notifications.reply",
-      ], enrollmentToken);
+        ...(getCallPermissionStatus() === "available" ? ["calls.direct"] : []),
+        ...(getMessagingPermissionStatus() === "available" ? ["messages.send"] : []),
+        ...(getContactsCapability().available ? ["contacts.read"] : []),
+        ...(getNotificationCapability().available ? ["notifications.read", "notifications.reply"] : []),
+      ];
+      try {
+        const mediaModule = require("./modules/frosh-media/src").default as { getPermissionStatus(): string };
+        if (mediaModule.getPermissionStatus() === "available") capabilities.push("media.control");
+      } catch {
+        // Media capability stays absent when the native module or permission is unavailable.
+      }
+      const device = await registerDevice(deviceName.trim() || "My Android Phone", capabilities, enrollmentToken);
       setPaired(true);
       setEnrollmentToken("");
       setDevices([device]);
