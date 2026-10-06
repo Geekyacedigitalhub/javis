@@ -16,6 +16,7 @@ type CommandRecord =
   | { state: "completed"; createdAt: number; accepted: boolean; message: string; data?: unknown };
 
 const commandRecords = new Map<string, CommandRecord>();
+const inFlightCommands = new Map<string, Promise<void>>();
 const commandRecordPrefix = "frosh:device-command:";
 
 async function loadCommandRecord(requestId: string): Promise<CommandRecord | null> {
@@ -86,26 +87,48 @@ export function connectFroshRealtime(
   socket.onmessage = async (message) => {
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      let releaseCommand: (() => void) | undefined;
+      let commandRequestId: string | undefined;
+
       if (parsed.type === "device.command") {
         const requestId = String(parsed.requestId ?? "");
+        commandRequestId = requestId || undefined;
         if (requestId) {
-          const existing = await loadCommandRecord(requestId);
-          if (existing?.state === "completed") {
-            await sendCommandResult(socket, parsed, existing);
+          const existingInFlight = inFlightCommands.get(requestId);
+          if (existingInFlight) {
+            await existingInFlight;
+            const completed = await loadCommandRecord(requestId);
+            if (completed?.state === "completed") {
+              await sendCommandResult(socket, parsed, completed);
+            } else {
+              await sendCommandResult(socket, parsed, {
+                accepted: false,
+                message: "This command was already processed by another connection, but its final outcome was not durably recorded. The outcome is unknown; do not retry automatically.",
+                data: { outcome: "unknown", retryable: false, reason: "prior_execution_unknown" },
+              });
+            }
             return;
           }
+
+          let release!: () => void;
+          const lock = new Promise<void>((resolve) => { release = resolve; });
+          inFlightCommands.set(requestId, lock);
+          releaseCommand = release;
+
+          const existing = await loadCommandRecord(requestId);
+          if (existing?.state === "completed") return await sendCommandResult(socket, parsed, existing);
           if (existing?.state === "started") {
-            await sendCommandResult(socket, parsed, {
+            return await sendCommandResult(socket, parsed, {
               accepted: false,
-              message: "This command was already started, but its final outcome was not durably recorded. The outcome is unknown; do not retry automatically.",
+              message: "This command was already started before this connection began. The outcome is unknown; do not retry automatically.",
               data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
             });
-            return;
           }
           await saveCommandRecord(requestId, { state: "started", createdAt: Date.now() });
         }
       }
 
+      try {
       if (parsed.type === "device.command" && parsed.command === "message_inbox") {
         try {
           const { getUnifiedMessagingInbox } = await import("./messaging-inbox");
@@ -178,6 +201,12 @@ export function connectFroshRealtime(
         return;
       }
       onEvent(parsed as unknown as FroshEvent);
+      } finally {
+        if (commandRequestId) {
+          inFlightCommands.delete(commandRequestId);
+          releaseCommand?.();
+        }
+      }
     } catch {
       // Ignore malformed events from the server.
     }
