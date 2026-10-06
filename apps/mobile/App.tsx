@@ -79,6 +79,7 @@ export default function App() {
         "notifications.reply",
       ], enrollmentToken);
       setPaired(true);
+      setEnrollmentToken("");
       setDevices([device]);
     } catch (error) {
       setReply(error instanceof Error ? error.message : "Pairing failed.");
