@@ -942,10 +942,39 @@ const server = Bun.serve({
             if(evaluation.nextAction==="finish"||evaluation.complete){
               steps=steps.map((item,i)=>i===index?{...item,status:"completed",result:(run.result??"")+"\nEvaluation: "+evaluation.reason,updatedAt:new Date().toISOString()}:item);
             }else if(evaluation.nextAction==="recover"){
-              steps.push(createRecoveryStep(step.title,evaluation.reason));
+              const recovery=createRecoveryStep(step.title,evaluation.reason);
+              const recoveryNow=new Date().toISOString();
+              steps=steps.map(item=>item.id===step.id?{
+                ...recovery,
+                id:item.id,
+                context:[item.context??"","Evaluator requested recovery work.",evaluation.reason].filter(Boolean).join("\n\n").slice(-12000),
+                createdAt:item.createdAt,
+                updatedAt:recoveryNow
+              }:item);
             }else if(evaluation.nextStep?.trim()){
-              const timestamp=new Date().toISOString();
-              steps.push({id:crypto.randomUUID(),title:evaluation.nextStep.trim(),status:"pending",createdAt:timestamp,updatedAt:timestamp});
+              const nextTitle=evaluation.nextStep.trim();
+              const duplicatePending=steps.some(item=>item.title===nextTitle && (item.status==="pending"||item.status==="running"||item.status==="blocked"));
+              if(!duplicatePending){
+                if(steps.length>=maxSteps){
+                  const durationAtPause=initialDurationMs+(Date.now()-missionStartedAt);
+                  await emit("mission.budget.exceeded","Mission step budget reached before evaluator could add the next step.",step.id,run.id,{stepCount:steps.length,maxSteps});
+                  mission=await updateOwned({
+                    status:"paused",
+                    progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,
+                    steps,
+                    activeRunId:run.id,
+                    pendingApprovalId:undefined,
+                    result:run.result,
+                    toolCallsUsed:toolCount,
+                    executionDurationMs:durationAtPause,
+                    leaseUntil:undefined,
+                    leaseOwner:undefined
+                  });
+                  return Response.json({mission,budgetExceeded:true});
+                }
+                const timestamp=new Date().toISOString();
+                steps.push({id:crypto.randomUUID(),title:nextTitle,status:"pending",createdAt:timestamp,updatedAt:timestamp});
+              }
             }
           }
 
