@@ -763,7 +763,15 @@ const server = Bun.serve({
       try {
         const userId = decodeBoundedUserId(automationMatch[1]);
         if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
-        const id = decodeURIComponent(automationMatch[2]);
+        let id: string;
+        try {
+          id = decodeURIComponent(automationMatch[2]);
+        } catch {
+          return Response.json({ error: "Invalid automation ID" }, { status: 400 });
+        }
+        if (!id || id.length > 200 || new TextEncoder().encode(id).byteLength > 512 || /[\u0000-\u001f\u007f]/.test(id)) {
+          return Response.json({ error: "Invalid automation ID" }, { status: 400 });
+        }
         const body = await parseBoundedJson(request);
         const patch: Record<string, unknown> = {};
         if (body && typeof body === "object" && !Array.isArray(body) && Object.keys(body as Record<string, unknown>).length > 10) return Response.json({ error: "Automation update contains too many fields." }, { status: 400 });
@@ -793,8 +801,18 @@ const server = Bun.serve({
     }
 
     if (automationMatch && request.method === "DELETE") {
-      const deleted = await (await import("../../automation/src")).getAutomationStore().delete(decodeURIComponent(automationMatch[2]), decodeURIComponent(automationMatch[1]));
-      return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Automation not found" }, { status: 404 });
+      try {
+        const userId = decodeBoundedUserId(automationMatch[1]);
+        if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+        const id = decodeURIComponent(automationMatch[2]);
+        if (!id || id.length > 200 || new TextEncoder().encode(id).byteLength > 512 || /[\u0000-\u001f\u007f]/.test(id)) {
+          return Response.json({ error: "Invalid automation ID" }, { status: 400 });
+        }
+        const deleted = await (await import("../../automation/src")).getAutomationStore().delete(id, userId);
+        return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Automation not found" }, { status: 404 });
+      } catch {
+        return Response.json({ error: "Automation deletion failed" }, { status: 400 });
+      }
     }
 
     const missionUsers = url.pathname.match(/^\/v1\/missions\/users\/([^/]+)$/);
