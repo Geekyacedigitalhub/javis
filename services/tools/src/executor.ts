@@ -13,6 +13,17 @@ export async function executeToolCall(call: FroshToolCall, options: { runId?: st
   }
 
   if (tool.permission !== "safe") {
+    const argumentsHash = JSON.stringify(call.arguments);
+    const existingApproval = options.runId
+      ? await approvalStore.findPendingByRun(options.runId, call.name, argumentsHash)
+      : null;
+    if (existingApproval) {
+      return {
+        ...call,
+        status: "failed" as const,
+        result: { error: "Approval required", approvalId: existingApproval.id, approval: existingApproval },
+      };
+    }
     const approval = await approvalStore.create({
       runId: options.runId,
       toolName: call.name,
