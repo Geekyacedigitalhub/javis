@@ -195,6 +195,13 @@ export function handleDeviceCommandResult(clientId: string, message: FroshDevice
   if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
+  const client = clients.get(clientId);
+  if (
+    !client ||
+    client.deviceId !== message.deviceId ||
+    client.socket.readyState !== WebSocket.OPEN ||
+    latestClientByDevice.get(message.deviceId) !== clientId
+  ) return;
   if (pending.clientId !== clientId || pending.deviceId !== message.deviceId || pending.command !== message.command) return;
   pendingCommands.delete(message.requestId);
   clearTimeout(pending.timeout);
