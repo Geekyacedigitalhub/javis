@@ -33,17 +33,33 @@ export class PostgresAutomationStore implements FroshAutomationStore {
   }
 
   async create(input: Omit<FroshAutomation, "id" | "createdAt" | "updatedAt">) {
-    const id = crypto.randomUUID();
-    const rows = await this.sql.unsafe<FroshAutomation[]>(
-      `INSERT INTO frosh_automations
-       (id,user_id,name,prompt,schedule,status,next_run_at,last_run_at)
-       VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
-       RETURNING id,user_id AS "userId",name,prompt,schedule,status,
-       next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",
-       created_at AS "createdAt",updated_at AS "updatedAt"`,
-      [id,input.userId,input.name,input.prompt,JSON.stringify(input.schedule),input.status,input.nextRunAt ?? null,input.lastRunAt ?? null]
-    );
-    return rows[0];
+    const configured = Number(process.env.FROSH_MAX_ACTIVE_AUTOMATIONS_PER_USER ?? 50);
+    const maxActive = Number.isFinite(configured)
+      ? Math.min(500, Math.max(1, Math.floor(configured)))
+      : 50;
+
+    return this.sql.begin(async (sql) => {
+      // Serialize admission decisions for this user across all API processes.
+      await sql.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))", [input.userId]);
+
+      const countRows = await sql.unsafe<{ count: number }[]>(
+        "SELECT COUNT(*)::int AS count FROM frosh_automations WHERE user_id=$1 AND status='active'",
+        [input.userId]
+      );
+      if ((countRows[0]?.count ?? 0) >= maxActive) return null;
+
+      const id = crypto.randomUUID();
+      const rows = await sql.unsafe<FroshAutomation[]>(
+        `INSERT INTO frosh_automations
+         (id,user_id,name,prompt,schedule,status,next_run_at,last_run_at)
+         VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
+         RETURNING id,user_id AS "userId",name,prompt,schedule,status,
+         next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",
+         created_at AS "createdAt",updated_at AS "updatedAt"`,
+        [id,input.userId,input.name,input.prompt,JSON.stringify(input.schedule),input.status,input.nextRunAt ?? null,input.lastRunAt ?? null]
+      );
+      return rows[0] ?? null;
+    });
   }
 
   async update(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>) {
@@ -143,6 +159,12 @@ export class InMemoryAutomationStore implements FroshAutomationStore {
   async list(userId:string){ return [...this.items.values()].filter(x=>x.userId===userId).sort((a,b)=>Date.parse(a.nextRunAt??"9999")-Date.parse(b.nextRunAt??"9999")); }
   async get(id:string,userId:string){ const item=this.items.get(id); return item?.userId===userId ? item : null; }
   async create(input:Omit<FroshAutomation,"id"|"createdAt"|"updatedAt">){
+    const configured = Number(process.env.FROSH_MAX_ACTIVE_AUTOMATIONS_PER_USER ?? 50);
+    const maxActive = Number.isFinite(configured)
+      ? Math.min(500, Math.max(1, Math.floor(configured)))
+      : 50;
+    const activeCount = [...this.items.values()].filter((item) => item.userId === input.userId && item.status === "active").length;
+    if (activeCount >= maxActive) return null;
     const now=new Date().toISOString();
     const item={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};
     this.items.set(item.id,item); return item;
