@@ -117,6 +117,34 @@ function logOperationalError(context: string, error: unknown): void {
 const MAX_USER_ID_LENGTH = 200;
 
 const DEFAULT_MAX_ACTIVE_MISSIONS_PER_USER = 50;
+const DEFAULT_MAX_ACTIVE_AUTOMATIONS_PER_USER = 50;
+const automationCreationLocks = new Map<string, Promise<void>>();
+
+function configuredMaxActiveAutomations(): number {
+  const configured = Number(process.env.FROSH_MAX_ACTIVE_AUTOMATIONS_PER_USER ?? DEFAULT_MAX_ACTIVE_AUTOMATIONS_PER_USER);
+  return Number.isFinite(configured)
+    ? Math.min(500, Math.max(1, Math.floor(configured)))
+    : DEFAULT_MAX_ACTIVE_AUTOMATIONS_PER_USER;
+}
+
+async function withAutomationCreationAdmission<T>(userId: string, create: () => Promise<T>): Promise<T | null> {
+  const previous = automationCreationLocks.get(userId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  const queued = previous.then(() => current);
+  automationCreationLocks.set(userId, queued);
+  await previous;
+  try {
+    const store = (await import("../../automation/src")).getAutomationStore();
+    const automations = await store.list(userId);
+    const activeCount = automations.filter((automation) => automation.status === "active").length;
+    if (activeCount >= configuredMaxActiveAutomations()) return null;
+    return await create();
+  } finally {
+    release();
+    if (automationCreationLocks.get(userId) === queued) automationCreationLocks.delete(userId);
+  }
+}
 const missionCreationLocks = new Map<string, Promise<void>>();
 
 function configuredMaxActiveMissions(): number {
@@ -788,7 +816,8 @@ const server = Bun.serve({
         if (!valid) return Response.json({ error: "Invalid schedule. Interval must be at least 60 minutes." }, { status: 400 });
 
         const nextRunAt = calculateNextRun(schedule);
-        const automation = await getAutomationStore().create({ userId, name, prompt, schedule, status: "active", nextRunAt });
+        const automation = await withAutomationCreationAdmission(userId, () => getAutomationStore().create({ userId, name, prompt, schedule, status: "active", nextRunAt }));
+        if (!automation) return Response.json({ error: "Automation limit reached for this user; pause, complete, or delete an existing automation before creating another." }, { status: 429 });
         return Response.json({ automation }, { status: 201 });
       } catch (error) {
         return Response.json({ error: "Automation creation failed" }, { status: 400 });
