@@ -353,6 +353,9 @@ const server = Bun.serve({
     const messagesMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages$/);
     if (messagesMatch && request.method === "GET") {
       try {
+        if (!webAuthenticated && deviceId !== messagesMatch[1]) {
+          return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
+        }
         const { requestMessageInbox } = await import("./realtime");
         return Response.json(await requestMessageInbox(messagesMatch[1]));
       } catch (error) {
@@ -363,6 +366,9 @@ const server = Bun.serve({
     const replySuggestionsMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/suggest-replies$/);
     if (replySuggestionsMatch && request.method === "POST") {
       try {
+        if (!webAuthenticated && deviceId !== replySuggestionsMatch[1]) {
+          return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
+        }
         const body = await request.json();
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         const provider = typeof body?.provider === "string" ? body.provider : "other";
@@ -378,6 +384,9 @@ const server = Bun.serve({
     const messageIntelligenceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/intelligence$/);
     if (messageIntelligenceMatch && request.method === "GET") {
       try {
+        if (!webAuthenticated && deviceId !== messageIntelligenceMatch[1]) {
+          return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
+        }
         const { requestMessageInbox } = await import("./realtime");
         const inbox = await requestMessageInbox(messageIntelligenceMatch[1]);
         if (!inbox.accepted) return Response.json(inbox);
