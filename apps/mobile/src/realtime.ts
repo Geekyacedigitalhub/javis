@@ -69,6 +69,7 @@ export function connectFroshRealtime(
 ) {
   onStatus?.("connecting");
   const socket = new WebSocket(websocketUrl());
+  let authenticatedDeviceId: string | undefined;
 
   socket.onopen = async () => {
     const credential = await loadDeviceCredential();
@@ -77,6 +78,7 @@ export function connectFroshRealtime(
       socket.close();
       return;
     }
+    authenticatedDeviceId = credential.deviceId;
     socket.send(JSON.stringify({
       type: "auth",
       deviceId: credential.deviceId,
@@ -93,7 +95,7 @@ export function connectFroshRealtime(
       if (parsed.type === "device.command") {
         const requestId = typeof parsed.requestId === "string" ? parsed.requestId.trim() : "";
         const commandDeviceId = typeof parsed.deviceId === "string" ? parsed.deviceId.trim() : "";
-        if (!requestId || !commandDeviceId || !credential || commandDeviceId !== credential.deviceId) {
+        if (!requestId || !commandDeviceId || !authenticatedDeviceId || commandDeviceId !== authenticatedDeviceId) {
           return;
         }
         commandRequestId = requestId;
