@@ -32,7 +32,9 @@ export class CodingSessionManager {
     } catch (error) {
       try {
         if (!input.canPersist || await input.canPersist()) {
-          await agentRunStore.update(run.id, {
+          if (canPersist && !(await canPersist())) throw new Error("Mission lease was lost before approval continuation could start");
+
+    await agentRunStore.update(run.id, {
             status: "failed",
             error: error instanceof Error ? error.message : "Agent run failed before provider execution",
             result: "The run was stopped before provider execution could begin.",
@@ -85,7 +87,7 @@ export class CodingSessionManager {
     });
   }
 
-  async approveAndResume(approvalId: string) {
+  async approveAndResume(approvalId: string, canPersist?: () => Promise<boolean>) {
     const approval = await approvalStore.get(approvalId);
     if (!approval) throw new Error("Approval request not found");
     if (!approval.runId) throw new Error("Approval is not attached to an agent run");
@@ -130,6 +132,7 @@ export class CodingSessionManager {
         },
       );
     } catch (error) {
+      if (canPersist && !(await canPersist())) throw error;
       await agentRunStore.update(run.id, {
         status: "failed",
         pendingApprovalId: undefined,
@@ -150,7 +153,11 @@ export class CodingSessionManager {
           : undefined;
       if (!nextApprovalId) throw new Error("Provider paused without an approval request");
 
-      return agentRunStore.update(run.id, {
+      if (canPersist && !(await canPersist())) return agentRunStore.get(run.id).then((current) => current ?? run);
+
+      if (canPersist && !(await canPersist())) return agentRunStore.get(run.id).then((current) => current ?? run);
+
+    return agentRunStore.update(run.id, {
         status: "waiting_approval",
         pendingApprovalId: nextApprovalId,
         providerContinuation: resumed.continuation,
