@@ -129,8 +129,7 @@ export class PostgresAutomationStore implements FroshAutomationStore {
   }
 
   async delete(id: string, userId: string) {
-    const result = await this.sql.unsafe("DELETE FROM frosh_automations WHERE id=$1 AND user_id=$2",[id,userId]);
-    return result.count > 0;
+    return this.deleteIfIdle(id, userId);
   }
 }
 
