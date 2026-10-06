@@ -155,7 +155,14 @@ export class CodingSessionManager {
     });
 
     if (canPersist && !(await canPersist())) {
-      await agentRunStore.restoreApprovalWait(run.id, approvalId, run.toolCalls);
+      await agentRunStore.update(run.id, {
+        status: "failed",
+        pendingApprovalId: undefined,
+        providerContinuation: claimedRun.providerContinuation,
+        toolCalls: [...run.toolCalls, completedToolCall],
+        result: "The approved action completed, but the mission lease was lost before provider continuation could resume. The action will not be replayed automatically.",
+        error: "Mission lease was lost after approved action execution; outcome requires recovery review",
+      });
       throw new Error("Mission lease was lost after approval was accepted and before provider continuation could resume");
     }
 
