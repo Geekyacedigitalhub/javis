@@ -103,6 +103,13 @@ export class PostgresMissionStore implements FroshMissionStore {
   }
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
     const id=crypto.randomUUID();
+    const mission=await this.sql.unsafe<{id:string;steps:import("../../../packages/types/src/mission").FroshMissionStep[]}[]>(`SELECT id,steps FROM frosh_missions WHERE id=$1 AND user_id=$2 LIMIT 1`,[input.missionId,input.userId]);
+    if(!mission[0]) throw new Error("Mission not found for event");
+    if(input.stepId && !mission[0].steps.some(step=>step.id===input.stepId)) throw new Error("Mission step not found for event");
+    if(input.runId && input.stepId){
+      const step=mission[0].steps.find(item=>item.id===input.stepId);
+      if(step?.runId && step.runId!==input.runId) throw new Error("Agent run does not match mission step for event");
+    }
     const rows=await this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`INSERT INTO frosh_mission_events(id,mission_id,user_id,type,message,step_id,run_id,metadata)
       SELECT $1,m.id,$3,$4,$5,$6,$7,$8::jsonb
       FROM frosh_missions m
@@ -140,6 +147,11 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async addEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
     const mission=await this.get(input.missionId,input.userId);
     if(!mission) throw new Error("Mission not found for event");
+    if(input.stepId && !mission.steps.some(step=>step.id===input.stepId)) throw new Error("Mission step not found for event");
+    if(input.runId && input.stepId){
+      const step=mission.steps.find(item=>item.id===input.stepId);
+      if(step && step.runId && step.runId!==input.runId) throw new Error("Agent run does not match mission step for event");
+    }
     const event={...input,id:crypto.randomUUID(),createdAt:new Date().toISOString()};
     const list=this.events.get(input.missionId)??[];
     list.unshift(event);
