@@ -126,12 +126,13 @@ const server = Bun.serve({
     open(ws) {
       // Authentication is completed by the first realtime auth message.
       const authTimeout = setTimeout(() => {
-        if (!ws.data?.authenticated) {
-          ws.send(JSON.stringify({ type: "error", message: "Realtime authentication timed out" }));
-          ws.close();
+        if (!ws.data?.authenticated && !ws.data?.closed) {
+          ws.data = { ...ws.data, closed: true, authenticating: false };
+          try { ws.send(JSON.stringify({ type: "error", message: "Realtime authentication timed out" })); } catch { /* socket may already be closing */ }
+          try { ws.close(); } catch { /* already closed */ }
         }
       }, 10000);
-      ws.data = { authenticated: false, authenticating: false, closed: false, deviceId: undefined as string | undefined, realtimeClientId: undefined as string | undefined, authTimeout };
+      ws.data = { authenticated: false, authenticating: false, closed: false, malformedMessages: 0, deviceId: undefined as string | undefined, realtimeClientId: undefined as string | undefined, authTimeout };
       ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
     },
     close(ws) {
@@ -180,7 +181,13 @@ const server = Bun.serve({
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
         }
       } catch {
-        ws.send(JSON.stringify({ type: "error", message: "Invalid realtime message" }));
+        const malformedMessages = (ws.data?.malformedMessages ?? 0) + 1;
+        ws.data = { ...ws.data, malformedMessages };
+        try { ws.send(JSON.stringify({ type: "error", message: "Invalid realtime message" })); } catch { /* socket may already be closing */ }
+        if (malformedMessages >= 3 && !ws.data?.closed) {
+          ws.data = { ...ws.data, closed: true, authenticating: false };
+          try { ws.close(); } catch { /* already closed */ }
+        }
       }
     },
   },
