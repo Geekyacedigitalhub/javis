@@ -18,6 +18,11 @@ type CommandRecord =
 const commandRecords = new Map<string, CommandRecord>();
 const inFlightCommands = new Map<string, Promise<void>>();
 const commandRecordPrefix = "frosh:device-command:";
+const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isSafeCommandRequestId(value: string): boolean {
+  return requestIdPattern.test(value);
+}
 
 async function loadCommandRecord(requestId: string): Promise<CommandRecord | null> {
   const cached = commandRecords.get(requestId);
@@ -157,7 +162,7 @@ export function connectFroshRealtime(
       if (parsed.type === "device.command") {
         const requestId = typeof parsed.requestId === "string" ? parsed.requestId.trim() : "";
         const commandDeviceId = typeof parsed.deviceId === "string" ? parsed.deviceId.trim() : "";
-        if (!requestId || !commandDeviceId || !authenticatedDeviceId || commandDeviceId !== authenticatedDeviceId) {
+        if (!isSafeCommandRequestId(requestId) || !commandDeviceId || !authenticatedDeviceId || commandDeviceId !== authenticatedDeviceId) {
           return;
         }
         commandRequestId = requestId;
