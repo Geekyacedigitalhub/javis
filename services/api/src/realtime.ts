@@ -271,8 +271,23 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
   });
 }
 
+const commandRequestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const MAX_COMMAND_RESULT_MESSAGE_LENGTH = 4000;
+const MAX_COMMAND_RESULT_DATA_BYTES = 64 * 1024;
+
 export async function handleDeviceCommandResult(clientId: string, message: FroshDeviceCommand & { type: "device.command.result" }) {
-  if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
+  if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || !commandRequestIdPattern.test(message.requestId) || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
+  if (message.message.length > MAX_COMMAND_RESULT_MESSAGE_LENGTH) return;
+  let resultData: unknown = undefined;
+  if ("data" in message && message.data !== undefined) {
+    try {
+      const serialized = JSON.stringify(message.data);
+      if (serialized.length > MAX_COMMAND_RESULT_DATA_BYTES) return;
+      resultData = message.data;
+    } catch {
+      return;
+    }
+  }
   const client = clients.get(clientId);
   if (
     !client ||
@@ -291,7 +306,7 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
   const result = {
     accepted: message.accepted,
     message: message.message,
-    data: "data" in message ? message.data : undefined,
+    data: resultData,
   };
   const stored = await completeDeviceCommandLedger(message.requestId, result).catch(() => false);
   if (!stored) {
