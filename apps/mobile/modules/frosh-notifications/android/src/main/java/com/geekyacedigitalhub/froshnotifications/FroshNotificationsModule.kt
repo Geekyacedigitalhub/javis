@@ -1,10 +1,7 @@
 package com.geekyacedigitalhub.froshnotifications
 
 import android.content.Intent
-import android.os.Build
 import android.provider.Settings
-import android.text.TextUtils
-import androidx.annotation.RequiresApi
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -12,7 +9,7 @@ class FroshNotificationsModule : Module() {
   private fun isEnabled(): Boolean {
     val context = appContext.reactContext ?: return false
     val enabled = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners") ?: return false
-    return enabled.split(":").any { it.contains(context.packageName) }
+    return enabled.split(":").any { it == context.packageName }
   }
 
   override fun definition() = ModuleDefinition {
@@ -35,8 +32,8 @@ class FroshNotificationsModule : Module() {
     }
 
     Function("reply") { notificationId: String, message: String ->
-      if (notificationId.isBlank() || message.isBlank()) {
-        return@Function mapOf("accepted" to false, "message" to "Notification ID and reply text are required.")
+      if (notificationId.isBlank() || notificationId.length > 512 || message.isBlank() || message.length > 8000 || message.any { it.code < 0x20 || it.code == 0x7f }) {
+        return@Function mapOf("accepted" to false, "message" to "Notification ID or reply text is invalid.")
       }
       val sent = FroshNotificationStore.reply(notificationId, message)
       mapOf(
