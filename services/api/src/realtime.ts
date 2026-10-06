@@ -1,21 +1,30 @@
 import type { FroshEvent } from "../../../packages/types/src/events";
 import type { FroshDeviceCommand } from "../../../packages/types/src/events";
+import { authenticateDevice } from "./devices";
 
 type Client = {
   id: string;
   socket: WebSocket;
   deviceId?: string;
+  deviceToken?: string;
+  authCheck?: ReturnType<typeof setInterval>;
 };
 
 const clients = new Map<string, Client>();
 const latestClientByDevice = new Map<string, string>();
 
-export function addRealtimeClient(socket: WebSocket, deviceId?: string) {
+export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceToken?: string) {
   const id = crypto.randomUUID();
-  clients.set(id, { id, socket, deviceId });
+  const authCheck = deviceId && deviceToken
+    ? setInterval(() => {
+        if (!authenticateDevice(deviceId, deviceToken)) socket.close();
+      }, 30000)
+    : undefined;
+  clients.set(id, { id, socket, deviceId, deviceToken, authCheck });
   if (deviceId) latestClientByDevice.set(deviceId, id);
 
   socket.addEventListener("close", () => {
+    if (authCheck) clearInterval(authCheck);
     clients.delete(id);
     if (deviceId && latestClientByDevice.get(deviceId) === id) {
       latestClientByDevice.delete(deviceId);
