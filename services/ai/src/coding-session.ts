@@ -2,7 +2,6 @@ import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/ja
 import { listTools, approvalStore, resolveApproval } from "../../tools/src";
 import type { ProviderClient } from "./provider";
 import { createAgentRunStore } from "./run-store-factory";
-import { broadcast } from "../../api/src/realtime";
 
 export const agentRunStore = createAgentRunStore();
 
@@ -19,7 +18,13 @@ const CODING_SYSTEM = [
 export class CodingSessionManager {
   constructor(private readonly model: ProviderClient) {}
 
-  async start(input: { goal: string; messages: FroshMessage[]; conversationId?: string; onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>; canPersist?: () => Promise<boolean> }) {
+  async start(input: {
+    goal: string;
+    messages: FroshMessage[];
+    conversationId?: string;
+    onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>;
+    canPersist?: () => Promise<boolean>;
+  }) {
     const run = await agentRunStore.create({
       conversationId: input.conversationId,
       goal: input.goal,
@@ -32,9 +37,7 @@ export class CodingSessionManager {
     } catch (error) {
       try {
         if (!input.canPersist || await input.canPersist()) {
-          if (canPersist && !(await canPersist())) throw new Error("Mission lease was lost before approval continuation could start");
-
-    await agentRunStore.update(run.id, {
+          await agentRunStore.update(run.id, {
             status: "failed",
             error: error instanceof Error ? error.message : "Agent run failed before provider execution",
             result: "The run was stopped before provider execution could begin.",
@@ -67,9 +70,7 @@ export class CodingSessionManager {
 
       if (canPersist && !(await canPersist())) return agentRunStore.get(runId).then((current) => current ?? run);
 
-      if (canPersist && !(await canPersist())) return agentRunStore.get(runId).then((current) => current ?? run);
-
-    return agentRunStore.update(runId, {
+      return agentRunStore.update(runId, {
         status: "waiting_approval",
         pendingApprovalId: approvalId,
         providerContinuation: result.continuation,
@@ -77,6 +78,8 @@ export class CodingSessionManager {
         result: result.message,
       });
     }
+
+    if (canPersist && !(await canPersist())) return agentRunStore.get(runId).then((current) => current ?? run);
 
     return agentRunStore.update(runId, {
       status: "completed",
@@ -101,34 +104,71 @@ export class CodingSessionManager {
       throw new Error("Agent run has no resumable provider state");
     }
 
-    const resolved = await resolveApproval(approvalId, "approved");
-    const toolCall: FroshToolCall = {
+    if (canPersist && !(await canPersist())) {
+      throw new Error("Mission lease was lost before approval continuation could start");
+    }
+
+    const pendingToolCall: FroshToolCall = {
       id: `approved-${approvalId}`,
       name: approval.toolName,
       arguments: approval.arguments,
+      status: "planned",
+    };
+    const claimedRun = await agentRunStore.claimApproval(run.id, approvalId, pendingToolCall);
+    if (!claimedRun) throw new Error("Approval continuation was already claimed or the agent run changed");
+
+    if (canPersist && !(await canPersist())) {
+      await agentRunStore.restoreApprovalWait(run.id, approvalId, run.toolCalls);
+      throw new Error("Mission lease was lost before approval could be resolved");
+    }
+
+    let resolved: Awaited<ReturnType<typeof resolveApproval>>;
+    try {
+      resolved = await resolveApproval(approvalId, "approved");
+    } catch (error) {
+      const latestApproval = await approvalStore.get(approvalId);
+      if (latestApproval?.status === "approved") {
+        const message = error instanceof Error ? error.message : "Approved tool execution failed";
+        await agentRunStore.update(run.id, {
+          status: "failed",
+          pendingApprovalId: undefined,
+          providerContinuation: claimedRun.providerContinuation,
+          toolCalls: [...run.toolCalls, { ...pendingToolCall, status: "failed", result: { error: message } }],
+          result: "Approval was accepted, but the approved action failed. The run was stopped safely.",
+          error: message,
+        });
+      } else {
+        await agentRunStore.restoreApprovalWait(run.id, approvalId, run.toolCalls);
+      }
+      throw error;
+    }
+
+    const completedToolCall: FroshToolCall = {
+      ...pendingToolCall,
       status: "completed",
       result: resolved.result,
     };
-
-    await agentRunStore.update(run.id, {
+    const afterApproval = await agentRunStore.update(run.id, {
+      toolCalls: [...run.toolCalls, completedToolCall],
       status: "running",
       pendingApprovalId: undefined,
-      toolCalls: [...run.toolCalls, toolCall],
     });
+
+    if (canPersist && !(await canPersist())) return afterApproval;
 
     let resumed;
     try {
       resumed = await this.model.generate(
         { system: CODING_SYSTEM, messages: [], tools: listTools() },
         {
-        runId: run.id,
-        continuation: {
-          continuation: run.providerContinuation,
-          toolOutput: {
-            callId: run.providerContinuation.pendingCallId,
-            output: JSON.stringify(resolved.result),
+          runId: run.id,
+          continuation: {
+            continuation: claimedRun.providerContinuation,
+            toolOutput: {
+              callId: claimedRun.providerContinuation!.pendingCallId!,
+              output: JSON.stringify(resolved.result),
+            },
           },
-        },
         },
       );
     } catch (error) {
@@ -136,14 +176,14 @@ export class CodingSessionManager {
       await agentRunStore.update(run.id, {
         status: "failed",
         pendingApprovalId: undefined,
-        providerContinuation: run.providerContinuation,
+        providerContinuation: claimedRun.providerContinuation,
         result: "Approval was accepted, but FROSH could not resume the provider session. The run was stopped safely.",
         error: error instanceof Error ? error.message : "Provider continuation failed",
       });
       throw error;
     }
 
-    const calls = [...run.toolCalls, toolCall, ...(resumed.toolCalls ?? [])];
+    const calls: FroshToolCall[] = [...afterApproval.toolCalls, ...(resumed.toolCalls ?? [])];
 
     if (resumed.waitingForApproval && resumed.continuation) {
       const approvalCall = calls[calls.length - 1];
@@ -153,11 +193,9 @@ export class CodingSessionManager {
           : undefined;
       if (!nextApprovalId) throw new Error("Provider paused without an approval request");
 
-      if (canPersist && !(await canPersist())) return agentRunStore.get(run.id).then((current) => current ?? run);
+      if (canPersist && !(await canPersist())) return agentRunStore.get(run.id).then((current) => current ?? afterApproval);
 
-      if (canPersist && !(await canPersist())) return agentRunStore.get(run.id).then((current) => current ?? run);
-
-    return agentRunStore.update(run.id, {
+      return agentRunStore.update(run.id, {
         status: "waiting_approval",
         pendingApprovalId: nextApprovalId,
         providerContinuation: resumed.continuation,
@@ -165,6 +203,8 @@ export class CodingSessionManager {
         result: resumed.message,
       });
     }
+
+    if (canPersist && !(await canPersist())) return agentRunStore.get(run.id).then((current) => current ?? afterApproval);
 
     return agentRunStore.update(run.id, {
       status: "completed",
@@ -180,10 +220,13 @@ export class CodingSessionManager {
     if (!approval) throw new Error("Approval request not found");
     if (!approval.runId) throw new Error("Approval is not attached to an agent run");
 
-    await resolveApproval(approvalId, "rejected");
     const run = await agentRunStore.get(approval.runId);
     if (!run) throw new Error("Agent run not found");
+    if (run.status !== "waiting_approval" || run.pendingApprovalId !== approvalId) {
+      throw new Error("Agent run is not waiting for this approval");
+    }
 
+    await resolveApproval(approvalId, "rejected");
     return agentRunStore.update(run.id, {
       status: "failed",
       pendingApprovalId: undefined,
