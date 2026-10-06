@@ -86,6 +86,14 @@ export function sendToDevice(deviceId: string, event: FroshEvent) {
   return true;
 }
 
+export function disconnectDeviceClients(deviceId: string) {
+  const matching = [...clients.values()].filter(client => client.deviceId === deviceId);
+  for (const client of matching) {
+    removeRealtimeClient(client.id);
+  }
+  return matching.length;
+}
+
 export function realtimeClientCount() {
   return clients.size;
 }
