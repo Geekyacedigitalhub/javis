@@ -570,8 +570,14 @@ const server = Bun.serve({
 
         const name = body.name.trim();
         const platform = body.platform;
-        if (!name) {
-          return Response.json({ error: "Device name cannot be empty." }, { status: 400 });
+        const capabilities = body.capabilities.filter(
+          (capability: unknown): capability is string => typeof capability === "string",
+        );
+        if (!name || name.length > 120 || new TextEncoder().encode(name).byteLength > 512) {
+          return Response.json({ error: "Device name is invalid or too large." }, { status: 400 });
+        }
+        if (capabilities.length > 100 || capabilities.some((item) => item.length > 100 || new TextEncoder().encode(item).byteLength > 256)) {
+          return Response.json({ error: "Device capabilities are invalid or too large." }, { status: 400 });
         }
         const existingDevice = (await listDevices()).find(
           (item) => item.name === name && item.platform === platform,
@@ -586,10 +592,7 @@ const server = Bun.serve({
           name,
           platform,
           allowExisting: webAuthenticated,
-          capabilities: body.capabilities.filter(
-            (capability: unknown): capability is string =>
-              typeof capability === "string",
-          ),
+          capabilities,
         });
         const credential = await issueDeviceCredential(device.id);
         return Response.json({ device, credential }, { status: 201 });
