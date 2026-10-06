@@ -45,7 +45,7 @@ class FroshContactsModule : Module() {
       context.contentResolver.query(
         ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
         projection,
-        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ?",
+        ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ? ESCAPE '\\'",
         arrayOf("%" + trimmed.replace("%", "\%").replace("_", "\_") + "%"),
         ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
       )?.use { cursor ->
