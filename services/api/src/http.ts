@@ -800,7 +800,7 @@ const server = Bun.serve({
               }
             }catch(error){leaseLost=true;console.error("FROSH mission execution lease renewal error:",error);}
             finally{leaseRenewing=false;}
-          },60000);
+          },30000);
           let run;
           try{
             run=await codingSessions.start({
