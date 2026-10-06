@@ -74,6 +74,27 @@ async function saveCommandRecord(requestId: string, record: CommandRecord) {
   }
 }
 
+async function sendUnknownCommandResult(
+  socket: WebSocket,
+  command: Record<string, unknown>,
+  reason: string,
+  message: string,
+) {
+  try {
+    socket.send(JSON.stringify({
+      type: "device.command.result",
+      requestId: String(command.requestId ?? ""),
+      deviceId: String(command.deviceId ?? ""),
+      command: String(command.command ?? ""),
+      accepted: false,
+      message,
+      data: { outcome: "unknown", retryable: false, reason },
+    }));
+  } catch {
+    // The server will treat a missing acknowledgement as unknown.
+  }
+}
+
 async function sendStoredCommandResult(
   socket: WebSocket,
   command: Record<string, unknown>,
@@ -171,15 +192,25 @@ export function connectFroshRealtime(
           const existingInFlight = inFlightCommands.get(requestId);
           if (existingInFlight) {
             await existingInFlight;
-            const completed = await loadCommandRecord(requestId);
-            if (completed?.state === "completed" && completed.command === commandType) {
-              await sendCommandResult(socket, parsed, completed);
-            } else {
-              await sendCommandResult(socket, parsed, {
-                accepted: false,
-                message: "This command was already processed by another connection, but its final outcome was not durably recorded. The outcome is unknown; do not retry automatically.",
-                data: { outcome: "unknown", retryable: false, reason: "prior_execution_unknown" },
-              });
+            try {
+              const completed = await loadCommandRecord(requestId);
+              if (completed?.state === "completed" && completed.command === commandType) {
+                await sendCommandResult(socket, parsed, completed);
+              } else {
+                await sendUnknownCommandResult(
+                  socket,
+                  parsed,
+                  "prior_execution_unknown",
+                  "This command was already processed by another connection, but its final outcome was not durably recorded. The outcome is unknown; do not retry automatically.",
+                );
+              }
+            } catch {
+              await sendUnknownCommandResult(
+                socket,
+                parsed,
+                "command_record_read_failed",
+                "The Android device could not verify the prior command outcome. The outcome is unknown; do not retry automatically.",
+              );
             }
             return;
           }
