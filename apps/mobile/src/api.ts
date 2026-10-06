@@ -17,7 +17,7 @@ export function hasDeviceCredential() {
   return credential !== null;
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+async function request<T>(path: string, init?: RequestInit, options: { includeCredential?: boolean } = {}): Promise<T> {
   if (credential && Date.parse(credential.expiresAt) <= Date.now()) {
     credential = null;
     await clearDeviceCredential().catch(() => undefined);
@@ -27,7 +27,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(credential ? {
+      ...(options.includeCredential === false ? {} : credential ? {
         "x-frosh-device-id": credential.deviceId,
         "x-frosh-device-token": credential.token,
       } : {}),
@@ -89,7 +89,7 @@ export async function registerDevice(name: string, capabilities: string[], enrol
     method: "POST",
     headers: { "x-frosh-device-enrollment-token": token },
     body: JSON.stringify({ name, platform: "android", capabilities }),
-  });
+  }, { includeCredential: false });
   await saveDeviceCredential(result.credential);
   setDeviceCredential(result.credential);
   return result.device;
