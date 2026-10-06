@@ -19,7 +19,7 @@ const CODING_SYSTEM = [
 export class CodingSessionManager {
   constructor(private readonly model: ProviderClient) {}
 
-  async start(input: { goal: string; messages: FroshMessage[]; conversationId?: string; onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void> }) {
+  async start(input: { goal: string; messages: FroshMessage[]; conversationId?: string; onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>; canPersist?: () => Promise<boolean> }) {
     const run = await agentRunStore.create({
       conversationId: input.conversationId,
       goal: input.goal,
@@ -28,7 +28,7 @@ export class CodingSessionManager {
     });
     try {
       if (input.onRunCreated) await input.onRunCreated(run);
-      return await this.step(run.id, input.messages);
+      return await this.step(run.id, input.messages, input.canPersist);
     } catch (error) {
       try {
         await agentRunStore.update(run.id, {
@@ -41,7 +41,7 @@ export class CodingSessionManager {
     }
   }
 
-  async step(runId: string, messages: FroshMessage[]) {
+  async step(runId: string, messages: FroshMessage[], canPersist?: () => Promise<boolean>) {
     const run = await agentRunStore.get(runId);
     if (!run) throw new Error("Agent run not found");
     if (run.status === "completed" || run.status === "failed") return run;
@@ -61,7 +61,11 @@ export class CodingSessionManager {
           : undefined;
       if (!approvalId) throw new Error("Provider paused without an approval request");
 
-      return agentRunStore.update(runId, {
+      if (canPersist && !(await canPersist())) return agentRunStore.get(runId).then((current) => current ?? run);
+
+      if (canPersist && !(await canPersist())) return agentRunStore.get(runId).then((current) => current ?? run);
+
+    return agentRunStore.update(runId, {
         status: "waiting_approval",
         pendingApprovalId: approvalId,
         providerContinuation: result.continuation,
