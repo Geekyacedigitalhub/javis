@@ -123,7 +123,14 @@ const server = Bun.serve({
     },
     async message(ws, message) {
       try {
-        const parsed = JSON.parse(String(message));
+        const rawMessage = String(message);
+        const MAX_REALTIME_FRAME_BYTES = 128 * 1024;
+        if (new TextEncoder().encode(rawMessage).byteLength > MAX_REALTIME_FRAME_BYTES) {
+          ws.send(JSON.stringify({ type: "error", message: "Realtime message is too large" }));
+          ws.close();
+          return;
+        }
+        const parsed = JSON.parse(rawMessage);
         if (parsed?.type === "auth") {
           if (ws.data?.authenticated || ws.data?.authenticating) {
             ws.send(JSON.stringify({ type: "error", message: ws.data?.authenticated ? "Realtime socket is already authenticated" : "Realtime authentication is already in progress" }));
