@@ -268,6 +268,26 @@ function normalizeCommandLedgerRow(row: {
 
 const memoryCommandLedger = new Map<string, DeviceCommandLedgerRecord>();
 
+const MAX_COMMAND_LEDGER_IDEMPOTENCY_KEY_LENGTH = 200;
+const MAX_COMMAND_LEDGER_COMMAND_LENGTH = 100;
+const MAX_COMMAND_LEDGER_MESSAGE_BYTES = 16 * 1024;
+const MAX_COMMAND_LEDGER_DATA_BYTES = 64 * 1024;
+
+function validCommandLedgerInput(input: {
+  requestId: string;
+  deviceId: string;
+  command: string;
+  payloadHash: string;
+  idempotencyKey: string;
+}) {
+  return input.requestId.length <= 100 &&
+    input.deviceId.length <= 200 &&
+    input.command.length <= MAX_COMMAND_LEDGER_COMMAND_LENGTH &&
+    /^[0-9a-f]{64}$/i.test(input.payloadHash) &&
+    input.idempotencyKey.length <= MAX_COMMAND_LEDGER_IDEMPOTENCY_KEY_LENGTH &&
+    !/[\u0000-\u001f\u007f]/.test(input.idempotencyKey);
+}
+
 export async function createDeviceCommandLedger(input: {
   requestId: string;
   deviceId: string;
@@ -275,6 +295,7 @@ export async function createDeviceCommandLedger(input: {
   payloadHash: string;
   idempotencyKey: string;
 }) {
+  if (!validCommandLedgerInput(input)) return false;
   const client = db();
   const now = new Date().toISOString();
   if (!client) {
@@ -326,6 +347,14 @@ export async function markDeviceCommandDispatched(requestId: string) {
 }
 
 export async function completeDeviceCommandLedger(requestId: string, result: { accepted: boolean; message: string; data?: unknown }) {
+  if (requestId.length > 100 || result.message.length > 4000 || new TextEncoder().encode(result.message).byteLength > MAX_COMMAND_LEDGER_MESSAGE_BYTES) return false;
+  let serializedData = "null";
+  try {
+    serializedData = JSON.stringify(result.data ?? null);
+  } catch {
+    return false;
+  }
+  if (new TextEncoder().encode(serializedData).byteLength > MAX_COMMAND_LEDGER_DATA_BYTES) return false;
   const client = db();
   const now = new Date().toISOString();
   if (!client) {
@@ -348,7 +377,7 @@ export async function completeDeviceCommandLedger(requestId: string, result: { a
      SET state='completed',accepted=$2,message=$3,data=$4::jsonb,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
      WHERE request_id=$1 AND state IN ('pending','dispatched','unknown')
      RETURNING request_id`,
-    [requestId, result.accepted, result.message, JSON.stringify(result.data ?? null)],
+    [requestId, result.accepted, result.message, serializedData],
   );
   return resultRow.count > 0;
 }
