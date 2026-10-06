@@ -40,6 +40,7 @@ function validCredential(value: unknown): value is FroshDeviceCredential {
 }
 
 export async function loadDeviceCredential() {
+  await credentialMutation;
   let raw: string | null;
   try {
     raw = await SecureStore.getItemAsync(CREDENTIAL_KEY);
