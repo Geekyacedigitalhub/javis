@@ -52,6 +52,14 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return rows[0] ?? null;
   }
 
+  async stopWaitingApproval(id: string, approvalId: string, result: string, error: string) {
+    const rows = await this.query<FroshAgentRun>(
+      'UPDATE frosh_agent_runs SET status=$3,pending_approval_id=NULL,provider_continuation=NULL,result=$4,error=$5,updated_at=NOW() WHERE id=$1 AND status=$2 AND pending_approval_id=$6 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+      [id, "waiting_approval", "failed", result, error, approvalId],
+    );
+    return rows[0] ?? null;
+  }
+
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>) {
     const fields: string[] = [];
     const values: unknown[] = [id];
