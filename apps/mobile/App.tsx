@@ -3,10 +3,10 @@ import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Tex
 import { StatusBar } from "expo-status-bar";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { hasDeviceCredential, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun } from "./src/api";
+import { listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
-import { loadDeviceCredential, saveDeviceCredential } from "./src/session";
+import { loadDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
 import { controlMedia, readMediaState } from "./src/media-bridge";
 import { listInstalledApps } from "./modules/frosh-apps/src";
@@ -77,13 +77,7 @@ export default function App() {
         "notifications.read",
         "notifications.reply",
       ]);
-      const result = await (await fetch(`${process.env.EXPO_PUBLIC_FROSH_API_URL ?? "http://localhost:3001"}/v1/devices/${device.id}`, {
-        headers: { "x-frosh-device-id": device.id },
-      })).json().catch(() => null);
-      void result;
       setPaired(true);
-      const saved = await loadDeviceCredential();
-      if (saved) await saveDeviceCredential(saved);
       setDevices([device]);
     } catch (error) {
       setReply(error instanceof Error ? error.message : "Pairing failed.");
