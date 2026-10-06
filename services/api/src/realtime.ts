@@ -45,6 +45,7 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
 
 export function removeRealtimeClient(id: string) {
   const client = clients.get(id);
+  if (client?.authCheck) clearInterval(client.authCheck);
   clients.delete(id);
   if (client?.deviceId && latestClientByDevice.get(client.deviceId) === id) {
     latestClientByDevice.delete(client.deviceId);
