@@ -10,7 +10,10 @@ export function middleware(request: NextRequest) {
   if (!authorization?.startsWith("Basic ")) {
     return new NextResponse("Authentication required.", {
       status: 401,
-      headers: { "WWW-Authenticate": 'Basic realm="FROSH Control Center", charset="UTF-8"' },
+      headers: {
+        "WWW-Authenticate": 'Basic realm="FROSH Control Center", charset="UTF-8"',
+        "Cache-Control": "no-store",
+      },
     });
   }
 
@@ -26,11 +29,16 @@ export function middleware(request: NextRequest) {
   if (password !== configuredToken) {
     return new NextResponse("Authentication failed.", {
       status: 401,
-      headers: { "WWW-Authenticate": 'Basic realm="FROSH Control Center", charset="UTF-8"' },
+      headers: {
+        "WWW-Authenticate": 'Basic realm="FROSH Control Center", charset="UTF-8"',
+        "Cache-Control": "no-store",
+      },
     });
   }
 
-  return NextResponse.next();
+  const response = NextResponse.next();
+  response.headers.set("Cache-Control", "no-store");
+  return response;
 }
 
 export const config = {
