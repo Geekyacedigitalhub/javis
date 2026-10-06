@@ -29,4 +29,6 @@ export interface FroshAgentRunStore {
   get(id: string): Promise<FroshAgentRun | null>;
   update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>): Promise<FroshAgentRun>;
   touch(id: string): Promise<FroshAgentRun>;
+  claimApproval(id: string, approvalId: string, toolCall: FroshToolCall): Promise<FroshAgentRun | null>;
+  restoreApprovalWait(id: string, approvalId: string, toolCalls: FroshToolCall[]): Promise<FroshAgentRun | null>;
 }
