@@ -995,7 +995,10 @@ const server = Bun.serve({
         async start(controller){
           let closed=false;
           let polling=false;
-          const close=()=>{if(closed)return;closed=true;clearInterval(timer);clearInterval(heartbeat);clearTimeout(lifetime);controller.close();};
+          let timer:ReturnType<typeof setInterval>|undefined;
+          let heartbeat:ReturnType<typeof setInterval>|undefined;
+          let lifetime:ReturnType<typeof setTimeout>|undefined;
+          const close=()=>{if(closed)return;closed=true;if(timer)clearInterval(timer);if(heartbeat)clearInterval(heartbeat);if(lifetime)clearTimeout(lifetime);controller.close();};
           const send=(event:unknown)=>{
             if(closed)return;
             let payload:string;
@@ -1007,7 +1010,7 @@ const server = Bun.serve({
           const initial=await getMissionStore().listEvents(id,userId,20);
           for(const event of initial.reverse())send(event);
           let seen=new Set(initial.map((event)=>event.id));
-          const timer=setInterval(async()=>{
+          timer=setInterval(async()=>{
             if(closed||polling)return;
             polling=true;
             try{
@@ -1016,8 +1019,8 @@ const server = Bun.serve({
               if(seen.size>200)seen=new Set(latest.map((event)=>event.id));
             }catch{}finally{polling=false;}
           },2000);
-          const heartbeat=setInterval(()=>send({type:"heartbeat",createdAt:new Date().toISOString()}),15000);
-          const lifetime=setTimeout(close,MAX_MISSION_SSE_LIFETIME_MS);
+          heartbeat=setInterval(()=>send({type:"heartbeat",createdAt:new Date().toISOString()}),15000);
+          lifetime=setTimeout(close,MAX_MISSION_SSE_LIFETIME_MS);
           request.signal.addEventListener("abort",close,{once:true});
         }
       });
