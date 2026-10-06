@@ -6,6 +6,7 @@ import {
   createDeviceCommandLedger,
   getDeviceCommandLedger,
   getDeviceCommandLedgerByIdempotency,
+  hasDeviceCapability,
   markDeviceCommandUnknown,
   markDeviceCommandDispatched,
   markDeviceOffline,
@@ -191,6 +192,23 @@ const MAX_NOTIFICATION_ID_LENGTH = 200;
 const MAX_PROVIDER_LENGTH = 40;
 const MAX_COMMAND_PAYLOAD_BYTES = 32 * 1024;
 
+const COMMAND_CAPABILITY: Partial<Record<FroshDeviceCommand["command"], string>> = {
+  message_inbox: "notifications.read",
+  message_reply: "notifications.reply",
+  send_message: "messages.send",
+  open_dialer: "calls.dialer",
+  call_number: "calls.direct",
+  contacts_search: "contacts.read",
+  media_state: "media.control",
+  media_control: "media.control",
+  open_app: "apps.launch",
+};
+
+async function authorizedForCommand(deviceId: string, command: FroshDeviceCommand["command"]) {
+  const capability = COMMAND_CAPABILITY[command];
+  return capability ? hasDeviceCapability(deviceId, capability) : false;
+}
+
 function validCommandText(value: string | undefined, maxLength: number) {
   return value === undefined || value.length <= maxLength;
 }
@@ -258,6 +276,7 @@ const commandTimeoutResult = {
 export async function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string, idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
+  if (!(await authorizedForCommand(deviceId, command))) return { accepted: false, message: "This device is not authorized for the requested capability." };
   const latestId = client.id;
   if (!validCommandText(value, MAX_COMMAND_VALUE_LENGTH)) {
     return { accepted: false, message: "Command value is too large." };
@@ -363,6 +382,7 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
 export async function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms", idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
+  if (!(await authorizedForCommand(deviceId, "send_message"))) return { accepted: false, message: "This device is not authorized to send messages." };
   const latestId = client.id;
   if (!validCommandText(provider, MAX_PROVIDER_LENGTH) || !validCommandText(recipient, MAX_MESSAGE_RECIPIENT_LENGTH) || !validCommandText(message, MAX_MESSAGE_BODY_LENGTH)) {
     return { accepted: false, message: "Message command payload is too large." };
@@ -400,6 +420,7 @@ export function requestMessageInbox(deviceId: string) {
 export async function replyToMessageCommand(deviceId: string, notificationId: string, message: string, idempotencyKey?: string) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
+  if (!(await authorizedForCommand(deviceId, "message_reply"))) return { accepted: false, message: "This device is not authorized to reply to notifications." };
   const latestId = client.id;
   if (!validCommandText(notificationId, MAX_NOTIFICATION_ID_LENGTH) || !validCommandText(message, MAX_MESSAGE_BODY_LENGTH)) {
     return { accepted: false, message: "Message reply payload is too large." };
