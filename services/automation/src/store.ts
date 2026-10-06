@@ -10,7 +10,6 @@ export class PostgresAutomationStore implements FroshAutomationStore {
     const rows = await this.sql.unsafe<FroshAutomation[]>(
       `SELECT id, user_id AS "userId", name, prompt, schedule, status,
         next_run_at AS "nextRunAt", last_run_at AS "lastRunAt",
-        lease_owner AS "leaseOwner", lease_until AS "leaseUntil",
         created_at AS "createdAt", updated_at AS "updatedAt"
        FROM frosh_automations WHERE user_id=$1 ORDER BY next_run_at NULLS LAST, created_at DESC`,
       [userId]
@@ -37,7 +36,6 @@ export class PostgresAutomationStore implements FroshAutomationStore {
        VALUES ($1,$2,$3,$4,$5::jsonb,$6,$7,$8)
        RETURNING id,user_id AS "userId",name,prompt,schedule,status,
        next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",
-       lease_owner AS "leaseOwner", lease_until AS "leaseUntil",
        created_at AS "createdAt",updated_at AS "updatedAt"`,
       [id,input.userId,input.name,input.prompt,JSON.stringify(input.schedule),input.status,input.nextRunAt ?? null,input.lastRunAt ?? null]
     );
