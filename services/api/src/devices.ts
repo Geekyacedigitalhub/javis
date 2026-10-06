@@ -101,17 +101,29 @@ export async function closeDeviceStore() {
 }
 
 export async function registerDevice(input: FroshDeviceRegistration, options: { allowExisting?: boolean } = {}) {
+  const name = name.trim();
+  const capabilities = [...new Set(input.capabilities.filter((item): item is string => typeof item === "string").map(item => item.trim()).filter(Boolean))];
+  if (!name || name.length > 120 || new TextEncoder().encode(name).byteLength > 512) {
+    throw new Error("Device name is invalid or too large.");
+  }
+  if (capabilities.length > 100 || capabilities.some(item => item.length > 100 || new TextEncoder().encode(item).byteLength > 256)) {
+    throw new Error("Device capabilities are invalid or too large.");
+  }
+  const serializedCapabilities = JSON.stringify(capabilities);
+  if (new TextEncoder().encode(serializedCapabilities).byteLength > 16 * 1024) {
+    throw new Error("Device capabilities are too large.");
+  }
   const client = db();
   if (!client) {
     const now = new Date().toISOString();
-    const existing = [...devices.values()].find(device => device.name === input.name && device.platform === input.platform);
+    const existing = [...devices.values()].find(device => device.name === name && device.platform === input.platform);
     if (existing && !options.allowExisting) throw new Error("A device with this name and platform is already registered.");
     const device: FroshDevice = {
       id: existing?.id ?? crypto.randomUUID(),
-      name: input.name,
+      name: name,
       platform: input.platform,
       status: "online",
-      capabilities: [...new Set(input.capabilities)],
+      capabilities: capabilities,
       lastSeenAt: now,
     };
     devices.set(device.id, device);
@@ -123,7 +135,7 @@ export async function registerDevice(input: FroshDeviceRegistration, options: { 
   if (!options.allowExisting) {
     const existing = await client.unsafe<{ id: string }[]>(
       `SELECT id FROM frosh_devices WHERE name=$1 AND platform=$2 LIMIT 1`,
-      [input.name, input.platform],
+      [name, input.platform],
     );
     if (existing[0]) throw new Error("A device with this name and platform is already registered.");
   }
@@ -133,13 +145,13 @@ export async function registerDevice(input: FroshDeviceRegistration, options: { 
          VALUES($1,$2,$3,'online',$4::jsonb,$5)
          ON CONFLICT(name,platform) DO UPDATE SET status='online',capabilities=EXCLUDED.capabilities,last_seen_at=EXCLUDED.last_seen_at
          RETURNING id,name,platform,status,capabilities,last_seen_at AS "lastSeenAt"`,
-        [id, input.name, input.platform, JSON.stringify([...new Set(input.capabilities)]), now],
+        [id, name, input.platform, JSON.stringify(capabilities), now],
       )
     : await client.unsafe<FroshDevice[]>(
         `INSERT INTO frosh_devices(id,name,platform,status,capabilities,last_seen_at)
          VALUES($1,$2,$3,'online',$4::jsonb,$5)
          RETURNING id,name,platform,status,capabilities,last_seen_at AS "lastSeenAt"`,
-        [id, input.name, input.platform, JSON.stringify([...new Set(input.capabilities)]), now],
+        [id, name, input.platform, JSON.stringify(capabilities), now],
       );
   return rows[0];
 }
@@ -503,6 +515,7 @@ export async function purgeExpiredDeviceCredentials() {
 }
 
 export async function revokeDeviceCredential(deviceId: string) {
+  if (!deviceId || deviceId.length > 200) return false;
   const client = db();
   if (!client) {
     if (!devices.has(deviceId)) return false;
@@ -510,10 +523,15 @@ export async function revokeDeviceCredential(deviceId: string) {
   }
   await ensureSchema();
   const result = await client.unsafe(`DELETE FROM frosh_device_credentials WHERE device_id=$1`, [deviceId]);
+  if (result.count > 0) {
+    const { disconnectDeviceClients } = await import("./realtime");
+    disconnectDeviceClients(deviceId);
+  }
   return result.count > 0;
 }
 
 export async function authenticateDevice(deviceId: string, token: string) {
+  if (!deviceId || deviceId.length > 200 || token.length > 200) return false;
   const client = db();
   if (!client) {
     const credential = credentials.get(deviceId);
