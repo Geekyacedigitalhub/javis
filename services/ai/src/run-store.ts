@@ -1,4 +1,5 @@
 import type { FroshAgentRun, FroshAgentRunStore } from "../../../packages/types/src/agent-run";
+import type { FroshToolCall } from "../../../packages/types/src/javis";
 
 export class InMemoryAgentRunStore implements FroshAgentRunStore {
   private readonly runs = new Map<string, FroshAgentRun>();
