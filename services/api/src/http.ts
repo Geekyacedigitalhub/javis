@@ -724,15 +724,20 @@ const server = Bun.serve({
                 await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
                 return Response.json({mission:await store.get(id,userId)});
               }
-              if(approval?.status==="approved"){
-                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:"Approval was already accepted before the execution restarted, but the agent run did not reach a durable completion state. The action outcome is unknown, so FROSH will not replay it automatically.",updatedAt:new Date().toISOString()}:step);
+              if(approval?.status==="approved" || approval?.status==="rejected" || approval?.status==="expired"){
+                const outcome=approval.status==="approved"
+                  ?"Approval was already accepted before execution restarted, but the agent run did not reach a durable completion state. The action outcome is unknown, so FROSH will not replay it automatically."
+                  :approval.status==="rejected"
+                    ?"The pending approval was rejected before execution restarted. The interrupted agent run was stopped safely."
+                    :"The pending approval expired before execution restarted. The interrupted agent run was stopped safely.";
+                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
                 reconciled.add(staleStep.id);
                 await store.update(savedRun.id,userId,{
                   status:"failed",
                   pendingApprovalId:undefined,
-                  result:"Approval was accepted before execution restarted, but the action outcome is unknown. The run was stopped safely to prevent duplicate execution.",
-                  error:"Approved action outcome is unknown after execution restart"
-                } as any).catch(()=>undefined);
+                  result:outcome,
+                  error:approval.status==="approved"?"Approved action outcome is unknown after execution restart":`Approval was ${approval.status} before execution restart`
+                }).catch(()=>undefined);
               }
             }else if(savedRun?.status==="running"){
               const plannedApproval=savedRun.toolCalls.find(call=>call.status==="planned" && call.id.startsWith("approved-"));
