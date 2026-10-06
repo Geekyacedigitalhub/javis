@@ -730,7 +730,6 @@ const server = Bun.serve({
                 await store.update(savedRun.id,userId,{
                   status:"failed",
                   pendingApprovalId:undefined,
-                  providerContinuation:savedRun.providerContinuation,
                   result:"Approval was accepted before execution restarted, but the action outcome is unknown. The run was stopped safely to prevent duplicate execution.",
                   error:"Approved action outcome is unknown after execution restart"
                 } as any).catch(()=>undefined);
