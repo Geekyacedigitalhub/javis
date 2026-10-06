@@ -13,7 +13,18 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string) {
   const id = crypto.randomUUID();
   clients.set(id, { id, socket, deviceId });
 
-  socket.addEventListener("close", () => clients.delete(id));
+  socket.addEventListener("close", () => {
+    clients.delete(id);
+    for (const [requestId, pending] of pendingCommands) {
+      if (pending.deviceId !== deviceId) continue;
+      pendingCommands.delete(requestId);
+      pending.resolve({
+        accepted: false,
+        message: "The Android device disconnected before acknowledging the command. The outcome is unknown; do not automatically retry a side-effecting action.",
+        data: { outcome: "unknown", retryable: false, reason: "device_disconnected" },
+      });
+    }
+  });
   return id;
 }
 
@@ -32,7 +43,15 @@ export function realtimeClientCount() {
   return clients.size;
 }
 
-const pendingCommands = new Map<string, { deviceId: string; resolve: (value: { accepted: boolean; message: string; data?: unknown }) => void; reject: (error: Error) => void }>();
+type DeviceCommandResult = { accepted: boolean; message: string; data?: unknown };
+
+type PendingCommand = {
+  deviceId: string;
+  resolve: (value: DeviceCommandResult) => void;
+  reject: (error: Error) => void;
+};
+
+const pendingCommands = new Map<string, PendingCommand>();
 
 const commandTimeoutResult = {
   accepted: false,
@@ -46,7 +65,7 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve, reject) => {
+  return new Promise<DeviceCommandResult>((resolve, reject) => {
     pendingCommands.set(requestId, { deviceId, resolve, reject });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
@@ -69,7 +88,11 @@ export function handleDeviceCommandResult(message: FroshDeviceCommand & { type: 
   if (!pending) return;
   if (pending.deviceId !== message.deviceId) return;
   pendingCommands.delete(message.requestId);
-  pending.resolve({ accepted: message.accepted, message: message.message, data: "data" in message ? message.data : undefined });
+  pending.resolve({
+    accepted: message.accepted,
+    message: message.message,
+    data: "data" in message ? message.data : undefined,
+  });
 }
 
 export function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
@@ -78,7 +101,7 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve, reject) => {
+  return new Promise<DeviceCommandResult>((resolve, reject) => {
     pendingCommands.set(requestId, { deviceId, resolve, reject });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
@@ -104,7 +127,7 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
   const client = [...clients.values()].find((item) => item.deviceId === deviceId);
   if (!client || client.socket.readyState !== WebSocket.OPEN) return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   const requestId = crypto.randomUUID();
-  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve, reject) => {
+  return new Promise<DeviceCommandResult>((resolve, reject) => {
     pendingCommands.set(requestId, { deviceId, resolve, reject });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
