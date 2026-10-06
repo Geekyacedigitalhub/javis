@@ -112,28 +112,35 @@ const server = Bun.serve({
           ws.close();
         }
       }, 10000);
-      ws.data = { authenticated: false, deviceId: undefined as string | undefined, realtimeClientId: undefined as string | undefined, authTimeout };
+      ws.data = { authenticated: false, authenticating: false, closed: false, deviceId: undefined as string | undefined, realtimeClientId: undefined as string | undefined, authTimeout };
       ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
     },
     close(ws) {
       clearTimeout(ws.data?.authTimeout);
+      ws.data = { ...ws.data, closed: true, authenticating: false };
     },
     async message(ws, message) {
       try {
         const parsed = JSON.parse(String(message));
         if (parsed?.type === "auth") {
-          if (ws.data?.authenticated) {
-            ws.send(JSON.stringify({ type: "error", message: "Realtime socket is already authenticated" }));
+          if (ws.data?.authenticated || ws.data?.authenticating) {
+            ws.send(JSON.stringify({ type: "error", message: ws.data?.authenticated ? "Realtime socket is already authenticated" : "Realtime authentication is already in progress" }));
             return;
           }
+          if (ws.data?.closed) return;
+          ws.data = { ...ws.data, authenticating: true };
           if (typeof parsed.deviceId !== "string" || typeof parsed.token !== "string" || !(await authenticateDevice(parsed.deviceId, parsed.token))) {
-            ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" }));
-            ws.close();
+            if (!ws.data?.closed) {
+              ws.data = { ...ws.data, authenticating: false };
+              ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" }));
+              ws.close();
+            }
             return;
           }
+          if (ws.data?.closed) return;
           clearTimeout(ws.data?.authTimeout);
           const realtimeClientId = addRealtimeClient(ws, parsed.deviceId, parsed.token);
-          ws.data = { authenticated: true, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
+          ws.data = { authenticated: true, authenticating: false, closed: false, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
           return;
         }
