@@ -73,6 +73,15 @@ export async function initializeDeviceStore() {
   if (!schemaReady) throw new Error("Device store schema initialization failed");
 }
 
+export async function closeDeviceStore() {
+  const client = sql;
+  sql = undefined;
+  schemaPromise = undefined;
+  schemaReady = false;
+  if (!client) return;
+  await client.end({ timeout: 5 });
+}
+
 export async function registerDevice(input: FroshDeviceRegistration, options: { allowExisting?: boolean } = {}) {
   const client = db();
   if (!client) {
