@@ -796,7 +796,31 @@ const server = Bun.serve({
               await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered a blocked step that is still waiting for approval.",stepId:blockedStep.id,runId:blockedRun.id});
               return Response.json({mission:await store.get(id,userId)});
             }
+            if(approval?.status==="approved"){
+              const outcome="An approval was accepted before execution restarted, but the blocked agent run did not durably record whether the approved action executed. The mission is paused for safety review to prevent duplicate execution.";
+              steps=steps.map(step=>step.id===blockedStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
+              recoveryRequiresReview=true;
+              await store.update(blockedRun.id,userId,{status:"failed",pendingApprovalId:undefined,result:outcome,error:"Approved action outcome is unknown after execution restart"}).catch(()=>undefined);
+            }
           }
+        }
+        const recoverableInterruptedSteps=steps.filter(step=>step.status==="failed"||step.status==="blocked");
+        if(recoverableInterruptedSteps.length&&!mission.pendingApprovalId){
+          const now=new Date().toISOString();
+          steps=steps.map(step=>recoverableInterruptedSteps.some(item=>item.id===step.id)?{
+            ...step,
+            status:"pending",
+            runId:undefined,
+            nextRetryAt:undefined,
+            updatedAt:now
+          }:step);
+          await store.addEvent({
+            missionId:id,
+            userId,
+            type:"mission.recovered",
+            message:"Reset failed or blocked steps into explicit recovery work.",
+            metadata:{stepIds:recoverableInterruptedSteps.map(step=>step.id)}
+          });
         }
         if(recoveryRequiresReview){
           const paused=await updateOwned({
