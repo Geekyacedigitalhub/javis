@@ -85,16 +85,50 @@ export class PostgresAutomationStore implements FroshAutomationStore {
   async updateIfIdle(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>) {
     const current = await this.get(id, userId);
     if (!current) return null;
-    const next = { ...current, ...patch };
-    const rows = await this.sql.unsafe<FroshAutomation[]>(
-      `UPDATE frosh_automations SET name=$3,prompt=$4,schedule=$5::jsonb,status=$6,next_run_at=$7,last_run_at=$8,updated_at=NOW()
-       WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until <= NOW())
-       RETURNING id,user_id AS "userId",name,prompt,schedule,status,next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",created_at AS "createdAt",updated_at AS "updatedAt"`,
-      [id,userId,next.name,next.prompt,JSON.stringify(next.schedule),next.status,next.nextRunAt ?? null,next.lastRunAt ?? null]
-    );
-    return rows[0] ?? null;
-  }
 
+    if (patch.status !== "active" || current.status === "active") {
+      const next = { ...current, ...patch };
+      const rows = await this.sql.unsafe<FroshAutomation[]>(
+        `UPDATE frosh_automations SET name=$3,prompt=$4,schedule=$5::jsonb,status=$6,next_run_at=$7,last_run_at=$8,updated_at=NOW()
+         WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until <= NOW())
+         RETURNING id,user_id AS "userId",name,prompt,schedule,status,next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",created_at AS "createdAt",updated_at AS "updatedAt"`,
+        [id,userId,next.name,next.prompt,JSON.stringify(next.schedule),next.status,next.nextRunAt ?? null,next.lastRunAt ?? null]
+      );
+      return rows[0] ?? null;
+    }
+
+    const configured = Number(process.env.FROSH_MAX_ACTIVE_AUTOMATIONS_PER_USER ?? 50);
+    const maxActive = Number.isFinite(configured)
+      ? Math.min(500, Math.max(1, Math.floor(configured)))
+      : 50;
+
+    return this.sql.begin(async (sql) => {
+      await sql.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))", [userId]);
+      const lockedRows = await sql.unsafe<FroshAutomation[]>(
+        `SELECT id,user_id AS "userId",name,prompt,schedule,status,next_run_at AS "nextRunAt",
+          last_run_at AS "lastRunAt",lease_owner AS "leaseOwner",lease_until AS "leaseUntil",
+          created_at AS "createdAt",updated_at AS "updatedAt"
+         FROM frosh_automations WHERE id=$1 AND user_id=$2 LIMIT 1`,
+        [id,userId]
+      );
+      const locked = lockedRows[0];
+      if (!locked || (locked.leaseUntil && Date.parse(locked.leaseUntil) > Date.now())) return null;
+      const countRows = await sql.unsafe<{ count: number }[]>(
+        "SELECT COUNT(*)::int AS count FROM frosh_automations WHERE user_id=$1 AND status='active'",
+        [userId]
+      );
+      if (locked.status !== "active" && (countRows[0]?.count ?? 0) >= maxActive) return null;
+
+      const next = { ...locked, ...patch };
+      const rows = await sql.unsafe<FroshAutomation[]>(
+        `UPDATE frosh_automations SET name=$3,prompt=$4,schedule=$5::jsonb,status=$6,next_run_at=$7,last_run_at=$8,updated_at=NOW()
+         WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until <= NOW())
+         RETURNING id,user_id AS "userId",name,prompt,schedule,status,next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",created_at AS "createdAt",updated_at AS "updatedAt"`,
+        [id,userId,next.name,next.prompt,JSON.stringify(next.schedule),next.status,next.nextRunAt ?? null,next.lastRunAt ?? null]
+      );
+      return rows[0] ?? null;
+    });
+  }
   async updateOwned(id: string, userId: string, owner: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>) {
     const current = await this.getForMutation(id, userId);
     if (!current || current.leaseOwner !== owner || !current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now()) return null;
@@ -176,6 +210,14 @@ export class InMemoryAutomationStore implements FroshAutomationStore {
   }
   async updateIfIdle(id:string,userId:string,patch:Partial<Pick<FroshAutomation,"name"|"prompt"|"schedule"|"status"|"nextRunAt"|"lastRunAt">>){
     const item=await this.get(id,userId); if(!item || (item.leaseUntil && Date.parse(item.leaseUntil)>Date.now())) return null;
+    if (patch.status === "active" && item.status !== "active") {
+      const configured = Number(process.env.FROSH_MAX_ACTIVE_AUTOMATIONS_PER_USER ?? 50);
+      const maxActive = Number.isFinite(configured)
+        ? Math.min(500, Math.max(1, Math.floor(configured)))
+        : 50;
+      const activeCount = [...this.items.values()].filter((entry) => entry.userId === userId && entry.status === "active").length;
+      if (activeCount >= maxActive) return null;
+    }
     const next={...item,...patch,updatedAt:new Date().toISOString()}; this.items.set(id,next); return next;
   }
   async updateOwned(id:string,userId:string,owner:string,patch:Partial<Pick<FroshAutomation,"name"|"prompt"|"schedule"|"status"|"nextRunAt"|"lastRunAt">>){
