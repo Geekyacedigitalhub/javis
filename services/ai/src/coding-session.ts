@@ -154,7 +154,10 @@ export class CodingSessionManager {
       pendingApprovalId: undefined,
     });
 
-    if (canPersist && !(await canPersist())) return afterApproval;
+    if (canPersist && !(await canPersist())) {
+      await agentRunStore.restoreApprovalWait(run.id, approvalId, run.toolCalls);
+      throw new Error("Mission lease was lost after approval was accepted and before provider continuation could resume");
+    }
 
     let resumed;
     try {
