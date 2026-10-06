@@ -164,6 +164,12 @@ export async function listDevices() {
   return client.unsafe<FroshDevice[]>(`SELECT id,name,platform,status,capabilities,last_seen_at AS "lastSeenAt" FROM frosh_devices ORDER BY created_at ASC`);
 }
 
+export async function hasDeviceCapability(id: string, capability: string) {
+  if (!id || id.length > 200 || !capability || capability.length > 100) return false;
+  const device = await getDevice(id);
+  return Boolean(device?.capabilities.includes(capability));
+}
+
 export async function getDevice(id: string) {
   const client = db();
   if (!client) return devices.get(id) ?? null;
