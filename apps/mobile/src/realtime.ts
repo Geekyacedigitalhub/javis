@@ -48,15 +48,9 @@ async function loadCommandRecord(requestId: string): Promise<CommandRecord | nul
       // side-effect did not start. Fail closed so a duplicate cannot execute it.
       throw new Error("Durable command record is invalid");
     }
-    if (parsed.state === "started") {
-      // A started side-effect may have completed before a crash. Never expire this fence.
-      commandRecords.set(requestId, parsed);
-      return parsed;
-    }
-    if (Date.now() - parsed.createdAt > 24 * 60 * 60 * 1000) {
-      await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
-      return null;
-    }
+    // Both started and completed records are permanent replay fences. A completed
+    // side-effect must not become executable again merely because enough time has
+    // passed for its history to expire locally.
     commandRecords.set(requestId, parsed);
     return parsed;
   } catch (error) {
