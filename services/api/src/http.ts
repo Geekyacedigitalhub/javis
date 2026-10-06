@@ -90,7 +90,7 @@ const server = Bun.serve({
     close(ws) {
       clearTimeout(ws.data?.authTimeout);
     },
-    message(ws, message) {
+    async message(ws, message) {
       try {
         const parsed = JSON.parse(String(message));
         if (parsed?.type === "auth") {
