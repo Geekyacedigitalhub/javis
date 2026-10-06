@@ -531,6 +531,15 @@ const server = Bun.serve({
         return Response.json({ device, credential }, { status: 201 });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Device registration failed";
+        const code = typeof error === "object" && error !== null && "code" in error
+          ? String((error as { code?: unknown }).code ?? "")
+          : "";
+        if (code === "23505") {
+          return Response.json(
+            { error: "A device with this name and platform is already registered. Use the trusted web console to re-enroll it." },
+            { status: 409 },
+          );
+        }
         return Response.json({ error: message }, { status: 400 });
       }
     }
