@@ -69,12 +69,24 @@ async function sendCommandResult(
   const deviceId = String(command.deviceId ?? "");
   const commandType = String(command.command ?? "");
   const record: CommandRecord = { state: "completed", createdAt: Date.now(), command: commandType, accepted: result.accepted, message: result.message, data: result.data };
-  await saveCommandRecord(requestId, record);
+  const persisted = await saveCommandRecord(requestId, record);
+  if (!persisted) {
+    socket.send(JSON.stringify({
+      type: "device.command.result",
+      requestId,
+      deviceId,
+      command: commandType,
+      accepted: false,
+      message: "The command completed but its final outcome could not be durably recorded. The outcome is unknown; do not automatically retry the side-effecting action.",
+      data: { outcome: "unknown", retryable: false, reason: "command_result_persist_failed" },
+    }));
+    return;
+  }
   socket.send(JSON.stringify({
     type: "device.command.result",
     requestId,
     deviceId,
-    command: String(command.command ?? ""),
+    command: commandType,
     accepted: result.accepted,
     message: result.message,
     ...(result.data !== undefined ? { data: result.data } : {}),
