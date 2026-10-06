@@ -946,7 +946,12 @@ const server = Bun.serve({
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(["completed","waiting_approval","paused","cancelled"].includes(mission.status))return Response.json({mission});
-        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({mission});
+        const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
+        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner!==requestedWorkerId)return Response.json({mission});
+        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner===requestedWorkerId){
+          const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
+          return next;
+        }
         if(mission.status==="failed"){
           const failedSteps=mission.steps.filter(step=>step.status==="failed");
           if(failedSteps.length){
