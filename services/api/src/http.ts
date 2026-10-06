@@ -500,6 +500,9 @@ const server = Bun.serve({
 
         const name = body.name.trim();
         const platform = body.platform;
+        if (!name) {
+          return Response.json({ error: "Device name cannot be empty." }, { status: 400 });
+        }
         const existingDevice = listDevices().find(
           (item) => item.name === name && item.platform === platform,
         );
