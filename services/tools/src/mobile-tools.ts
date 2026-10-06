@@ -53,26 +53,3 @@ registerTool({
     return sendDeviceCommand(device.id, "call_number", phoneNumber);
   }
 });
-
-registerTool({
-  name: "send_android_message",
-  description: "Send an SMS to a specific phone number on the paired Android FROSH device. Requires explicit user confirmation before execution.",
-  permission: "confirm",
-  parameters: {
-    type: "object",
-    properties: {
-      phoneNumber: { type: "string", description: "Phone number or resolved contact number." },
-      message: { type: "string", description: "Exact message to send." }
-    },
-    required: ["phoneNumber", "message"],
-    additionalProperties: false
-  },
-  async execute(args) {
-    const phoneNumber = typeof args.phoneNumber === "string" ? args.phoneNumber.trim() : "";
-    const message = typeof args.message === "string" ? args.message.trim() : "";
-    if (!phoneNumber || !message) return { accepted: false, message: "A phone number and message are required." };
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
-    if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
-    return sendMessageCommand(device.id, phoneNumber, message);
-  }
-});
