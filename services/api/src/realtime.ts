@@ -77,6 +77,24 @@ export function broadcast(event: FroshEvent) {
   sendToDevice(event.device.id, event);
 }
 
+export async function getAuthenticatedCommandClient(deviceId: string) {
+  const clientId = latestClientByDevice.get(deviceId);
+  const client = clientId ? clients.get(clientId) : undefined;
+  if (!client || client.deviceId !== deviceId || !client.deviceToken || client.socket.readyState !== WebSocket.OPEN) {
+    return null;
+  }
+  const authenticated = await authenticateDevice(deviceId, client.deviceToken).catch(() => false);
+  if (!authenticated) {
+    removeRealtimeClient(client.id);
+    return null;
+  }
+  const current = clients.get(client.id);
+  if (!current || current.deviceId !== deviceId || current.deviceToken !== client.deviceToken || current.socket.readyState !== WebSocket.OPEN) {
+    return null;
+  }
+  return current;
+}
+
 export function sendToDevice(deviceId: string, event: FroshEvent) {
   const clientId = latestClientByDevice.get(deviceId);
   if (!clientId) return false;
@@ -117,12 +135,10 @@ const commandTimeoutResult = {
   data: { outcome: "unknown", retryable: false },
 };
 
-export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
-  const latestId = latestClientByDevice.get(deviceId);
-  const client = latestId ? clients.get(latestId) : undefined;
-  if (!client || client.socket.readyState !== WebSocket.OPEN) {
-    return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
-  }
+export async function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
+  const client = await getAuthenticatedCommandClient(deviceId);
+  if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
+  const latestId = client.id;
   const requestId = crypto.randomUUID();
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -161,12 +177,10 @@ export function handleDeviceCommandResult(clientId: string, message: FroshDevice
   });
 }
 
-export function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
-  const latestId = latestClientByDevice.get(deviceId);
-  const client = latestId ? clients.get(latestId) : undefined;
-  if (!client || client.socket.readyState !== WebSocket.OPEN) {
-    return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
-  }
+export async function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
+  const client = await getAuthenticatedCommandClient(deviceId);
+  if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
+  const latestId = client.id;
   const requestId = crypto.randomUUID();
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -197,10 +211,10 @@ export function requestMessageInbox(deviceId: string) {
   return sendDeviceCommand(deviceId, "message_inbox");
 }
 
-export function replyToMessageCommand(deviceId: string, notificationId: string, message: string) {
-  const latestId = latestClientByDevice.get(deviceId);
-  const client = latestId ? clients.get(latestId) : undefined;
-  if (!client || client.socket.readyState !== WebSocket.OPEN) return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
+export async function replyToMessageCommand(deviceId: string, notificationId: string, message: string) {
+  const client = await getAuthenticatedCommandClient(deviceId);
+  if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
+  const latestId = client.id;
   const requestId = crypto.randomUUID();
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
