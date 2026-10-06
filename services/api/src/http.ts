@@ -534,9 +534,19 @@ const server = Bun.serve({
         return Response.json({mission:updated});
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
+      if(mission.pendingApprovalId){
+        const approval=await approvalStore.get(mission.pendingApprovalId);
+        if(approval?.status==="pending"){
+          try{
+            await approvalStore.resolve(approval.id,"rejected");
+          }catch(error){
+            return Response.json({error:error instanceof Error?error.message:"Pending approval could not be safely cancelled"},{status:409});
+          }
+        }
+      }
       const updated=await store.cancelIfIdle(id,userId);
       if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
-      await store.addEvent({missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user."});
+      await store.addEvent({missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user.",metadata:{approvalCancelled:Boolean(mission.pendingApprovalId)}});
       return Response.json({mission:updated});
     }
 
