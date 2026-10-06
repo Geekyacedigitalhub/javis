@@ -51,6 +51,11 @@ export function issueDeviceCredential(deviceId: string) {
   return { deviceId, token, expiresAt: new Date(expiresAt).toISOString() };
 }
 
+export function revokeDeviceCredential(deviceId: string) {
+  if (!devices.has(deviceId)) return false;
+  return credentials.delete(deviceId);
+}
+
 export function authenticateDevice(deviceId: string, token: string) {
   const credential = credentials.get(deviceId);
   if (!credential || credential.expiresAt <= Date.now() || credential.token !== token) return false;
