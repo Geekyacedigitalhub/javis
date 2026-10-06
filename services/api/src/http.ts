@@ -543,7 +543,8 @@ const server = Bun.serve({
 
     if (request.method === "GET" && url.pathname === "/v1/devices") {
       if (webAuthenticated) return Response.json({ devices: await listDevices() });
-      return Response.json({ devices: deviceId ? await listDevices().filter((device) => device.id === deviceId) : [] });
+      const device = deviceId ? await getDevice(deviceId) : null;
+      return Response.json({ devices: device ? [device] : [] });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/devices") {
@@ -617,18 +618,17 @@ const server = Bun.serve({
         if (!webAuthenticated && deviceId !== capabilityMatch[1]) {
           return Response.json({ error: "Device credential cannot update another device." }, { status: 403 });
         }
-        const body = await request.json();
-        if (!Array.isArray(body?.capabilities)) {
-          return Response.json({ error: "capabilities must be an array" }, { status: 400 });
+        const body = await parseBoundedJson(request);
+        if (!Array.isArray(body?.capabilities) || body.capabilities.length > 100) {
+          return Response.json({ error: "capabilities must be an array of at most 100 items" }, { status: 400 });
         }
-        const device = await updateDeviceCapabilities(
-          capabilityMatch[1],
-          body.capabilities.filter((item: unknown): item is { capability: string; availability: "available" | "permission_required" | "unsupported"; detail?: string } =>
-            typeof item === "object" && item !== null &&
-            typeof (item as { capability?: unknown }).capability === "string" &&
-            ["available", "permission_required", "unsupported"].includes(String((item as { availability?: unknown }).availability)),
-          ),
+        const capabilities = body.capabilities.filter((item: unknown): item is { capability: string; availability: "available" | "permission_required" | "unsupported"; detail?: string } =>
+          typeof item === "object" && item !== null &&
+          typeof (item as { capability?: unknown }).capability === "string" &&
+          (item as { capability: string }).capability.length <= 100 &&
+          ["available", "permission_required", "unsupported"].includes(String((item as { availability?: unknown }).availability)),
         );
+        const device = await updateDeviceCapabilities(capabilityMatch[1], capabilities);
         return device
           ? Response.json(device)
           : Response.json({ error: "Device not found" }, { status: 404 });
