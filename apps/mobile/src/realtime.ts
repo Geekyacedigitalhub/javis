@@ -29,10 +29,19 @@ async function loadCommandRecord(requestId: string): Promise<CommandRecord | nul
   try {
     const raw = await SecureStore.getItemAsync(commandRecordPrefix + requestId);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as CommandRecord;
-    if (!parsed || typeof parsed.createdAt !== "number" || typeof parsed.command !== "string") {
-      await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
-      return null;
+    const parsed = JSON.parse(raw) as Partial<CommandRecord>;
+    if (
+      !parsed ||
+      (parsed.state !== "started" && parsed.state !== "completed") ||
+      typeof parsed.createdAt !== "number" ||
+      !Number.isFinite(parsed.createdAt) ||
+      parsed.createdAt <= 0 ||
+      typeof parsed.command !== "string" ||
+      !parsed.command.trim()
+    ) {
+      // Never delete malformed command history: corruption is not proof that the
+      // side-effect did not start. Fail closed so a duplicate cannot execute it.
+      throw new Error("Durable command record is invalid");
     }
     if (parsed.state === "started") {
       // A started side-effect may have completed before a crash. Never expire this fence.
