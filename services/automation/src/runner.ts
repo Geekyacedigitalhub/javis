@@ -2,94 +2,95 @@ import { getAutomationStore, calculateNextRun } from "./factory";
 import { handleFroshRequest } from "../../api/src/server";
 
 let started = false;
+let stopping = false;
 let tickRunning = false;
+let tickTimer: ReturnType<typeof setInterval> | undefined;
+let activeTick: Promise<void> | undefined;
 
-export function startAutomationRunner() {
-  if (started) return;
-  started = true;
+function configuredLeaseMs(): number {
+  const configured = Number(process.env.FROSH_AUTOMATION_LEASE_MS ?? 5 * 60 * 1000);
+  return Number.isFinite(configured)
+    ? Math.min(30 * 60 * 1000, Math.max(60 * 1000, Math.floor(configured)))
+    : 5 * 60 * 1000;
+}
 
-  const tick = async () => {
-    if (tickRunning) return;
-    tickRunning = true;
-    try {
+async function tick(): Promise<void> {
+  if (tickRunning || stopping) return;
+  tickRunning = true;
+  try {
     const url = process.env.DATABASE_URL?.trim();
-    if (!url) return;
-
+    if (!url || stopping) return;
     const store = getAutomationStore();
-    // The current single-user runner uses FROSH_AUTOMATION_USER_ID.
     const userId = process.env.FROSH_AUTOMATION_USER_ID?.trim();
-    if (!userId) return;
-
+    if (!userId || stopping) return;
     const items = await store.list(userId);
     const now = Date.now();
-    const configuredLeaseMs = Number(process.env.FROSH_AUTOMATION_LEASE_MS ?? 5 * 60 * 1000);
-    const leaseMs = Number.isFinite(configuredLeaseMs)
-      ? Math.min(30 * 60 * 1000, Math.max(60 * 1000, Math.floor(configuredLeaseMs)))
-      : 5 * 60 * 1000;
+    const leaseMs = configuredLeaseMs();
 
     for (const item of items) {
+      if (stopping) break;
       if (item.status !== "active" || !item.nextRunAt || Date.parse(item.nextRunAt) > now) continue;
-
       const owner = "automation-runner:" + crypto.randomUUID();
       const claimed = await store.claimDue(item.id, userId, owner, leaseMs);
-      if (!claimed) continue;
-
+      if (!claimed || stopping) {
+        if (claimed && stopping) { try { await store.releaseLease(claimed.id, userId, owner); } catch {} }
+        continue;
+      }
       let leaseLost = false;
       const renewTimer = setInterval(() => {
         void store.renewLease(claimed.id, userId, owner, leaseMs)
           .then((renewed) => { if (!renewed) leaseLost = true; })
           .catch(() => { leaseLost = true; });
       }, Math.min(30_000, Math.max(5_000, Math.floor(leaseMs / 3))));
-
       try {
+        if (stopping) continue;
         await handleFroshRequest({
           userId: claimed.userId,
           message: `AUTOMATION: ${claimed.name}\nExecute this scheduled task now:\n${claimed.prompt}`,
         });
-
-        if (leaseLost) {
-          console.error("FROSH automation lease lost before completion", claimed.id);
+        if (leaseLost || stopping) {
+          if (leaseLost) console.error("FROSH automation lease lost before completion", claimed.id);
           continue;
         }
-
         if (claimed.schedule.type === "once") {
           const finalized = await store.updateOwned(claimed.id, userId, owner, {
-            status: "completed",
-            lastRunAt: new Date().toISOString(),
-            nextRunAt: undefined,
+            status: "completed", lastRunAt: new Date().toISOString(), nextRunAt: undefined,
           });
-          if (!finalized) {
-            console.error("FROSH automation lease lost during finalization", claimed.id);
-            continue;
-          }
+          if (!finalized) { console.error("FROSH automation lease lost during finalization", claimed.id); continue; }
         } else {
           const next = calculateNextRun(claimed.schedule, new Date());
           const finalized = await store.updateOwned(claimed.id, userId, owner, {
-            lastRunAt: new Date().toISOString(),
-            nextRunAt: next,
+            lastRunAt: new Date().toISOString(), nextRunAt: next,
           });
-          if (!finalized) {
-            console.error("FROSH automation lease lost during finalization", claimed.id);
-            continue;
-          }
+          if (!finalized) { console.error("FROSH automation lease lost during finalization", claimed.id); continue; }
         }
       } catch (error) {
         const errorName = error instanceof Error && error.name ? error.name : "UnknownError";
         console.error("FROSH automation failed", claimed.id, errorName);
       } finally {
         clearInterval(renewTimer);
-        try {
-          await store.releaseLease(claimed.id, userId, owner);
-        } catch {
-          // A stale lease is recoverable after its expiry; do not mask the runner result.
-        }
+        try { await store.releaseLease(claimed.id, userId, owner); } catch {}
       }
     }
-    } finally {
-      tickRunning = false;
-    }
-  };
+  } finally {
+    tickRunning = false;
+  }
+}
 
-  void tick();
-  setInterval(() => void tick(), 60_000);
+export function startAutomationRunner() {
+  if (started || stopping) return;
+  started = true;
+  void (activeTick = tick().finally(() => { activeTick = undefined; }));
+  tickTimer = setInterval(() => {
+    void (activeTick = tick().finally(() => { activeTick = undefined; }));
+  }, 60_000);
+}
+
+export async function stopAutomationRunner() {
+  if (!started) return;
+  stopping = true;
+  if (tickTimer) { clearInterval(tickTimer); tickTimer = undefined; }
+  if (activeTick) await activeTick;
+  started = false;
+  stopping = false;
 }
