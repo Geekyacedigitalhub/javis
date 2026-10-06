@@ -54,6 +54,14 @@ export class PostgresApprovalStore implements FroshApprovalStore {
     return record;
   }
 
+  async findPendingByRun(runId: string, toolName: string, argumentsHash: string) {
+    const rows = await this.query(
+      'SELECT id, run_id AS "runId", tool_name AS "toolName", arguments, reason, status, created_at AS "createdAt", expires_at AS "expiresAt", resolved_at AS "resolvedAt" FROM frosh_approvals WHERE run_id=$1 AND tool_name=$2 AND status=$3 AND arguments=$4::jsonb AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1',
+      [runId, toolName, "pending", argumentsHash],
+    );
+    return rows[0] ? this.normalize(rows[0]) : null;
+  }
+
   async resolve(id: string, status: "approved" | "rejected") {
     const current = await this.get(id);
     if (!current) throw new Error("Approval request not found");
