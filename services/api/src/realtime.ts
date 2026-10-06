@@ -34,20 +34,32 @@ export function realtimeClientCount() {
 
 const pendingCommands = new Map<string, { deviceId: string; resolve: (value: { accepted: boolean; message: string; data?: unknown }) => void; reject: (error: Error) => void }>();
 
+const commandTimeoutResult = {
+  accepted: false,
+  message: "The Android device did not acknowledge the command. The outcome is unknown; do not automatically retry a side-effecting action.",
+  data: { outcome: "unknown", retryable: false },
+};
+
 export function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string) {
   const client = [...clients.values()].find((item) => item.deviceId === deviceId);
   if (!client || client.socket.readyState !== WebSocket.OPEN) {
     return Promise.resolve({ accepted: false, message: "The Android device is not connected." });
   }
   const requestId = crypto.randomUUID();
-  client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
-  return new Promise<{ accepted: boolean; message: string }>((resolve, reject) => {
+  return new Promise<{ accepted: boolean; message: string; data?: unknown }>((resolve, reject) => {
     pendingCommands.set(requestId, { deviceId, resolve, reject });
+    try {
+      client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
+    } catch (error) {
+      pendingCommands.delete(requestId);
+      reject(error instanceof Error ? error : new Error(String(error)));
+      return;
+    }
     setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
-      pending.resolve({ accepted: false, message: "The Android device did not respond in time." });
+      pending.resolve(commandTimeoutResult);
     }, 15000);
   });
 }
@@ -73,7 +85,7 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
-      resolve({ accepted: false, message: "The Android device did not respond in time." });
+      resolve(commandTimeoutResult);
     }, 15000);
   });
 }
@@ -93,7 +105,7 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
-      resolve({ accepted: false, message: "The Android device did not respond in time." });
+      resolve(commandTimeoutResult);
     }, 15000);
   });
 }
