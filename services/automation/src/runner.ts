@@ -2,12 +2,16 @@ import { getAutomationStore, calculateNextRun } from "./factory";
 import { handleFroshRequest } from "../../api/src/server";
 
 let started = false;
+let tickRunning = false;
 
 export function startAutomationRunner() {
   if (started) return;
   started = true;
 
   const tick = async () => {
+    if (tickRunning) return;
+    tickRunning = true;
+    try {
     const url = process.env.DATABASE_URL?.trim();
     if (!url) return;
 
@@ -44,6 +48,9 @@ export function startAutomationRunner() {
       } catch (error) {
         console.error("FROSH automation failed", item.id, error);
       }
+    }
+    } finally {
+      tickRunning = false;
     }
   };
 
