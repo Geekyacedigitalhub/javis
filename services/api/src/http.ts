@@ -114,6 +114,26 @@ function logOperationalError(context: string, error: unknown): void {
   console.error(context, name);
 }
 
+const MAX_USER_ID_LENGTH = 200;
+
+function decodeBoundedUserId(value: string): string | null {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+  if (
+    !decoded ||
+    decoded.length > MAX_USER_ID_LENGTH ||
+    new TextEncoder().encode(decoded).byteLength > 512 ||
+    /[\u0000-\u001f\u007f]/.test(decoded)
+  ) {
+    return null;
+  }
+  return decoded;
+}
+
 async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_HTTP_BODY_BYTES): Promise<unknown> {
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {
