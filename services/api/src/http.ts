@@ -112,6 +112,7 @@ const server = Bun.serve({
           return;
         }
         if (parsed?.type === "ping") {
+          if (!ws.data?.authenticated) return;
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
         }
       } catch {
