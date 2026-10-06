@@ -116,13 +116,21 @@ export function connectFroshRealtime(
           releaseCommand = release;
 
           const existing = await loadCommandRecord(requestId);
-          if (existing?.state === "completed") return await sendCommandResult(socket, parsed, existing);
+          if (existing?.state === "completed") {
+            await sendCommandResult(socket, parsed, existing);
+            inFlightCommands.delete(requestId);
+            releaseCommand();
+            return;
+          }
           if (existing?.state === "started") {
-            return await sendCommandResult(socket, parsed, {
+            await sendCommandResult(socket, parsed, {
               accepted: false,
               message: "This command was already started before this connection began. The outcome is unknown; do not retry automatically.",
               data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
             });
+            inFlightCommands.delete(requestId);
+            releaseCommand();
+            return;
           }
           await saveCommandRecord(requestId, { state: "started", createdAt: Date.now() });
         }
