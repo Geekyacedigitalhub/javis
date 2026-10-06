@@ -520,21 +520,22 @@ const server = Bun.serve({
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       if(action==="pause"){
         if(["completed","failed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be paused in its current state"},{status:409});
-        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
-        const updated=await store.update(id,userId,{status:"paused",leaseUntil:undefined,leaseOwner:undefined});
+        const updated=await store.pauseIfIdle(id,userId);
+        if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         await store.addEvent({missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
         return Response.json({mission:updated});
       }
       if(action==="resume"){
         if(mission.status!=="paused")return Response.json({error:"Only paused missions can be resumed"},{status:409});
         if(isSafetyPausedMission(mission))return Response.json({error:"Mission is paused for safety review after an unreconciled approval/action outcome; review the mission before resuming it."},{status:409});
-        const updated=await store.update(id,userId,{status:"running",result:undefined});
+        const updated=await store.resumeIfPaused(id,userId);
+        if(!updated)return Response.json({error:"Mission is no longer paused; refresh and try again"},{status:409});
         await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Mission resumed by user."});
         return Response.json({mission:updated});
       }
       if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
-      if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now())return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
-      const updated=await store.update(id,userId,{status:"cancelled",leaseUntil:undefined,pendingApprovalId:undefined});
+      const updated=await store.cancelIfIdle(id,userId);
+      if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
       await store.addEvent({missionId:id,userId,type:"mission.cancelled",message:"Mission cancelled by user."});
       return Response.json({mission:updated});
     }
