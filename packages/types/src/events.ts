@@ -18,4 +18,4 @@ export type FroshDeviceCommand =
   | { type: "device.command"; requestId: string; deviceId: string; command: "message_inbox" }
   | { type: "device.command"; requestId: string; deviceId: string; command: "message_reply"; notificationId: string; message: string }
   | { type: "device.command"; requestId: string; deviceId: string; command: "send_message"; provider: string; recipient: string; message: string }
-  | { type: "device.command.result"; requestId: string; deviceId: string; accepted: boolean; message: string; data?: unknown };
+  | { type: "device.command.result"; requestId: string; deviceId: string; command: FroshDeviceCommand["command"]; accepted: boolean; message: string; data?: unknown };
