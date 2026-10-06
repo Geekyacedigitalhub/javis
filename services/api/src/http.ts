@@ -11,11 +11,11 @@ const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
 await initializeDeviceStore();
 await markAllDevicesOffline();
-void purgeExpiredDeviceCredentials().catch((error) => console.warn("Initial device credential cleanup failed:", error));
-void purgeExpiredDeviceCommandLedger().catch((error) => console.warn("Initial device command ledger cleanup failed:", error));
+void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Initial device credential cleanup failed", error));
+void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Initial device command ledger cleanup failed", error));
 const credentialCleanupTimer = setInterval(() => {
-  void purgeExpiredDeviceCredentials().catch((error) => console.warn("Scheduled device credential cleanup failed:", error));
-  void purgeExpiredDeviceCommandLedger().catch((error) => console.warn("Scheduled device command ledger cleanup failed:", error));
+  void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Scheduled device credential cleanup failed", error));
+  void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Scheduled device command ledger cleanup failed", error));
 }, 60 * 60 * 1000);
 import { startAutomationRunner } from "../../automation/src";
 import { startMissionRunner } from "../../missions/src";
@@ -50,7 +50,7 @@ async function recoverMissionsOnStartup(){
           if(controller.signal.aborted){
             console.error("FROSH startup mission recovery timed out",mission.id,timeoutMs);
           }else{
-            console.error("FROSH startup mission recovery request failed",mission.id,error);
+            logOperationalError("FROSH startup mission recovery request failed", error);
           }
         }finally{
           clearTimeout(timeout);
@@ -58,7 +58,7 @@ async function recoverMissionsOnStartup(){
       }catch{}
     }
   }catch(error){
-    console.error("FROSH mission startup recovery failed:",error);
+    logOperationalError("FROSH mission startup recovery failed", error);
   }
 }
 setTimeout(()=>void recoverMissionsOnStartup(),2000);
@@ -72,12 +72,12 @@ async function shutdownApi() {
     shutdownRealtime();
     await server.stop(true);
   } catch (error) {
-    console.error("FROSH realtime/API server shutdown failed:", error);
+    logOperationalError("FROSH realtime/API server shutdown failed", error);
   } finally {
     try {
       await closeDeviceStore();
     } catch (error) {
-      console.error("FROSH device store shutdown failed:", error);
+      logOperationalError("FROSH device store shutdown failed", error);
     }
     process.exit(0);
   }
@@ -812,7 +812,7 @@ const server = Bun.serve({
           try{
             await approvalStore.resolve(cancelledApprovalId,"rejected");
           }catch(error){
-            console.error("FROSH cancelled mission approval rejection raced after mission cancellation",id,cancelledApprovalId,error);
+            logOperationalError("FROSH cancelled mission approval rejection raced after mission cancellation", error);
           }
         }
         try{
@@ -825,7 +825,7 @@ const server = Bun.serve({
           approvalRunStopped=Boolean(stopped);
           if(!stopped)console.warn("FROSH cancelled mission approval run was not waiting anymore",id,cancelledApprovalRunId);
         }catch(error){
-          console.error("FROSH cancelled mission approval run cleanup failed",id,cancelledApprovalRunId,error);
+          logOperationalError("FROSH cancelled mission approval run cleanup failed", error);
         }
       }
       await addMissionEventWithRetry(store, {
@@ -1222,7 +1222,7 @@ const server = Bun.serve({
         const missionStartedAt=Date.now();
         const initialToolCount=mission.toolCallsUsed??0;        const initialDurationMs=mission.executionDurationMs??0;
         let toolCount=initialToolCount;
-        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.step.retry"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await addMissionEventWithRetry(store, {missionId:id,userId,type,message,stepId,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+        const emit=async(type:"mission.created"|"mission.claimed"|"mission.step.started"|"mission.step.completed"|"mission.step.failed"|"mission.step.retry"|"mission.approval.required"|"mission.paused"|"mission.cancelled"|"mission.recovered"|"mission.completed"|"mission.failed"|"mission.tool.completed"|"mission.tool.failed"|"mission.budget.exceeded",message:string,stepId?:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await addMissionEventWithRetry(store, {missionId:id,userId,type,message,stepId,runId,metadata});}catch(error){logOperationalError("FROSH mission telemetry error", error);}};
         await emit("mission.claimed","Mission execution started.");
 
         for(let cycle=0;cycle<8;cycle++){
@@ -1274,10 +1274,10 @@ const server = Bun.serve({
                 try{
                   await agentRunStore.touch(activeRunId);
                 }catch(error){
-                  console.error("FROSH mission agent run heartbeat failed:",error);
+                  logOperationalError("FROSH mission agent run heartbeat failed", error);
                 }
               }
-            }catch(error){leaseLost=true;console.error("FROSH mission execution lease renewal error:",error);}
+            }catch(error){leaseLost=true;logOperationalError("FROSH mission execution lease renewal error", error);}
             finally{leaseRenewing=false;}
           },30000);
           let run;
@@ -1547,7 +1547,7 @@ const server = Bun.serve({
           const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
           const existingToolCount=mission.toolCallsUsed??0;
           const existingDurationMs=mission.executionDurationMs??0;
-          const emit=async(type:"mission.approval.required"|"mission.budget.exceeded"|"mission.failed",message:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await addMissionEventWithRetry(store, {missionId:id,userId,type,message,runId,metadata});}catch(error){console.error("FROSH mission telemetry error:",error);}};
+          const emit=async(type:"mission.approval.required"|"mission.budget.exceeded"|"mission.failed",message:string,runId?:string,metadata?:Record<string,unknown>)=>{try{await addMissionEventWithRetry(store, {missionId:id,userId,type,message,runId,metadata});}catch(error){logOperationalError("FROSH mission telemetry error", error);}};
           const executionOwner="approval-continuation:"+crypto.randomUUID();
           if(!mission.activeRunId){
             return Response.json({error:"Mission has no active agent run for the pending approval"},{status:409});
@@ -1578,7 +1578,7 @@ const server = Bun.serve({
               if(!renewed)continuationLeaseLost=true;
             }catch(error){
               continuationLeaseLost=true;
-              console.error("FROSH mission continuation lease renewal error:",error);
+              logOperationalError("FROSH mission continuation lease renewal error", error);
             }finally{
               continuationLeaseRenewing=false;
             }
