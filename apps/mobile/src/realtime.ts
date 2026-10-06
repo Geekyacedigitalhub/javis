@@ -142,11 +142,19 @@ export function connectFroshRealtime(
             return;
           }
           if (existing?.state === "started") {
-            await sendCommandResult(socket, parsed, {
-              accepted: false,
-              message: "This command was already started before this connection began. The outcome is unknown; do not retry automatically.",
-              data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
-            });
+            if (existing.command !== commandType) {
+              await sendCommandResult(socket, parsed, {
+                accepted: false,
+                message: "This request ID was previously started for a different command. The outcome is unknown; do not execute automatically.",
+                data: { outcome: "unknown", retryable: false, reason: "request_id_command_mismatch" },
+              });
+            } else {
+              await sendCommandResult(socket, parsed, {
+                accepted: false,
+                message: "This command was already started before this connection began. The outcome is unknown; do not retry automatically.",
+                data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
+              });
+            }
             inFlightCommands.delete(requestId);
             releaseCommand();
             return;
