@@ -1,6 +1,7 @@
 import postgres from "postgres";
 import type { FroshDevice, FroshDeviceRegistration } from "../../../packages/types/src/device";
 import type { FroshCapabilityStatus } from "../../../packages/types/src/capabilities";
+import { isFroshCapability } from "../../../packages/types/src/capabilities";
 
 type DeviceCredential = { token: string; expiresAt: number };
 type DeviceRow = FroshDevice & { createdAt?: string };
@@ -107,7 +108,7 @@ export async function registerDevice(input: FroshDeviceRegistration, options: { 
   if (!name || name.length > 120 || new TextEncoder().encode(name).byteLength > 512) {
     throw new Error("Device name is invalid or too large.");
   }
-  if (capabilities.length > 100 || capabilities.some(item => item.length > 100 || new TextEncoder().encode(item).byteLength > 256)) {
+  if (capabilities.length > 100 || capabilities.some(item => item.length > 100 || new TextEncoder().encode(item).byteLength > 256 || !isFroshCapability(item))) {
     throw new Error("Device capabilities are invalid or too large.");
   }
   const serializedCapabilities = JSON.stringify(capabilities);
@@ -167,7 +168,7 @@ export async function listDevices() {
 export async function hasDeviceCapability(id: string, capability: string) {
   if (!id || id.length > 200 || !capability || capability.length > 100) return false;
   const device = await getDevice(id);
-  return Boolean(device?.capabilities.includes(capability));
+  return Boolean(isFroshCapability(capability) && device?.capabilities.includes(capability));
 }
 
 export async function getDevice(id: string) {
@@ -575,7 +576,7 @@ export async function authenticateDevice(deviceId: string, token: string) {
 
 export async function updateDeviceCapabilities(deviceId: string, capabilities: FroshCapabilityStatus[]) {
   if (!deviceId || deviceId.length > 200 || capabilities.length > 100) return null;
-  const normalized = capabilities.filter(item => item.availability === "available" && item.capability.length <= 100).map(item => item.capability);
+  const normalized = [...new Set(capabilities.filter(item => item.availability === "available" && item.capability.length <= 100 && isFroshCapability(item.capability)).map(item => item.capability))];
   if (new TextEncoder().encode(JSON.stringify(normalized)).byteLength > 16 * 1024) return null;
   const client = db();
   if (!client) {
