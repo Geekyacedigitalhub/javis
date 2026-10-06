@@ -1,6 +1,14 @@
 import type { FroshEvent } from "../../../packages/types/src/events";
 import type { FroshDeviceCommand } from "../../../packages/types/src/events";
-import { authenticateDevice, markDeviceOffline } from "./devices";
+import {
+  authenticateDevice,
+  completeDeviceCommandLedger,
+  createDeviceCommandLedger,
+  getDeviceCommandLedger,
+  markDeviceCommandUnknown,
+  markDeviceCommandDispatched,
+  markDeviceOffline,
+} from "./devices";
 
 type Client = {
   id: string;
@@ -18,6 +26,7 @@ function resolvePendingCommandsForClient(clientId: string) {
     if (pending.clientId !== clientId) continue;
     pendingCommands.delete(requestId);
     clearTimeout(pending.timeout);
+    void markCommandUnknown(requestId, "The Android device connection was removed before acknowledging the command. The outcome is unknown.");
     pending.resolve({
       accepted: false,
       message: "The Android device connection was removed before acknowledging the command. The outcome is unknown; do not automatically retry a side-effecting action.",
@@ -136,6 +145,7 @@ export function shutdownRealtime() {
   for (const [requestId, pending] of pendingCommands) {
     pendingCommands.delete(requestId);
     clearTimeout(pending.timeout);
+    void markCommandUnknown(requestId, "The realtime service shut down before the command was acknowledged. The outcome is unknown.");
     pending.resolve({
       accepted: false,
       message: "The realtime service is shutting down before the command was acknowledged. The outcome is unknown; do not automatically retry a side-effecting action.",
@@ -155,6 +165,48 @@ type PendingCommand = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
+
+function stableCommandPayload(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableCommandPayload).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.entries(value as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, item]) => `${JSON.stringify(key)}:${stableCommandPayload(item)}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+async function hashCommandPayload(payload: unknown) {
+  const bytes = new TextEncoder().encode(stableCommandPayload(payload));
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function createCommandLedgerOrFail(input: {
+  requestId: string;
+  deviceId: string;
+  command: string;
+  payload: unknown;
+}) {
+  const payloadHash = await hashCommandPayload(input.payload);
+  try {
+    const created = await createDeviceCommandLedger({
+      requestId: input.requestId,
+      deviceId: input.deviceId,
+      command: input.command,
+      payloadHash,
+    });
+    return created ? payloadHash : null;
+  } catch {
+    return null;
+  }
+}
+
+async function markCommandUnknown(requestId: string, reason: string) {
+  await markDeviceCommandUnknown(requestId, reason).catch(() => undefined);
+}
+
 const pendingCommands = new Map<string, PendingCommand>();
 
 const commandTimeoutResult = {
@@ -168,25 +220,41 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
   const requestId = crypto.randomUUID();
+  const payload = {
+    type: "device.command",
+    deviceId,
+    command,
+    ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}),
+  };
+  const payloadHash = await createCommandLedgerOrFail({ requestId, deviceId, command, payload });
+  if (!payloadHash) {
+    return {
+      accepted: false,
+      message: "The command could not be durably recorded before dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
+      data: { outcome: "unknown", retryable: false, reason: "ledger_write_failed" },
+    };
+  }
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
+      void markCommandUnknown(requestId, "The Android device did not acknowledge the command before the server timeout. The outcome is unknown.");
       pending.resolve(commandTimeoutResult);
     }, 15000);
     pendingCommands.set(requestId, { clientId: latestId, deviceId, command, resolve, reject, timeout });
     try {
-      client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
-    } catch (error) {
+      client.socket.send(JSON.stringify({ ...payload, requestId }));
+      void markDeviceCommandDispatched(requestId).catch(() => undefined);
+    } catch {
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
+      void markCommandUnknown(requestId, "The command could not be confirmed after dispatch. The outcome is unknown.");
       pending.resolve({
         accepted: false,
         message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
         data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
       });
-      return;
     }
   });
 }
@@ -203,13 +271,36 @@ export function handleDeviceCommandResult(clientId: string, message: FroshDevice
     latestClientByDevice.get(message.deviceId) !== clientId
   ) return;
   if (pending.clientId !== clientId || pending.deviceId !== message.deviceId || pending.command !== message.command) return;
-  pendingCommands.delete(message.requestId);
-  clearTimeout(pending.timeout);
-  pending.resolve({
+  const result = {
     accepted: message.accepted,
     message: message.message,
     data: "data" in message ? message.data : undefined,
-  });
+  };
+  const stored = await completeDeviceCommandLedger(message.requestId, result).catch(() => false);
+  if (!stored) {
+    const ledger = await getDeviceCommandLedger(message.requestId).catch(() => null);
+    if (ledger?.state === "completed") {
+      pendingCommands.delete(message.requestId);
+      clearTimeout(pending.timeout);
+      pending.resolve({
+        accepted: ledger.accepted === true,
+        message: ledger.message ?? "The command result was recovered from durable storage.",
+        data: ledger.data,
+      });
+    } else {
+      pendingCommands.delete(message.requestId);
+      clearTimeout(pending.timeout);
+      pending.resolve({
+        accepted: false,
+        message: "The Android command result could not be durably recorded. The outcome is unknown; do not automatically retry a side-effecting action.",
+        data: { outcome: "unknown", retryable: false, reason: "ledger_completion_failed" },
+      });
+    }
+    return;
+  }
+  pendingCommands.delete(message.requestId);
+  clearTimeout(pending.timeout);
+  pending.resolve(result);
 }
 
 export async function sendMessageCommand(deviceId: string, recipient: string, message: string, provider = "sms") {
@@ -217,27 +308,27 @@ export async function sendMessageCommand(deviceId: string, recipient: string, me
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
   const requestId = crypto.randomUUID();
+  const payload = { type: "device.command", deviceId, command: "send_message", provider, recipient, message };
+  if (!await createCommandLedgerOrFail({ requestId, deviceId, command: "send_message", payload })) {
+    return { accepted: false, message: "The command could not be durably recorded before dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "ledger_write_failed" } };
+  }
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
+      void markCommandUnknown(requestId, "The Android device did not acknowledge the message command before the server timeout. The outcome is unknown.");
       pending.resolve(commandTimeoutResult);
     }, 15000);
     pendingCommands.set(requestId, { clientId: latestId, deviceId, command: "send_message", resolve, reject, timeout });
     try {
-      client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
-    } catch (error) {
+      client.socket.send(JSON.stringify({ ...payload, requestId }));
+      void markDeviceCommandDispatched(requestId).catch(() => undefined);
+    } catch {
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
-      pendingCommands.delete(requestId);
-      clearTimeout(timeout);
-      pending.resolve({
-        accepted: false,
-        message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
-        data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
-      });
-      return;
+      void markCommandUnknown(requestId, "The message command could not be confirmed after dispatch. The outcome is unknown.");
+      pending.resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
     }
   });
 }
@@ -251,27 +342,27 @@ export async function replyToMessageCommand(deviceId: string, notificationId: st
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
   const requestId = crypto.randomUUID();
+  const payload = { type: "device.command", deviceId, command: "message_reply", notificationId, message };
+  if (!await createCommandLedgerOrFail({ requestId, deviceId, command: "message_reply", payload })) {
+    return { accepted: false, message: "The command could not be durably recorded before dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "ledger_write_failed" } };
+  }
   return new Promise<DeviceCommandResult>((resolve, reject) => {
     const timeout = setTimeout(() => {
       const pending = pendingCommands.get(requestId);
       if (!pending) return;
       pendingCommands.delete(requestId);
+      void markCommandUnknown(requestId, "The Android device did not acknowledge the reply command before the server timeout. The outcome is unknown.");
       pending.resolve(commandTimeoutResult);
     }, 15000);
     pendingCommands.set(requestId, { clientId: latestId, deviceId, command: "message_reply", resolve, reject, timeout });
     try {
-      client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
-    } catch (error) {
+      client.socket.send(JSON.stringify({ ...payload, requestId }));
+      void markDeviceCommandDispatched(requestId).catch(() => undefined);
+    } catch {
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
-      pendingCommands.delete(requestId);
-      clearTimeout(timeout);
-      pending.resolve({
-        accepted: false,
-        message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.",
-        data: { outcome: "unknown", retryable: false, reason: "dispatch_error" },
-      });
-      return;
+      void markCommandUnknown(requestId, "The reply command could not be confirmed after dispatch. The outcome is unknown.");
+      pending.resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
     }
   });
 }
