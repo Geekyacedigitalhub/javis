@@ -91,9 +91,12 @@ export function connectFroshRealtime(
       let commandRequestId: string | undefined;
 
       if (parsed.type === "device.command") {
-        const requestId = String(parsed.requestId ?? "");
-        commandRequestId = requestId || undefined;
-        if (requestId) {
+        const requestId = typeof parsed.requestId === "string" ? parsed.requestId.trim() : "";
+        const commandDeviceId = typeof parsed.deviceId === "string" ? parsed.deviceId.trim() : "";
+        if (!requestId || !commandDeviceId || !credential || commandDeviceId !== credential.deviceId) {
+          return;
+        }
+        commandRequestId = requestId;
           const existingInFlight = inFlightCommands.get(requestId);
           if (existingInFlight) {
             await existingInFlight;
@@ -133,7 +136,6 @@ export function connectFroshRealtime(
             return;
           }
           await saveCommandRecord(requestId, { state: "started", createdAt: Date.now() });
-        }
       }
 
       try {
