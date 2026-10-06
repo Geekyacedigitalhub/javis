@@ -6,6 +6,10 @@ import { launchAppByName } from "../modules/frosh-apps/src";
 import { executeMediaAction } from "./media";
 import { searchContacts } from "../modules/frosh-contacts/src";
 import { executePhoneAction } from "./phone-actions";
+import { getCallPermissionStatus } from "../modules/frosh-calls/src";
+import { getContactsCapability } from "../modules/frosh-contacts/src";
+import { getMessagingPermissionStatus } from "../modules/frosh-messaging/src";
+import { getNotificationCapability } from "../modules/frosh-notifications/src";
 
 function websocketUrl() {
   return FROSH_API_URL.replace(/^http/, "ws") + "/v1/realtime";
@@ -72,6 +76,24 @@ function validateCommandArguments(command: Record<string, unknown>): string | nu
   return null;
 }
 
+async function checkNativePermission(command: Record<string, unknown>): Promise<string | null> {
+  const commandType = typeof command.command === "string" ? command.command : "";
+  try {
+    if (commandType === "message_inbox" || commandType === "message_reply") {
+      if (!getNotificationCapability().available) return "Android notification access is not available. No notification action was executed."; }
+    if (commandType === "send_message") {
+      if (getMessagingPermissionStatus() !== "available") return "Android SMS permission is not available. No message was sent."; }
+    if (commandType === "call_number") {
+      if (getCallPermissionStatus() !== "available") return "Android phone-call permission is not available. No call was placed."; }
+    if (commandType === "contacts_search") {
+      if (!getContactsCapability().available) return "Android contacts permission is not available. No contacts were read."; }
+    if (commandType === "media_state" || commandType === "media_control") {
+      const module = require("../modules/frosh-media/src").default as { getPermissionStatus(): string };
+      if (module.getPermissionStatus() !== "available") return "Android media-session access is not available. No media action was executed."; }
+    return null;
+  } catch {
+    return "The Android permission state could not be verified. No privileged action was executed."; }
+}
 function stableCommandPayload(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableCommandPayload).join(",")}]`;
   if (value && typeof value === "object") {
@@ -467,6 +489,12 @@ export function connectFroshRealtime(
             releaseCommand();
             return;
           }
+      }
+
+      const permissionError = await checkNativePermission(parsed);
+      if (permissionError) {
+        await sendCommandResult(socket, parsed, { accepted: false, message: permissionError });
+        return;
       }
 
       try {
