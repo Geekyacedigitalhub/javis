@@ -36,7 +36,7 @@
         if (typeof patch.prompt === "string" && (patch.prompt.length > 8000 || new TextEncoder().encode(patch.prompt).byteLength > 32 * 1024)) return Response.json({ error: "Automation prompt is too large." }, { status: 400 });
         if (body?.status === "active" || body?.status === "paused" || body?.status === "completed") patch.status = body.status;
         if (body?.schedule?.type) patch.schedule = body.schedule;
-        const { calculateNextRun, getAutomationStore } = await import("../../automation/src");
+        const { calculateNextRun, getAutomationStore, validateAutomationSchedule } = await import("../../automation/src");
         if (patch.schedule) {
           if (new TextEncoder().encode(JSON.stringify(patch.schedule)).byteLength > 8 * 1024) {
             return Response.json({ error: "Automation schedule is too large." }, { status: 400 });
