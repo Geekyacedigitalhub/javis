@@ -859,7 +859,8 @@ const server = Bun.serve({
           if (!valid) return Response.json({ error: "Invalid schedule. Interval must be at least 60 minutes." }, { status: 400 });
           patch.nextRunAt = calculateNextRun(patch.schedule as any);
         }
-        const automation = await getAutomationStore().update(id, userId, patch as any);
+        const automation = await getAutomationStore().updateIfIdle(id, userId, patch as any);
+        if (!automation) return Response.json({ error: "Automation is currently executing; wait for the active worker to finish." }, { status: 409 });
         return Response.json({ automation });
       } catch (error) {
         return Response.json({ error: "Automation update failed" }, { status: 400 });
@@ -874,8 +875,8 @@ const server = Bun.serve({
         if (!id || id.length > 200 || new TextEncoder().encode(id).byteLength > 512 || /[\u0000-\u001f\u007f]/.test(id)) {
           return Response.json({ error: "Invalid automation ID" }, { status: 400 });
         }
-        const deleted = await (await import("../../automation/src")).getAutomationStore().delete(id, userId);
-        return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Automation not found" }, { status: 404 });
+        const deleted = await (await import("../../automation/src")).getAutomationStore().deleteIfIdle(id, userId);
+        return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Automation is missing or currently executing." }, { status: 409 });
       } catch {
         return Response.json({ error: "Automation deletion failed" }, { status: 400 });
       }
