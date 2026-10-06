@@ -170,6 +170,19 @@ export async function issueDeviceCredential(deviceId: string) {
   return { deviceId, token, expiresAt: new Date(expiresAt).toISOString() };
 }
 
+export async function purgeExpiredDeviceCredentials() {
+  const client = db();
+  if (!client) {
+    const now = Date.now();
+    for (const [deviceId, credential] of credentials) {
+      if (credential.expiresAt <= now) credentials.delete(deviceId);
+    }
+    return;
+  }
+  await ensureSchema();
+  await client.unsafe(`DELETE FROM frosh_device_credentials WHERE expires_at <= NOW()`);
+}
+
 export async function revokeDeviceCredential(deviceId: string) {
   const client = db();
   if (!client) {
