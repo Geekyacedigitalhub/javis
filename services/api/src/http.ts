@@ -25,7 +25,28 @@ async function recoverMissionsOnStartup(){
       if(mission.status==="waiting_approval"||mission.status==="completed"||mission.status==="paused") continue;
       try{
         const url="http://localhost:"+String(port)+"/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(mission.id)+"/recover";
-        await fetch(url,{method:"POST",headers:{"x-frosh-web-token":process.env.FROSH_WEB_TOKEN??""}});
+        const configuredTimeout=Number(process.env.FROSH_STARTUP_RECOVERY_TIMEOUT_MS??60_000);
+        const timeoutMs=Number.isFinite(configuredTimeout)
+          ? Math.min(120_000,Math.max(5_000,Math.floor(configuredTimeout)))
+          : 60_000;
+        const controller=new AbortController();
+        const timeout=setTimeout(()=>controller.abort(),timeoutMs);
+        try{
+          const response=await fetch(url,{
+            method:"POST",
+            headers:{"x-frosh-web-token":process.env.FROSH_WEB_TOKEN??""},
+            signal:controller.signal
+          });
+          if(!response.ok)console.error("FROSH startup mission recovery failed",mission.id,response.status);
+        }catch(error){
+          if(controller.signal.aborted){
+            console.error("FROSH startup mission recovery timed out",mission.id,timeoutMs);
+          }else{
+            console.error("FROSH startup mission recovery request failed",mission.id,error);
+          }
+        }finally{
+          clearTimeout(timeout);
+        }
       }catch{}
     }
   }catch(error){
