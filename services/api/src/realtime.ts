@@ -203,7 +203,7 @@ async function prepareCommandLedger(input: {
   idempotencyKey?: string;
 }) {
   const serializedPayload = stableCommandPayload(input.payload);
-  if (serializedPayload.length > MAX_COMMAND_PAYLOAD_BYTES) {
+  if (new TextEncoder().encode(serializedPayload).byteLength > MAX_COMMAND_PAYLOAD_BYTES) {
     return { kind: "error" as const, reason: "command_payload_too_large" };
   }
   const payloadHash = await hashCommandPayload(input.payload);
