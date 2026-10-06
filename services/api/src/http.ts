@@ -194,10 +194,26 @@ const server = Bun.serve({
               const { buildModelInput } = await import("../../ai/src/provider");
               const { OpenAIProvider } = await import("../../ai/src/openai-provider");
 
-              const userId = typeof body?.userId === "string" ? body.userId : undefined;
+              const requestedUserId = typeof body?.userId === "string" ? body.userId : undefined;
+              const userId = webAuthenticated ? requestedUserId : configuredUserId;
+              if (!webAuthenticated && requestedUserId && requestedUserId !== configuredUserId) {
+                send({ type: "error", message: "Device credential cannot access another configured user." });
+                controller.close();
+                return;
+              }
               const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
               const memory = createMemoryStore();
               const conversation = conversationId ? await memory.getConversation(conversationId) : null;
+              if (conversation?.userId && userId && conversation.userId !== userId) {
+                send({ type: "error", message: "Conversation belongs to another user." });
+                controller.close();
+                return;
+              }
+              if (conversation?.userId && !userId) {
+                send({ type: "error", message: "Conversation owner is required." });
+                controller.close();
+                return;
+              }
               const currentConversation = conversation ?? await memory.createConversation({ id: conversationId, userId });
               await memory.appendMessage({ conversationId: currentConversation.id, role: "user", content: message });
 
