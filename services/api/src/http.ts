@@ -145,6 +145,12 @@ const server = Bun.serve({
       return Response.json({ error: "FROSH authentication required" }, { status: 401 });
     }
 
+    const configuredUserId = process.env.FROSH_USER_ID?.trim() || "default-user";
+    const userScopedPath = url.pathname.match(/\/users\/([^/]+)/);
+    if (!webAuthenticated && deviceId && userScopedPath && decodeURIComponent(userScopedPath[1]) !== configuredUserId) {
+      return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/missions/budgets") {
       const maxSteps = Math.max(1, Number(process.env.FROSH_MISSION_MAX_STEPS ?? 12) || 12);
       const maxToolCalls = Math.max(1, Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS ?? 40) || 40);
