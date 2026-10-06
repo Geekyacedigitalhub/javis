@@ -102,6 +102,7 @@ export async function closeDeviceStore() {
 
 export async function registerDevice(input: FroshDeviceRegistration, options: { allowExisting?: boolean } = {}) {
   const name = input.name.trim();
+  if (!Array.isArray(input.capabilities) || input.capabilities.length > 100) throw new Error("Device capabilities are invalid or too large.");
   const capabilities = [...new Set(input.capabilities.filter((item): item is string => typeof item === "string").map(item => item.trim()).filter(Boolean))];
   if (!name || name.length > 120 || new TextEncoder().encode(name).byteLength > 512) {
     throw new Error("Device name is invalid or too large.");
@@ -198,6 +199,7 @@ export async function markDeviceOffline(id: string) {
 }
 
 export async function issueDeviceCredential(deviceId: string) {
+  if (!deviceId || deviceId.length > 200) return null;
   const client = db();
   const device = client ? await getDevice(deviceId) : devices.get(deviceId);
   if (!device) return null;
@@ -566,8 +568,10 @@ export async function authenticateDevice(deviceId: string, token: string) {
 }
 
 export async function updateDeviceCapabilities(deviceId: string, capabilities: FroshCapabilityStatus[]) {
+  if (!deviceId || deviceId.length > 200 || capabilities.length > 100) return null;
+  const normalized = capabilities.filter(item => item.availability === "available" && item.capability.length <= 100).map(item => item.capability);
+  if (new TextEncoder().encode(JSON.stringify(normalized)).byteLength > 16 * 1024) return null;
   const client = db();
-  const normalized = capabilities.filter(item => item.availability === "available").map(item => item.capability);
   if (!client) {
     const device = devices.get(deviceId);
     if (!device) return null;
