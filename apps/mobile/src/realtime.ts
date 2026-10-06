@@ -1,3 +1,4 @@
+import * as SecureStore from "expo-secure-store";
 import type { FroshEvent } from "../../../packages/types/src/events";
 import { FROSH_API_URL } from "./api";
 import { loadDeviceCredential } from "./session";
@@ -8,6 +9,57 @@ import { executePhoneAction } from "./phone-actions";
 
 function websocketUrl() {
   return FROSH_API_URL.replace(/^http/, "ws") + "/v1/realtime";
+}
+
+type CommandRecord =
+  | { state: "started"; createdAt: number }
+  | { state: "completed"; createdAt: number; accepted: boolean; message: string; data?: unknown };
+
+const commandRecords = new Map<string, CommandRecord>();
+const commandRecordPrefix = "frosh:device-command:";
+
+async function loadCommandRecord(requestId: string): Promise<CommandRecord | null> {
+  const cached = commandRecords.get(requestId);
+  if (cached) return cached;
+  try {
+    const raw = await SecureStore.getItemAsync(commandRecordPrefix + requestId);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as CommandRecord;
+    if (!parsed || typeof parsed.createdAt !== "number" || Date.now() - parsed.createdAt > 24 * 60 * 60 * 1000) {
+      await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
+      return null;
+    }
+    commandRecords.set(requestId, parsed);
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function saveCommandRecord(requestId: string, record: CommandRecord) {
+  commandRecords.set(requestId, record);
+  try {
+    await SecureStore.setItemAsync(commandRecordPrefix + requestId, JSON.stringify(record));
+  } catch {}
+}
+
+async function sendCommandResult(
+  socket: WebSocket,
+  command: Record<string, unknown>,
+  result: { accepted: boolean; message: string; data?: unknown },
+) {
+  const requestId = String(command.requestId ?? "");
+  const deviceId = String(command.deviceId ?? "");
+  const record: CommandRecord = { state: "completed", createdAt: Date.now(), accepted: result.accepted, message: result.message, data: result.data };
+  await saveCommandRecord(requestId, record);
+  socket.send(JSON.stringify({
+    type: "device.command.result",
+    requestId,
+    deviceId,
+    accepted: result.accepted,
+    message: result.message,
+    ...(result.data !== undefined ? { data: result.data } : {}),
+  }));
 }
 
 export function connectFroshRealtime(
@@ -34,13 +86,33 @@ export function connectFroshRealtime(
   socket.onmessage = (message) => {
     try {
       const parsed = JSON.parse(message.data) as Record<string, unknown>;
+      if (parsed.type === "device.command") {
+        const requestId = String(parsed.requestId ?? "");
+        if (requestId) {
+          const existing = await loadCommandRecord(requestId);
+          if (existing?.state === "completed") {
+            await sendCommandResult(socket, parsed, existing);
+            return;
+          }
+          if (existing?.state === "started") {
+            await sendCommandResult(socket, parsed, {
+              accepted: false,
+              message: "This command was already started, but its final outcome was not durably recorded. The outcome is unknown; do not retry automatically.",
+              data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
+            });
+            return;
+          }
+          await saveCommandRecord(requestId, { state: "started", createdAt: Date.now() });
+        }
+      }
+
       if (parsed.type === "device.command" && parsed.command === "message_inbox") {
         try {
           const { getUnifiedMessagingInbox } = await import("./messaging-inbox");
           const inbox = await getUnifiedMessagingInbox();
-          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: true, message: "Message inbox loaded.", data: inbox }));
+          await sendCommandResult(socket, parsed, { accepted: true, message: "Message inbox loaded.", data: inbox });
         } catch (error) {
-          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to load the message inbox." }));
+          await sendCommandResult(socket, parsed, { accepted: false, message: error instanceof Error ? error.message : "Unable to load the message inbox." });
         }
         return;
       }
@@ -49,7 +121,7 @@ export function connectFroshRealtime(
         try {
           const { replyToUnifiedMessage } = await import("./messaging-inbox");
           const result = await replyToUnifiedMessage(String(parsed.notificationId ?? ""), String(parsed.message ?? ""));
-          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: result.accepted, message: result.message }));
+          await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         } catch (error) {
           socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to reply to the message." }));
         }
@@ -59,7 +131,7 @@ export function connectFroshRealtime(
       if (parsed.type === "device.command" && parsed.command === "send_message") {
         try {
           const result = await executePhoneAction({ action: "compose_message", value: String(parsed.recipient ?? ""), message: String(parsed.message ?? "") } as never);
-          socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: result.accepted, message: result.message }));
+          await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         } catch (error) {
           socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: false, message: error instanceof Error ? error.message : "Unable to send the message." }));
         }
@@ -67,7 +139,7 @@ export function connectFroshRealtime(
       }
       if (parsed.type === "device.command" && (parsed.command === "open_dialer" || parsed.command === "call_number")) {
         const result = await executePhoneAction({ action: parsed.command, value: typeof parsed.phoneNumber === "string" ? parsed.phoneNumber : undefined } as never);
-        socket.send(JSON.stringify({ type: "device.command.result", requestId: parsed.requestId, deviceId: parsed.deviceId, accepted: result.accepted, message: result.message }));
+        await sendCommandResult(socket, parsed, { accepted: result.accepted, message: result.message });
         return;
       }
       if (parsed.type === "device.command" && parsed.command === "contacts_search") {
@@ -84,14 +156,11 @@ export function connectFroshRealtime(
             return { available: false, message: "Media native module unavailable." };
           }
         })();
-        socket.send(JSON.stringify({
-          type: "device.command.result",
-          requestId: parsed.requestId,
-          deviceId: parsed.deviceId,
+        await sendCommandResult(socket, parsed, {
           accepted: Boolean(state.available),
           message: state.message ?? (state.available ? "Current media state retrieved." : "No active media session."),
           data: state
-        }));
+        });
         return;
       }
       if (parsed.type === "device.command" && parsed.command === "media_control") {
