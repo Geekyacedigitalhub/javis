@@ -1,7 +1,7 @@
 import postgres from "postgres";
 import type { FroshDevice, FroshDeviceRegistration } from "../../../packages/types/src/device";
 import type { FroshCapabilityStatus } from "../../../packages/types/src/capabilities";
-import { isFroshCapability } from "../../../packages/types/src/capabilities";
+import { isImplementedFroshCapability, isFroshCapability } from "../../../packages/types/src/capabilities";
 
 type DeviceCredential = { token: string; expiresAt: number };
 type DeviceRow = FroshDevice & { createdAt?: string };
@@ -576,7 +576,7 @@ export async function authenticateDevice(deviceId: string, token: string) {
 
 export async function updateDeviceCapabilities(deviceId: string, capabilities: FroshCapabilityStatus[]) {
   if (!deviceId || deviceId.length > 200 || capabilities.length > 100) return null;
-  const normalized = [...new Set(capabilities.filter(item => item.availability === "available" && item.capability.length <= 100 && isFroshCapability(item.capability)).map(item => item.capability))];
+  const normalized = [...new Set(capabilities.filter(item => item.availability === "available" && item.capability.length <= 100 && isImplementedFroshCapability(item.capability)).map(item => item.capability))];
   if (new TextEncoder().encode(JSON.stringify(normalized)).byteLength > 16 * 1024) return null;
   const client = db();
   if (!client) {
