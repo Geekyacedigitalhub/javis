@@ -35,6 +35,10 @@ async function recoverMissionsOnStartup(){
 setTimeout(()=>void recoverMissionsOnStartup(),2000);
 
 
+function isSafetyPausedMission(mission:FroshMission){
+  return mission.status==="paused" && (mission.result??"").startsWith("Mission paused after restart because an approval outcome or approved action was not durably reconciled.");
+}
+
 const server = Bun.serve({
   port,
   websocket: {
