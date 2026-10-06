@@ -11,6 +11,9 @@ const codingSessions = new CodingSessionManager(new OpenAIProvider());
 const port = Number(process.env.PORT ?? 3001);
 await initializeDeviceStore();
 void purgeExpiredDeviceCredentials().catch((error) => console.warn("Initial device credential cleanup failed:", error));
+setInterval(() => {
+  void purgeExpiredDeviceCredentials().catch((error) => console.warn("Scheduled device credential cleanup failed:", error));
+}, 60 * 60 * 1000);
 import { startAutomationRunner } from "../../automation/src";
 import { startMissionRunner } from "../../missions/src";
 startAutomationRunner();
