@@ -17,7 +17,7 @@ const credentialCleanupTimer = setInterval(() => {
   void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Scheduled device credential cleanup failed", error));
   void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Scheduled device command ledger cleanup failed", error));
 }, 60 * 60 * 1000);
-import { startAutomationRunner } from "../../automation/src";
+import { closeAutomationStore, startAutomationRunner, stopAutomationRunner } from "../../automation/src";
 import { startMissionRunner } from "../../missions/src";
 startAutomationRunner();
 startMissionRunner();
