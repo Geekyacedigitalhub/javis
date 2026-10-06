@@ -66,6 +66,16 @@ export default function App() {
         "agent-runs",
         "approvals",
         "realtime",
+        "device.info",
+        "apps.launch",
+        "media.control",
+        "calls.dialer",
+        "calls.direct",
+        "messages.compose",
+        "messages.send",
+        "contacts.read",
+        "notifications.read",
+        "notifications.reply",
       ]);
       const result = await (await fetch(`${process.env.EXPO_PUBLIC_FROSH_API_URL ?? "http://localhost:3001"}/v1/devices/${device.id}`, {
         headers: { "x-frosh-device-id": device.id },
