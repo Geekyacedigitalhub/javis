@@ -256,6 +256,9 @@ export class OpenAIProvider {
           output: output.output,
         })),
       ];
+      for (const output of options.continuation.continuation.pendingToolOutputs ?? []) {
+        continuationToolOutputs.set(output.callId, output.output);
+      }
       if (options.continuation.toolOutput) {
         continuationInput.push({
           type: "function_call_output",
