@@ -802,7 +802,8 @@ const server = Bun.serve({
         let lastResult=mission.result;
         const profileMultiplier=mission.budgetProfile==="extended"?1.5:mission.budgetProfile==="intensive"?2:1;
         const maxSteps=Math.min(24,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12)*profileMultiplier)));
-        const maxRetries=Math.max(0,Number(process.env.FROSH_MISSION_MAX_RETRIES??2)||2);
+        const configuredMaxRetries=Number(process.env.FROSH_MISSION_MAX_RETRIES??2);
+        const maxRetries=Number.isFinite(configuredMaxRetries)?Math.max(0,Math.floor(configuredMaxRetries)):2;
         const retryPollMs=Math.max(5000,Number(process.env.FROSH_MISSION_RETRY_POLL_MS??10000)||10000);
         const maxTools=Math.min(80,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_TOOL_CALLS??40)||40)*profileMultiplier)));
         const maxDurationMs=Math.min(3600000,Math.max(60000,Math.round((Number(process.env.FROSH_MISSION_MAX_DURATION_MS??1800000)||1800000)*profileMultiplier)));
@@ -1091,7 +1092,7 @@ const server = Bun.serve({
             }finally{
               continuationLeaseRenewing=false;
             }
-          },60000);
+          },30000);
           let run;
           try {
             run=await codingSessions.approveAndResume(mission.pendingApprovalId,async()=>{
@@ -1100,7 +1101,8 @@ const server = Bun.serve({
             });
           } catch(error) {
             clearInterval(leaseRenewTimer);
-            const continuationDurationMs=Date.now()-continuationStartedAt;
+            clearInterval(leaseRenewTimer);
+          const continuationDurationMs=Date.now()-continuationStartedAt;
             const executionDurationMs=existingDurationMs+continuationDurationMs;
             if(continuationLeaseLost){
               await store.releaseLeaseIfOwned(id,userId,executionOwner);
