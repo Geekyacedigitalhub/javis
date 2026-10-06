@@ -26,7 +26,7 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
       try {
         const parsed = JSON.parse(raw);
         if (path.join("/") === "v1/chat" || path.join("/") === "v1/chat/stream") {
-          if (!parsed.userId) parsed.userId = USER_ID;
+          parsed.userId = USER_ID;
         }
         body = JSON.stringify(parsed);
         headers.set("content-type", "application/json");
