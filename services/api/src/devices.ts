@@ -132,6 +132,18 @@ export async function getDevice(id: string) {
   return rows[0] ?? null;
 }
 
+export async function markAllDevicesOffline() {
+  const client = db();
+  if (!client) {
+    for (const [id, device] of devices) {
+      devices.set(id, { ...device, status: "offline" });
+    }
+    return;
+  }
+  await ensureSchema();
+  await client.unsafe(`UPDATE frosh_devices SET status='offline'`);
+}
+
 export async function markDeviceOffline(id: string) {
   const client = db();
   if (!client) {
