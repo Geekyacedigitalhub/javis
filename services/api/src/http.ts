@@ -78,20 +78,31 @@ const server = Bun.serve({
   websocket: {
     open(ws) {
       // Authentication is completed by the first realtime auth message.
-      ws.data = { authenticated: false, deviceId: undefined as string | undefined };
+      const authTimeout = setTimeout(() => {
+        if (!ws.data?.authenticated) {
+          ws.send(JSON.stringify({ type: "error", message: "Realtime authentication timed out" }));
+          ws.close();
+        }
+      }, 10000);
+      ws.data = { authenticated: false, deviceId: undefined as string | undefined, realtimeClientId: undefined as string | undefined, authTimeout };
       ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
     },
     message(ws, message) {
       try {
         const parsed = JSON.parse(String(message));
         if (parsed?.type === "auth") {
+          if (ws.data?.authenticated) {
+            ws.send(JSON.stringify({ type: "error", message: "Realtime socket is already authenticated" }));
+            return;
+          }
           if (typeof parsed.deviceId !== "string" || typeof parsed.token !== "string" || !authenticateDevice(parsed.deviceId, parsed.token)) {
             ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" }));
             ws.close();
             return;
           }
+          clearTimeout(ws.data?.authTimeout);
           const realtimeClientId = addRealtimeClient(ws, parsed.deviceId);
-          ws.data = { authenticated: true, deviceId: parsed.deviceId, realtimeClientId };
+          ws.data = { authenticated: true, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
           return;
         }
