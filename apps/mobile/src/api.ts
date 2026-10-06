@@ -23,20 +23,21 @@ async function request<T>(path: string, init?: RequestInit, options: { includeCr
     await clearDeviceCredential().catch(() => undefined);
     throw new Error("Device credential has expired. Re-pair this phone.");
   }
+  const requestCredential = credential;
   const response = await fetch(`${FROSH_API_URL}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
-      ...(options.includeCredential === false ? {} : credential ? {
-        "x-frosh-device-id": credential.deviceId,
-        "x-frosh-device-token": credential.token,
+      ...(options.includeCredential === false ? {} : requestCredential ? {
+        "x-frosh-device-id": requestCredential.deviceId,
+        "x-frosh-device-token": requestCredential.token,
       } : {}),
       ...(init?.headers ?? {}),
     },
   });
   const body = await response.json();
   if (!response.ok) {
-    if (response.status === 401 && credential) {
+    if (response.status === 401 && requestCredential && credential && credential.deviceId === requestCredential.deviceId && credential.token === requestCredential.token && credential.expiresAt === requestCredential.expiresAt) {
       credential = null;
       await clearDeviceCredential().catch(() => undefined);
     }
