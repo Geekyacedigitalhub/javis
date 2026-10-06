@@ -422,13 +422,15 @@ const server = Bun.serve({
 
     const memoryUserMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)$/);
     if (memoryUserMatch && request.method === "GET") {
-      const userId = decodeURIComponent(memoryUserMatch[1]);
+      const userId = decodeBoundedUserId(memoryUserMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
       return Response.json({ memories: await getUserMemoryStore().list(userId, 100) });
     }
 
     const memoryCandidatesMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/candidates$/);
     if (memoryCandidatesMatch && request.method === "GET") {
-      const userId = decodeURIComponent(memoryCandidatesMatch[1]);
+      const userId = decodeBoundedUserId(memoryCandidatesMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
       return Response.json({ candidates: await listUserMemoryCandidates(userId) });
     }
 
@@ -437,7 +439,8 @@ const server = Bun.serve({
         return Response.json({ error: "Trusted web authentication required for memory candidate decisions." }, { status: 403 });
       }
       try {
-        const userId = decodeURIComponent(memoryCandidatesMatch[1]);
+        const userId = decodeBoundedUserId(memoryCandidatesMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
         const body = await parseBoundedJson(request);
         const candidateId = typeof body?.candidateId === "string" ? body.candidateId.trim() : "";
         const status = body?.status === "approved" || body?.status === "rejected" ? body.status : "";
@@ -726,7 +729,8 @@ const server = Bun.serve({
 
     if (automationUsers && request.method === "POST") {
       try {
-        const userId = decodeURIComponent(automationUsers[1]);
+        const userId = decodeBoundedUserId(automationUsers[1]);
+        if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
         const body = await parseBoundedJson(request);
         const name = typeof body?.name === "string" ? body.name.trim() : "";
         const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
@@ -752,7 +756,8 @@ const server = Bun.serve({
     const automationMatch = url.pathname.match(/^\/v1\/automations\/users\/([^/]+)\/([^/]+)$/);
     if (automationMatch && request.method === "PATCH") {
       try {
-        const userId = decodeURIComponent(automationMatch[1]);
+        const userId = decodeBoundedUserId(automationMatch[1]);
+        if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
         const id = decodeURIComponent(automationMatch[2]);
         const body = await parseBoundedJson(request);
         const patch: Record<string, unknown> = {};
