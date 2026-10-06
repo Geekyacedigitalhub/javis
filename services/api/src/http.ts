@@ -254,7 +254,7 @@ const server = Bun.serve({
 
     const configuredUserId = process.env.FROSH_USER_ID?.trim() || "default-user";
     const userScopedPath = url.pathname.match(/\/users\/([^/]+)/);
-    if (!webAuthenticated && deviceId && userScopedPath && decodeURIComponent(userScopedPath[1]) !== configuredUserId) {
+    if (!webAuthenticated && deviceId && userScopedPath && decodeBoundedUserId(userScopedPath[1]) !== configuredUserId) {
       return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
     }
 
@@ -456,7 +456,8 @@ const server = Bun.serve({
       if (!webAuthenticated) {
         return Response.json({ error: "Trusted web authentication required to delete memory." }, { status: 403 });
       }
-      const userId = decodeURIComponent(memoryDeleteMatch[1]);
+      const userId = decodeBoundedUserId(memoryDeleteMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
       const memoryId = decodeURIComponent(memoryDeleteMatch[2]);
       const deleted = await getUserMemoryStore().delete(memoryId, userId);
       return deleted
@@ -781,7 +782,8 @@ const server = Bun.serve({
 
     if (missionUsers && request.method === "POST") {
       try {
-        const userId=decodeURIComponent(missionUsers[1]);
+        const userId=decodeBoundedUserId(missionUsers[1]);
+        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const body=await parseBoundedJson(request);
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
         if(!goal)return Response.json({error:"goal is required"},{status:400});        const { getMissionStore }=await import("../../missions/src");
