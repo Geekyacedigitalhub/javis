@@ -1027,7 +1027,6 @@ const server = Bun.serve({
         }
         if(mission.status==="failed"){
           const recoverableSteps=mission.steps.filter(step=>step.status==="failed"||step.status==="blocked"||step.status==="running");
-          const failedSteps=recoverableSteps;
           if(recoverableSteps.length){
             const now=new Date().toISOString();
             const steps=mission.steps.map(step=>recoverableSteps.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,nextRetryAt:undefined,updatedAt:now}:step);
