@@ -575,19 +575,20 @@ const server = Bun.serve({
         if(approval){
           cancelledApprovalId=approval.id;
           cancelledApprovalRunId=approval.runId;
-          if(approval.status==="pending"){
-            try{
-              await approvalStore.resolve(approval.id,"rejected");
-            }catch(error){
-              return Response.json({error:error instanceof Error?error.message:"Pending approval could not be safely cancelled"},{status:409});
-            }
-          }
         }
       }
       const updated=await store.cancelIfIdle(id,userId);
       if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
       let approvalRunStopped=false;
       if(cancelledApprovalId && cancelledApprovalRunId){
+        const approval=await approvalStore.get(cancelledApprovalId);
+        if(approval?.status==="pending"){
+          try{
+            await approvalStore.resolve(cancelledApprovalId,"rejected");
+          }catch(error){
+            console.error("FROSH cancelled mission approval rejection raced after mission cancellation",id,cancelledApprovalId,error);
+          }
+        }
         try{
           const stopped=await agentRunStore.stopWaitingApproval(
             cancelledApprovalRunId,
@@ -840,7 +841,24 @@ const server = Bun.serve({
               recoveryRequiresReview=true;
               reconciled.add(staleStep.id);
               continue;
-            }else if(savedRun.status==="running"){
+            }else if(savedRun.status==="running" || savedRun.status==="failed"){
+              const approvedActionCall=savedRun.toolCalls.find(call=>call.id.startsWith("approved-") && call.status!=="planned");
+              const approvedActionId=approvedActionCall?.id.slice("approved-".length);
+              const approvedAction=approvedActionId?await approvalStore.get(approvedActionId):null;
+              if(approvedAction?.status==="approved"){
+                const outcome="An approved action was recorded in the agent run before execution stopped, but the mission did not durably reconcile the final continuation state. FROSH will not replay the action automatically.";
+                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
+                reconciled.add(staleStep.id);
+                recoveryRequiresReview=true;
+                await store.update(savedRun.id,userId,{
+                  status:"failed",
+                  pendingApprovalId:undefined,
+                  result:outcome,
+                  error:"Approved action requires safety review after interrupted continuation"
+                }).catch(()=>undefined);
+                continue;
+              }
+              if(savedRun.status==="running"){
               let orphanApproval:null|Awaited<ReturnType<typeof approvalStore.findPendingByRun>>=null;
               for(const toolCall of savedRun.toolCalls){
                 if(toolCall.status!=="planned") continue;
@@ -891,6 +909,7 @@ const server = Bun.serve({
               if(Number.isFinite(heartbeatAgeMs) && heartbeatAgeMs<180000){
                 await store.releaseLeaseIfOwned(id,userId,executionOwner);
                 return Response.json({error:"Mission agent run is still active"},{status:409});
+              }
               }
             }
           }
