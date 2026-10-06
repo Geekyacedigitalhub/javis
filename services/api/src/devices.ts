@@ -291,14 +291,19 @@ export async function createDeviceCommandLedger(input: {
     return true;
   }
   await ensureSchema();
-  const result = await client.unsafe(
-    `INSERT INTO frosh_device_command_ledger(request_id,device_id,command,payload_hash,idempotency_key,state,created_at,updated_at)
-     VALUES($1,$2,$3,$4,$5,'pending',NOW(),NOW())
-     ON CONFLICT(request_id) DO NOTHING`,
-    [input.requestId, input.deviceId, input.command, input.payloadHash, input.idempotencyKey],
-  );
-  if (result.count > 0) return true;
-  return false;
+  try {
+    const result = await client.unsafe(
+      `INSERT INTO frosh_device_command_ledger(request_id,device_id,command,payload_hash,idempotency_key,state,created_at,updated_at)
+       VALUES($1,$2,$3,$4,$5,'pending',NOW(),NOW())
+       ON CONFLICT(request_id) DO NOTHING`,
+      [input.requestId, input.deviceId, input.command, input.payloadHash, input.idempotencyKey],
+    );
+    if (result.count > 0) return true;
+    return false;
+  } catch {
+    // A unique idempotency-key conflict is handled by the caller as a lookup/replay.
+    return false;
+  }
 }
 
 export async function markDeviceCommandDispatched(requestId: string) {
