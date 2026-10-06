@@ -989,22 +989,36 @@ const server = Bun.serve({
       const mission=await getMissionStore().get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       const encoder=new TextEncoder();
+      const MAX_MISSION_SSE_EVENT_BYTES=64*1024;
+      const MAX_MISSION_SSE_LIFETIME_MS=30*60*1000;
       const stream=new ReadableStream({
         async start(controller){
           let closed=false;
-          const send=(event:unknown)=>{if(!closed)controller.enqueue(encoder.encode("data: "+JSON.stringify(event)+"\n\n"));};
+          let polling=false;
+          const close=()=>{if(closed)return;closed=true;clearInterval(timer);clearInterval(heartbeat);clearTimeout(lifetime);controller.close();};
+          const send=(event:unknown)=>{
+            if(closed)return;
+            let payload:string;
+            try{payload=JSON.stringify(event);}catch{return;}
+            const bytes=encoder.encode("data: "+payload+"\n\n");
+            if(bytes.byteLength>MAX_MISSION_SSE_EVENT_BYTES){close();return;}
+            controller.enqueue(bytes);
+          };
           const initial=await getMissionStore().listEvents(id,userId,20);
           for(const event of initial.reverse())send(event);
           let seen=new Set(initial.map((event)=>event.id));
           const timer=setInterval(async()=>{
+            if(closed||polling)return;
+            polling=true;
             try{
               const latest=await getMissionStore().listEvents(id,userId,50);
-              for(const event of latest.reverse())if(!seen.has(event.id)){seen.add(event.id);send(event);}
+              for(const event of latest.reverse())if(!seen.has(event.id)){seen.add(event.id);send(event);if(closed)break;}
               if(seen.size>200)seen=new Set(latest.map((event)=>event.id));
-            }catch{}
+            }catch{}finally{polling=false;}
           },2000);
           const heartbeat=setInterval(()=>send({type:"heartbeat",createdAt:new Date().toISOString()}),15000);
-          request.signal.addEventListener("abort",()=>{closed=true;clearInterval(timer);clearInterval(heartbeat);controller.close();},{once:true});
+          const lifetime=setTimeout(close,MAX_MISSION_SSE_LIFETIME_MS);
+          request.signal.addEventListener("abort",close,{once:true});
         }
       });
       return new Response(stream,{headers:{"content-type":"text/event-stream","cache-control":"no-cache","connection":"keep-alive"}});
