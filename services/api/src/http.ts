@@ -144,8 +144,9 @@ const server = Bun.serve({
         const rawMessage = String(message);
         const MAX_REALTIME_FRAME_BYTES = 128 * 1024;
         if (new TextEncoder().encode(rawMessage).byteLength > MAX_REALTIME_FRAME_BYTES) {
-          ws.send(JSON.stringify({ type: "error", message: "Realtime message is too large" }));
-          ws.close();
+          ws.data = { ...ws.data, closed: true, authenticating: false };
+          try { ws.send(JSON.stringify({ type: "error", message: "Realtime message is too large" })); } catch { /* socket may already be closing */ }
+          try { ws.close(); } catch { /* already closed */ }
           return;
         }
         const parsed = JSON.parse(rawMessage);
@@ -158,16 +159,16 @@ const server = Bun.serve({
           ws.data = { ...ws.data, authenticating: true };
           if (typeof parsed.deviceId !== "string" || typeof parsed.token !== "string" || !(await authenticateDevice(parsed.deviceId, parsed.token))) {
             if (!ws.data?.closed) {
-              ws.data = { ...ws.data, authenticating: false };
-              ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" }));
-              ws.close();
+              ws.data = { ...ws.data, authenticating: false, closed: true };
+              try { ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" })); } catch { /* socket may already be closing */ }
+              try { ws.close(); } catch { /* already closed */ }
             }
             return;
           }
           if (ws.data?.closed) return;
           clearTimeout(ws.data?.authTimeout);
           const realtimeClientId = addRealtimeClient(ws, parsed.deviceId, parsed.token);
-          ws.data = { authenticated: true, authenticating: false, closed: false, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
+          ws.data = { authenticated: true, authenticating: false, closed: false, malformedMessages: 0, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
           return;
         }
