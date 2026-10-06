@@ -15,5 +15,6 @@ export interface FroshApprovalRequest {
 export interface FroshApprovalStore {
   create(input: Omit<FroshApprovalRequest, "id" | "createdAt" | "status">): Promise<FroshApprovalRequest>;
   get(id: string): Promise<FroshApprovalRequest | null>;
+  findPendingByRun(runId: string, toolName: string, argumentsHash: string): Promise<FroshApprovalRequest | null>;
   resolve(id: string, status: "approved" | "rejected"): Promise<FroshApprovalRequest>;
 }
