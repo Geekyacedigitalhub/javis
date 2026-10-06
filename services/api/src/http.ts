@@ -98,7 +98,7 @@ const server = Bun.serve({
             ws.send(JSON.stringify({ type: "error", message: "Realtime socket is already authenticated" }));
             return;
           }
-          if (typeof parsed.deviceId !== "string" || typeof parsed.token !== "string" || !authenticateDevice(parsed.deviceId, parsed.token)) {
+          if (typeof parsed.deviceId !== "string" || typeof parsed.token !== "string" || !(await authenticateDevice(parsed.deviceId, parsed.token))) {
             ws.send(JSON.stringify({ type: "error", message: "Realtime authentication failed" }));
             ws.close();
             return;
@@ -141,7 +141,7 @@ const server = Bun.serve({
     const publicPath =
       url.pathname === "/health" ||
       url.pathname === "/v1/realtime";
-    if (!publicPath && !webAuthenticated && (!deviceId || !deviceToken || !authenticateDevice(deviceId, deviceToken))) {
+    if (!publicPath && !webAuthenticated && (!deviceId || !deviceToken || !(await authenticateDevice(deviceId, deviceToken)))) {
       return Response.json({ error: "FROSH authentication required" }, { status: 401 });
     }
 
@@ -472,8 +472,8 @@ const server = Bun.serve({
     }
 
     if (request.method === "GET" && url.pathname === "/v1/devices") {
-      if (webAuthenticated) return Response.json({ devices: listDevices() });
-      return Response.json({ devices: deviceId ? listDevices().filter((device) => device.id === deviceId) : [] });
+      if (webAuthenticated) return Response.json({ devices: await listDevices() });
+      return Response.json({ devices: deviceId ? await listDevices().filter((device) => device.id === deviceId) : [] });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/devices") {
@@ -503,7 +503,7 @@ const server = Bun.serve({
         if (!name) {
           return Response.json({ error: "Device name cannot be empty." }, { status: 400 });
         }
-        const existingDevice = listDevices().find(
+        const existingDevice = await listDevices().find(
           (item) => item.name === name && item.platform === platform,
         );
         if (existingDevice && !webAuthenticated) {
@@ -512,7 +512,7 @@ const server = Bun.serve({
             { status: 409 },
           );
         }
-        const device = registerDevice({
+        const device = await registerDevice({
           name,
           platform,
           capabilities: body.capabilities.filter(
@@ -520,7 +520,7 @@ const server = Bun.serve({
               typeof capability === "string",
           ),
         });
-        const credential = issueDeviceCredential(device.id);
+        const credential = await issueDeviceCredential(device.id);
         return Response.json({ device, credential }, { status: 201 });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Device registration failed";
@@ -538,7 +538,7 @@ const server = Bun.serve({
         if (!Array.isArray(body?.capabilities)) {
           return Response.json({ error: "capabilities must be an array" }, { status: 400 });
         }
-        const device = updateDeviceCapabilities(
+        const device = await updateDeviceCapabilities(
           capabilityMatch[1],
           body.capabilities.filter((item: unknown): item is { capability: string; availability: "available" | "permission_required" | "unsupported"; detail?: string } =>
             typeof item === "object" && item !== null &&
@@ -559,7 +559,7 @@ const server = Bun.serve({
       if (!webAuthenticated) {
         return Response.json({ error: "Trusted web authentication required." }, { status: 401 });
       }
-      const revoked = revokeDeviceCredential(credentialRevokeMatch[1]);
+      const revoked = await revokeDeviceCredential(credentialRevokeMatch[1]);
       return revoked
         ? Response.json({ revoked: true })
         : Response.json({ error: "Device not found" }, { status: 404 });
@@ -570,7 +570,7 @@ const server = Bun.serve({
       if (!webAuthenticated && deviceId !== deviceMatch[1]) {
         return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
       }
-      const device = getDevice(deviceMatch[1]);
+      const device = await getDevice(deviceMatch[1]);
       return device
         ? Response.json(device)
         : Response.json({ error: "Device not found" }, { status: 404 });
