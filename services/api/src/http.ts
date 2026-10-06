@@ -370,6 +370,9 @@ const server = Bun.serve({
     const messageReplyMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/messages\/([^/]+)\/reply$/);
     if (messageReplyMatch && request.method === "POST") {
       try {
+        if (!webAuthenticated && deviceId !== messageReplyMatch[1]) {
+          return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
+        }
         const body = await request.json();
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
@@ -383,6 +386,9 @@ const server = Bun.serve({
     const commandMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/command$/);
     if (commandMatch && request.method === "POST") {
       try {
+        if (!webAuthenticated && deviceId !== commandMatch[1]) {
+          return Response.json({ error: "Device credential cannot command another device." }, { status: 403 });
+        }
         const body = await request.json();
         const command = typeof body?.command === "string" ? body.command : "";
         const allowed = ["open_dialer", "media_control", "media_state", "open_app", "contacts_search", "message_inbox"];
@@ -416,7 +422,8 @@ const server = Bun.serve({
     }
 
     if (request.method === "GET" && url.pathname === "/v1/devices") {
-      return Response.json({ devices: listDevices() });
+      if (webAuthenticated) return Response.json({ devices: listDevices() });
+      return Response.json({ devices: deviceId ? listDevices().filter((device) => device.id === deviceId) : [] });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/devices") {
@@ -454,6 +461,9 @@ const server = Bun.serve({
     const capabilityMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)\/capabilities$/);
     if (capabilityMatch && request.method === "POST") {
       try {
+        if (!webAuthenticated && deviceId !== capabilityMatch[1]) {
+          return Response.json({ error: "Device credential cannot update another device." }, { status: 403 });
+        }
         const body = await request.json();
         if (!Array.isArray(body?.capabilities)) {
           return Response.json({ error: "capabilities must be an array" }, { status: 400 });
@@ -476,6 +486,9 @@ const server = Bun.serve({
 
     const deviceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)$/);
     if (deviceMatch && request.method === "GET") {
+      if (!webAuthenticated && deviceId !== deviceMatch[1]) {
+        return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
+      }
       const device = getDevice(deviceMatch[1]);
       return device
         ? Response.json(device)
