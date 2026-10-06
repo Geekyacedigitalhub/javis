@@ -1103,6 +1103,9 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="completed")return Response.json({mission});
         const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
+        if(requestedWorkerId && !webAuthenticated){
+          return Response.json({error:"Trusted worker authentication required."},{status:401});
+        }
         const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
         const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await store.updateOwned(id,userId,executionOwner,patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
         if(requestedWorkerId){
@@ -1608,6 +1611,9 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(["completed","waiting_approval","paused","cancelled"].includes(mission.status))return Response.json({mission});
         const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
+        if(requestedWorkerId && !webAuthenticated){
+          return Response.json({error:"Trusted worker authentication required."},{status:401});
+        }
         if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner!==requestedWorkerId)return Response.json({mission});
         if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner===requestedWorkerId){
           const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
@@ -1624,6 +1630,7 @@ const server = Bun.serve({
             await getMissionStore().addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered failed mission for another execution attempt.",metadata:{stepIds:recoverableSteps.map(step=>step.id)}});
             const handoffHeaders=new Headers(request.headers);
             handoffHeaders.set("x-frosh-mission-worker-id",executionOwner);
+            if(process.env.FROSH_WEB_TOKEN) handoffHeaders.set("x-frosh-web-token",process.env.FROSH_WEB_TOKEN);
             return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{
               method:"POST",
               headers:handoffHeaders
