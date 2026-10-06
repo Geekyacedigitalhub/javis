@@ -252,7 +252,7 @@ const server = Bun.serve({
 
     if (request.method === "POST" && url.pathname === "/v1/chat/stream") {
       try {
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
 
@@ -405,7 +405,7 @@ const server = Bun.serve({
       }
       try {
         const userId = decodeURIComponent(memoryCandidatesMatch[1]);
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const candidateId = typeof body?.candidateId === "string" ? body.candidateId.trim() : "";
         const status = body?.status === "approved" || body?.status === "rejected" ? body.status : "";
         if (!candidateId || !status) {
@@ -450,7 +450,7 @@ const server = Bun.serve({
         if (!webAuthenticated && deviceId !== replySuggestionsMatch[1]) {
           return Response.json({ error: "Device credential cannot access another device." }, { status: 403 });
         }
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         const provider = typeof body?.provider === "string" ? body.provider : "other";
         const sender = typeof body?.sender === "string" ? body.sender : undefined;
@@ -693,7 +693,7 @@ const server = Bun.serve({
     if (automationUsers && request.method === "POST") {
       try {
         const userId = decodeURIComponent(automationUsers[1]);
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const name = typeof body?.name === "string" ? body.name.trim() : "";
         const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : "";
         const schedule = body?.schedule;
@@ -720,7 +720,7 @@ const server = Bun.serve({
       try {
         const userId = decodeURIComponent(automationMatch[1]);
         const id = decodeURIComponent(automationMatch[2]);
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const patch: Record<string, unknown> = {};
         if (typeof body?.name === "string") patch.name = body.name.trim();
         if (typeof body?.prompt === "string") patch.prompt = body.prompt.trim();
@@ -749,7 +749,7 @@ const server = Bun.serve({
     if (missionUsers && request.method === "POST") {
       try {
         const userId=decodeURIComponent(missionUsers[1]);
-        const body=await request.json();
+        const body=await parseBoundedJson(request);
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
         if(!goal)return Response.json({error:"goal is required"},{status:400});        const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
@@ -936,7 +936,7 @@ const server = Bun.serve({
       try{
         const userId=decodeURIComponent(missionPriorityMatch[1]);
         const id=decodeURIComponent(missionPriorityMatch[2]);
-        const body=await request.json();
+        const body=await parseBoundedJson(request);
         const priority=body?.priority;
         if(priority!=="low"&&priority!=="normal"&&priority!=="high")return Response.json({error:"priority must be low, normal, or high"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
@@ -955,7 +955,7 @@ const server = Bun.serve({
       try{
         const userId=decodeURIComponent(missionBudgetProfileMatch[1]);
         const id=decodeURIComponent(missionBudgetProfileMatch[2]);
-        const body=await request.json();
+        const body=await parseBoundedJson(request);
         const budgetProfile=body?.budgetProfile;
         if(budgetProfile!=="standard"&&budgetProfile!=="extended"&&budgetProfile!=="intensive")return Response.json({error:"invalid budget profile"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
@@ -1670,7 +1670,7 @@ const server = Bun.serve({
         return Response.json({ error: "Direct agent runs require trusted web authentication." }, { status: 403 });
       }
       try {
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const goal = typeof body?.goal === "string" ? body.goal.trim() : "";
         const message =
           typeof body?.message === "string" && body.message.trim()
