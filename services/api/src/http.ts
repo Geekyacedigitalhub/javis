@@ -718,10 +718,38 @@ const server = Bun.serve({
               steps=steps.map(step=>step.id===staleStep.id?{...step,status:"completed",result:savedRun.result??step.result,context:[step.context??"",savedRun.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:step);
               reconciled.add(staleStep.id);
             }else if(savedRun?.status==="waiting_approval" && savedRun.pendingApprovalId){
-              await updateOwned({status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
-              await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
-              return Response.json({mission:await store.get(id,userId)});
+              const approval=await approvalStore.get(savedRun.pendingApprovalId);
+              if(approval?.status==="pending"){
+                await updateOwned({status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
+                await store.addEvent({missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
+                return Response.json({mission:await store.get(id,userId)});
+              }
+              if(approval?.status==="approved"){
+                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:"Approval was already accepted before the execution restarted, but the agent run did not reach a durable completion state. The action outcome is unknown, so FROSH will not replay it automatically.",updatedAt:new Date().toISOString()}:step);
+                reconciled.add(staleStep.id);
+                await store.update(savedRun.id,userId,{
+                  status:"failed",
+                  pendingApprovalId:undefined,
+                  providerContinuation:savedRun.providerContinuation,
+                  result:"Approval was accepted before execution restarted, but the action outcome is unknown. The run was stopped safely to prevent duplicate execution.",
+                  error:"Approved action outcome is unknown after execution restart"
+                } as any).catch(()=>undefined);
+              }
             }else if(savedRun?.status==="running"){
+              const plannedApproval=savedRun.toolCalls.find(call=>call.status==="planned" && call.id.startsWith("approved-"));
+              const plannedApprovalId=plannedApproval?.id.slice("approved-".length);
+              const approval=plannedApprovalId?await approvalStore.get(plannedApprovalId):null;
+              if(approval?.status==="approved"){
+                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:"An approved action was in progress when execution stopped. Its outcome is unknown, so FROSH will not replay it automatically.",updatedAt:new Date().toISOString()}:step);
+                reconciled.add(staleStep.id);
+                await store.update(savedRun.id,userId,{
+                  status:"failed",
+                  pendingApprovalId:undefined,
+                  result:"An approved action was in progress when execution stopped, but its outcome is unknown. The run was stopped safely to prevent duplicate execution.",
+                  error:"Approved action outcome is unknown after execution restart"
+                } as any).catch(()=>undefined);
+                continue;
+              }
               const heartbeatAgeMs=Date.now()-Date.parse(savedRun.updatedAt);
               if(Number.isFinite(heartbeatAgeMs) && heartbeatAgeMs<180000){
                 await store.releaseLeaseIfOwned(id,userId,executionOwner);
