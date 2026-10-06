@@ -77,13 +77,20 @@ async function tick(): Promise<void> {
   }
 }
 
+function scheduleTick(): void {
+  if (tickRunning || stopping) return;
+  const promise = tick();
+  activeTick = promise;
+  void promise.finally(() => {
+    if (activeTick === promise) activeTick = undefined;
+  });
+}
+
 export function startAutomationRunner() {
   if (started || stopping) return;
   started = true;
-  void (activeTick = tick().finally(() => { activeTick = undefined; }));
-  tickTimer = setInterval(() => {
-    void (activeTick = tick().finally(() => { activeTick = undefined; }));
-  }, 60_000);
+  scheduleTick();
+  tickTimer = setInterval(scheduleTick, 60_000);
 }
 
 export async function stopAutomationRunner() {
