@@ -339,8 +339,7 @@ export function connectFroshRealtime(
       deviceId: credential.deviceId,
       token: credential.token
     }));
-    onStatus?.("open");
-  };
+    // Do not advertise an authenticated realtime state until the server accepts the credential.\n  onStatus?.("connecting");\n  };
   socket.onmessage = async (message) => {
     try {
       const rawMessage = typeof message.data === "string" ? message.data : String(message.data ?? "");
