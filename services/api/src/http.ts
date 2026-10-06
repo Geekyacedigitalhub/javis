@@ -1100,9 +1100,8 @@ const server = Bun.serve({
               return Boolean(current && current.leaseOwner===executionOwner && current.leaseUntil && Date.parse(current.leaseUntil)>Date.now());
             });
           } catch(error) {
-            clearInterval(leaseRenewTimer);
-            clearInterval(leaseRenewTimer);
-          const continuationDurationMs=Date.now()-continuationStartedAt;
+              clearInterval(leaseRenewTimer);
+            const continuationDurationMs=Date.now()-continuationStartedAt;
             const executionDurationMs=existingDurationMs+continuationDurationMs;
             if(continuationLeaseLost){
               await store.releaseLeaseIfOwned(id,userId,executionOwner);
