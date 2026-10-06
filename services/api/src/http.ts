@@ -362,7 +362,7 @@ const server = Bun.serve({
 
     if (request.method === "POST" && url.pathname === "/v1/chat") {
       try {
-        const body = await request.json();
+        const body = await parseBoundedJson(request);
         const chatBody =
           body && typeof body === "object" && !Array.isArray(body)
             ? { ...(body as Record<string, unknown>) }
@@ -400,6 +400,9 @@ const server = Bun.serve({
     }
 
     if (memoryCandidatesMatch && request.method === "POST") {
+      if (!webAuthenticated) {
+        return Response.json({ error: "Trusted web authentication required for memory candidate decisions." }, { status: 403 });
+      }
       try {
         const userId = decodeURIComponent(memoryCandidatesMatch[1]);
         const body = await request.json();
@@ -415,7 +418,11 @@ const server = Bun.serve({
       }
     }
 
-    const memoryDeleteMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/([^/]+)$/);    if (memoryDeleteMatch && request.method === "DELETE") {
+    const memoryDeleteMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)\/([^/]+)$/);
+    if (memoryDeleteMatch && request.method === "DELETE") {
+      if (!webAuthenticated) {
+        return Response.json({ error: "Trusted web authentication required to delete memory." }, { status: 403 });
+      }
       const userId = decodeURIComponent(memoryDeleteMatch[1]);
       const memoryId = decodeURIComponent(memoryDeleteMatch[2]);
       const deleted = await getUserMemoryStore().delete(memoryId, userId);
