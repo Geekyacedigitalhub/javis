@@ -348,6 +348,7 @@ export function connectFroshRealtime(
         return;
       }
       const parsed = JSON.parse(rawMessage) as Record<string, unknown>;
+      if (parsed.type === "connected" && parsed.authenticated === true) onStatus?.("open");
       let releaseCommand: (() => void) | undefined;
       let commandRequestId: string | undefined;
 
