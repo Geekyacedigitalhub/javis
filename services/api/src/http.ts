@@ -2,7 +2,7 @@ import { postChat } from "./routes";
 import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, markAllDevicesOffline } from "./devices";
+import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, markAllDevicesOffline, closeDeviceStore } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
@@ -60,6 +60,21 @@ async function recoverMissionsOnStartup(){
   }
 }
 setTimeout(()=>void recoverMissionsOnStartup(),2000);
+
+let shuttingDown = false;
+async function shutdownApi() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  try {
+    await closeDeviceStore();
+  } catch (error) {
+    console.error("FROSH device store shutdown failed:", error);
+  } finally {
+    process.exit(0);
+  }
+}
+process.once("SIGTERM", () => { void shutdownApi(); });
+process.once("SIGINT", () => { void shutdownApi(); });
 
 
 async function addMissionEventWithRetry(store:FroshMissionStore,input:Omit<FroshMissionEvent,"id"|"createdAt">){
