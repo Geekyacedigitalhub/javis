@@ -4,7 +4,11 @@ import type { FroshAutomation, FroshAutomationStore } from "../../../packages/ty
 type Sql = ReturnType<typeof postgres>;
 
 export class PostgresAutomationStore implements FroshAutomationStore {
-  constructor(private readonly sql: Sql) {}\n\n  async close(): Promise<void> {\n    await this.sql.end({ timeout: 5 });\n  }
+  constructor(private readonly sql: Sql) {}
+
+  async close(): Promise<void> {
+    await this.sql.end({ timeout: 5 });
+  }
 
   async list(userId: string) {
     const rows = await this.sql.unsafe<FroshAutomation[]>(
