@@ -45,8 +45,8 @@ async function loadCommandRecord(requestId: string): Promise<CommandRecord | nul
     }
     commandRecords.set(requestId, parsed);
     return parsed;
-  } catch {
-    return null;
+  } catch (error) {
+    throw new Error("Durable command record storage is unavailable", { cause: error });
   }
 }
 
