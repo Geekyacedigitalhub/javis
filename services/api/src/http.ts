@@ -971,6 +971,7 @@ const server = Bun.serve({
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(["completed","cancelled"].includes(mission.status))return Response.json({error:"Mission cannot be retried in its current state"},{status:409});
         if(mission.status==="waiting_approval")return Response.json({error:"Resolve the pending approval before retrying a mission step"},{status:409});
+        if(isSafetyPausedMission(mission))return Response.json({error:"Mission is paused for safety review after an unreconciled approval/action outcome; review the mission before retrying it."},{status:409});
         const step=mission.steps.find(item=>item.id===stepId);
         if(!step)return Response.json({error:"Mission step not found"},{status:404});
         if(step.status==="running")return Response.json({error:"Mission step is already running"},{status:409});
