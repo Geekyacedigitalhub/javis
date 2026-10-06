@@ -54,6 +54,8 @@ async function ensureSchema() {
         completed_at TIMESTAMPTZ,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
+      await client.unsafe(`ALTER TABLE frosh_device_command_ledger ADD COLUMN IF NOT EXISTS idempotency_key TEXT`);
+      await client.unsafe(`CREATE UNIQUE INDEX IF NOT EXISTS frosh_device_command_ledger_idempotency_idx ON frosh_device_command_ledger(device_id,idempotency_key) WHERE idempotency_key IS NOT NULL`);
       await client.unsafe(`CREATE INDEX IF NOT EXISTS frosh_device_command_ledger_device_idx ON frosh_device_command_ledger(device_id,created_at)`);
     })().catch(error => {
       schemaPromise = undefined;
@@ -221,6 +223,7 @@ export type DeviceCommandLedgerRecord = {
   deviceId: string;
   command: string;
   payloadHash: string;
+  idempotencyKey?: string;
   state: DeviceCommandLedgerState;
   accepted?: boolean;
   message?: string;
@@ -236,6 +239,7 @@ function normalizeCommandLedgerRow(row: {
   deviceId: string;
   command: string;
   payloadHash: string;
+  idempotencyKey: string | null;
   state: DeviceCommandLedgerState;
   accepted: boolean | null;
   message: string | null;
@@ -250,6 +254,7 @@ function normalizeCommandLedgerRow(row: {
     deviceId: row.deviceId,
     command: row.command,
     payloadHash: row.payloadHash,
+    ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
     state: row.state,
     ...(row.accepted === null ? {} : { accepted: row.accepted }),
     ...(row.message === null ? {} : { message: row.message }),
@@ -268,11 +273,15 @@ export async function createDeviceCommandLedger(input: {
   deviceId: string;
   command: string;
   payloadHash: string;
+  idempotencyKey: string;
 }) {
   const client = db();
   const now = new Date().toISOString();
   if (!client) {
-    if (memoryCommandLedger.has(input.requestId)) return false;
+    const existing = [...memoryCommandLedger.values()].find(
+      record => record.deviceId === input.deviceId && record.idempotencyKey === input.idempotencyKey,
+    );
+    if (existing || memoryCommandLedger.has(input.requestId)) return false;
     memoryCommandLedger.set(input.requestId, {
       ...input,
       state: "pending",
@@ -283,12 +292,13 @@ export async function createDeviceCommandLedger(input: {
   }
   await ensureSchema();
   const result = await client.unsafe(
-    `INSERT INTO frosh_device_command_ledger(request_id,device_id,command,payload_hash,state,created_at,updated_at)
-     VALUES($1,$2,$3,$4,'pending',NOW(),NOW())
+    `INSERT INTO frosh_device_command_ledger(request_id,device_id,command,payload_hash,idempotency_key,state,created_at,updated_at)
+     VALUES($1,$2,$3,$4,$5,'pending',NOW(),NOW())
      ON CONFLICT(request_id) DO NOTHING`,
-    [input.requestId, input.deviceId, input.command, input.payloadHash],
+    [input.requestId, input.deviceId, input.command, input.payloadHash, input.idempotencyKey],
   );
-  return result.count > 0;
+  if (result.count > 0) return true;
+  return false;
 }
 
 export async function markDeviceCommandDispatched(requestId: string) {
@@ -362,15 +372,20 @@ export async function markDeviceCommandUnknown(requestId: string, reason?: strin
   return result.count > 0;
 }
 
-export async function getDeviceCommandLedger(requestId: string) {
+export async function getDeviceCommandLedgerByIdempotency(deviceId: string, idempotencyKey: string) {
   const client = db();
-  if (!client) return memoryCommandLedger.get(requestId) ?? null;
+  if (!client) {
+    return [...memoryCommandLedger.values()].find(
+      record => record.deviceId === deviceId && record.idempotencyKey === idempotencyKey,
+    ) ?? null;
+  }
   await ensureSchema();
   const rows = await client.unsafe<{
     requestId: string;
     deviceId: string;
     command: string;
     payloadHash: string;
+    idempotencyKey: string | null;
     state: DeviceCommandLedgerState;
     accepted: boolean | null;
     message: string | null;
@@ -380,7 +395,37 @@ export async function getDeviceCommandLedger(requestId: string) {
     completedAt: string | null;
     updatedAt: string;
   }[]>(
-    `SELECT request_id AS "requestId",device_id AS "deviceId",command,payload_hash AS "payloadHash",state,accepted,message,data,
+    `SELECT request_id AS "requestId",device_id AS "deviceId",command,payload_hash AS "payloadHash",
+            idempotency_key AS "idempotencyKey",state,accepted,message,data,
+            created_at AS "createdAt",dispatched_at AS "dispatchedAt",
+            completed_at AS "completedAt",updated_at AS "updatedAt"
+     FROM frosh_device_command_ledger
+     WHERE device_id=$1 AND idempotency_key=$2 LIMIT 1`,
+    [deviceId, idempotencyKey],
+  );
+  return rows[0] ? normalizeCommandLedgerRow(rows[0]) : null;
+}
+
+export async function getDeviceCommandLedger(requestId: string) {
+  const client = db();
+  if (!client) return memoryCommandLedger.get(requestId) ?? null;
+  await ensureSchema();
+  const rows = await client.unsafe<{
+    requestId: string;
+    deviceId: string;
+    command: string;
+    payloadHash: string;
+    idempotencyKey: string | null;
+    state: DeviceCommandLedgerState;
+    accepted: boolean | null;
+    message: string | null;
+    data: unknown;
+    createdAt: string;
+    dispatchedAt: string | null;
+    completedAt: string | null;
+    updatedAt: string;
+  }[]>(
+    `SELECT request_id AS "requestId",device_id AS "deviceId",command,payload_hash AS "payloadHash",idempotency_key AS "idempotencyKey",state,accepted,message,data,
             created_at AS "createdAt",dispatched_at AS "dispatchedAt",completed_at AS "completedAt",updated_at AS "updatedAt"
      FROM frosh_device_command_ledger WHERE request_id=$1 LIMIT 1`,
     [requestId],
