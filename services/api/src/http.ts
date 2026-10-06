@@ -1182,6 +1182,9 @@ const server = Bun.serve({
         const store=getMissionStore();
         const mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
+        if(["paused","cancelled","completed"].includes(mission.status)){
+          return Response.json({error:"Mission cannot continue in its current state; resume a paused mission or recover it through the appropriate control."},{status:409});
+        }
         if(mission.status==="waiting_approval" && mission.pendingApprovalId){
           const profileMultiplier=mission.budgetProfile==="extended"?1.5:mission.budgetProfile==="intensive"?2:1;
           const maxSteps=Math.min(24,Math.max(1,Math.round((Number(process.env.FROSH_MISSION_MAX_STEPS??12)||12)*profileMultiplier)));
