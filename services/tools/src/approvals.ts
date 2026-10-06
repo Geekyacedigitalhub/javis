@@ -27,6 +27,14 @@ export class InMemoryApprovalStore implements FroshApprovalStore {
     return record;
   }
 
+  async findPendingByRun(runId: string, toolName: string, argumentsHash: string) {
+    for (const record of this.requests.values()) {
+      if (record.status !== "pending" || record.runId !== runId || record.toolName !== toolName) continue;
+      if (JSON.stringify(record.arguments) === argumentsHash) return record;
+    }
+    return null;
+  }
+
   async resolve(id: string, status: "approved" | "rejected") {
     const record = await this.get(id);
     if (!record) throw new Error("Approval request not found");
