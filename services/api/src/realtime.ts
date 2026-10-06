@@ -97,6 +97,7 @@ type PendingCommand = {
   deviceId: string;
   resolve: (value: DeviceCommandResult) => void;
   reject: (error: Error) => void;
+  command: FroshDeviceCommand["command"];
   timeout: ReturnType<typeof setTimeout>;
 };
 
@@ -122,12 +123,10 @@ export function sendDeviceCommand(deviceId: string, command: Extract<FroshDevice
       pendingCommands.delete(requestId);
       pending.resolve(commandTimeoutResult);
     }, 15000);
-    pendingCommands.set(requestId, { clientId: latestId, deviceId, resolve, reject, timeout });
+    pendingCommands.set(requestId, { clientId: latestId, deviceId, command, resolve, reject, timeout });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command, ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}) }));
     } catch (error) {
-      pendingCommands.delete(requestId);
-      clearTimeout(timeout);
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
       pending.resolve({
@@ -144,7 +143,7 @@ export function handleDeviceCommandResult(clientId: string, message: FroshDevice
   if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
-  if (pending.clientId !== clientId || pending.deviceId !== message.deviceId) return;
+  if (pending.clientId !== clientId || pending.deviceId !== message.deviceId || pending.command !== message.command) return;
   pendingCommands.delete(message.requestId);
   clearTimeout(pending.timeout);
   pending.resolve({
@@ -168,7 +167,7 @@ export function sendMessageCommand(deviceId: string, recipient: string, message:
       pendingCommands.delete(requestId);
       pending.resolve(commandTimeoutResult);
     }, 15000);
-    pendingCommands.set(requestId, { clientId: latestId, deviceId, resolve, reject, timeout });
+    pendingCommands.set(requestId, { clientId: latestId, deviceId, command: "send_message", resolve, reject, timeout });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "send_message", provider, recipient, message }));
     } catch (error) {
@@ -202,7 +201,7 @@ export function replyToMessageCommand(deviceId: string, notificationId: string, 
       pendingCommands.delete(requestId);
       pending.resolve(commandTimeoutResult);
     }, 15000);
-    pendingCommands.set(requestId, { clientId: latestId, deviceId, resolve, reject, timeout });
+    pendingCommands.set(requestId, { clientId: latestId, deviceId, command: "message_reply", resolve, reject, timeout });
     try {
       client.socket.send(JSON.stringify({ type: "device.command", requestId, deviceId, command: "message_reply", notificationId, message }));
     } catch (error) {
