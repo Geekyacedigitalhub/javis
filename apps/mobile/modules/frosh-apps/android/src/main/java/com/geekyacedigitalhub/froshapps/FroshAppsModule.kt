@@ -7,6 +7,11 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
 class FroshAppsModule : Module() {
+  private companion object {
+    const val MAX_PACKAGE_NAME_LENGTH = 255
+    const val MAX_APP_QUERY_LENGTH = 255
+  }
+
   private fun packageManager(): PackageManager? = appContext.reactContext?.packageManager
 
   private fun launchableApps(): List<ApplicationInfo> {
@@ -26,12 +31,11 @@ class FroshAppsModule : Module() {
         .sortedBy { pm.getApplicationLabel(it).toString().lowercase() }
         .map {
           mapOf(
-            "packageName" to it.packageName,
-            "name" to pm.getApplicationLabel(it).toString()
+            "packageName" to it.packageName.take(MAX_PACKAGE_NAME_LENGTH),
+            "name" to pm.getApplicationLabel(it).toString().take(MAX_APP_QUERY_LENGTH)
           )
         }
     }
-
 
     Function("listMessagingApps") {
       val pm = packageManager() ?: return@Function emptyList<Map<String, String>>()
@@ -49,7 +53,7 @@ class FroshAppsModule : Module() {
           mapOf(
             "provider" to known[it.packageName]!!,
             "packageName" to it.packageName,
-            "name" to pm.getApplicationLabel(it).toString()
+            "name" to pm.getApplicationLabel(it).toString().take(MAX_APP_QUERY_LENGTH)
           )
         }
     }
@@ -59,6 +63,11 @@ class FroshAppsModule : Module() {
         "accepted" to false,
         "message" to "Android package manager unavailable."
       )
+      if (packageName.length !in 1..MAX_PACKAGE_NAME_LENGTH ||
+        packageName.any { it.code < 0x21 || it.code == 0x7f } ||
+        !packageName.matches(Regex("^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)+$"))) {
+        return@Function mapOf("accepted" to false, "message" to "Invalid Android package name.")
+      }
       val target = launchableApps().firstOrNull { it.packageName == packageName }
         ?: return@Function mapOf(
           "accepted" to false,
