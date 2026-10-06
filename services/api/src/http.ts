@@ -116,6 +116,35 @@ function logOperationalError(context: string, error: unknown): void {
 
 const MAX_USER_ID_LENGTH = 200;
 
+const DEFAULT_MAX_ACTIVE_MISSIONS_PER_USER = 50;
+const missionCreationLocks = new Map<string, Promise<void>>();
+
+function configuredMaxActiveMissions(): number {
+  const configured = Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER ?? DEFAULT_MAX_ACTIVE_MISSIONS_PER_USER);
+  return Number.isFinite(configured)
+    ? Math.min(500, Math.max(1, Math.floor(configured)))
+    : DEFAULT_MAX_ACTIVE_MISSIONS_PER_USER;
+}
+
+async function withMissionCreationAdmission<T>(userId: string, create: () => Promise<T>): Promise<T | null> {
+  const previous = missionCreationLocks.get(userId) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => { release = resolve; });
+  missionCreationLocks.set(userId, previous.then(() => current));
+  await previous;
+  try {
+    const store = (await import("../../missions/src")).getMissionStore();
+    const missions = await store.list(userId);
+    const activeStatuses = new Set(["planning", "running", "waiting_approval", "paused"]);
+    const activeCount = missions.filter((mission) => activeStatuses.has(mission.status)).length;
+    if (activeCount >= configuredMaxActiveMissions()) return null;
+    return await create();
+  } finally {
+    release();
+    if (missionCreationLocks.get(userId) === current) missionCreationLocks.delete(userId);
+  }
+}
+
 function decodeBoundedResourceId(value: string, label: string): string | null {
   let decoded: string;
   try { decoded = decodeURIComponent(value); } catch { return null; }
@@ -841,7 +870,8 @@ const server = Bun.serve({
         const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
       const budgetProfile=body?.budgetProfile==="extended"||body?.budgetProfile==="intensive"?body.budgetProfile:"standard";
-        const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
+        const mission=await withMissionCreationAdmission(userId,()=>getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]}));
+        if(!mission)return Response.json({error:"Mission limit reached for this user; complete, cancel, or delete an existing mission before creating another."},{status:429});
       await getMissionStore().addEvent({missionId:mission.id,userId,type:"mission.created",message:"Mission created: "+goal});
         return Response.json({mission},{status:201});
       } catch(error){return Response.json({error:"Mission creation failed"},{status:400});}
@@ -944,7 +974,7 @@ const server = Bun.serve({
         updatedAt:now
       }));
       const completedBefore=steps.filter((step)=>step.status==="completed").length;
-      const rerunMission=await store.create({
+      const rerunMission=await withMissionCreationAdmission(userId,()=>store.create({
         userId,
         goal:source.goal,
         status:"planning",
@@ -952,7 +982,8 @@ const server = Bun.serve({
         budgetProfile:source.budgetProfile,
         progress:steps.length?completedBefore/steps.length:0,
         steps
-      });
+      }));
+      if(!rerunMission)return Response.json({error:"Mission limit reached for this user; complete, cancel, or delete an existing mission before rerunning."},{status:429});
       await addMissionEventWithRetry(store, {
         missionId:rerunMission.id,
         userId,
@@ -973,7 +1004,8 @@ const server = Bun.serve({
       const source=await store.get(id,userId);
       if(!source)return Response.json({error:"Mission not found"},{status:404});
       if(!["completed","failed","cancelled"].includes(source.status))return Response.json({error:"Only completed, failed, or cancelled missions can be rerun"},{status:409});
-      const rerunMission=await store.create({userId,goal:source.goal,status:"planning",priority:source.priority,budgetProfile:source.budgetProfile,progress:0,steps:[]});
+      const rerunMission=await withMissionCreationAdmission(userId,()=>store.create({userId,goal:source.goal,status:"planning",priority:source.priority,budgetProfile:source.budgetProfile,progress:0,steps:[]}));
+      if(!rerunMission)return Response.json({error:"Mission limit reached for this user; complete, cancel, or delete an existing mission before rerunning."},{status:429});
       await addMissionEventWithRetry(store, {missionId:rerunMission.id,userId,type:"mission.created",message:"Mission rerun created from "+source.id,metadata:{sourceMissionId:source.id}});
       return Response.json({mission:rerunMission});
     }
