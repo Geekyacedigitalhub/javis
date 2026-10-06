@@ -3,7 +3,7 @@ import { approvalStore } from "../../tools/src";
 import { CodingSessionManager, agentRunStore } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, markAllDevicesOffline } from "./devices";
-import { addRealtimeClient, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
+import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 
@@ -576,9 +576,11 @@ const server = Bun.serve({
         return Response.json({ error: "Trusted web authentication required." }, { status: 401 });
       }
       const revoked = await revokeDeviceCredential(credentialRevokeMatch[1]);
-      return revoked
-        ? Response.json({ revoked: true })
-        : Response.json({ error: "Device not found" }, { status: 404 });
+      if (!revoked) {
+        return Response.json({ error: "Device not found" }, { status: 404 });
+      }
+      const disconnectedClients = disconnectDeviceClients(credentialRevokeMatch[1]);
+      return Response.json({ revoked: true, disconnectedClients });
     }
 
     const deviceMatch = url.pathname.match(/^\/v1\/devices\/([^/]+)$/);
