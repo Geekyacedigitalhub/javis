@@ -1524,6 +1524,9 @@ const server = Bun.serve({
     }
 
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
+      if (!webAuthenticated) {
+        return Response.json({ error: "Direct agent runs require trusted web authentication." }, { status: 403 });
+      }
       try {
         const body = await request.json();
         const goal = typeof body?.goal === "string" ? body.goal.trim() : "";
