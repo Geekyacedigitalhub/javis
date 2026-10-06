@@ -24,7 +24,7 @@ export interface FroshAutomation {
 export interface FroshAutomationStore {
   list(userId: string): Promise<FroshAutomation[]>;
   get(id: string, userId: string): Promise<FroshAutomation | null>;
-  create(input: Omit<FroshAutomation, "id" | "createdAt" | "updatedAt">): Promise<FroshAutomation>;
+  create(input: Omit<FroshAutomation, "id" | "createdAt" | "updatedAt">): Promise<FroshAutomation | null>;
   update(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation>;
   updateIfIdle(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation | null>;
   updateOwned(id: string, userId: string, owner: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation | null>;
