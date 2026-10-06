@@ -9,6 +9,7 @@ const devices = new Map<string, FroshDevice>();
 const credentials = new Map<string, DeviceCredential>();
 let sql: ReturnType<typeof postgres> | null | undefined;
 let schemaPromise: Promise<void> | undefined;
+let schemaReady = false;
 
 function db() {
   if (sql !== undefined) return sql;
@@ -41,10 +42,12 @@ async function ensureSchema() {
       await client.unsafe(`CREATE INDEX IF NOT EXISTS frosh_device_credentials_expiry_idx ON frosh_device_credentials(expires_at)`);
     })().catch(error => {
       schemaPromise = undefined;
+      schemaReady = false;
       throw error;
     });
   }
   await schemaPromise;
+  schemaReady = true;
 }
 
 async function hashToken(token: string) {
@@ -65,7 +68,9 @@ function normalizeDevice(row: DeviceRow): FroshDevice {
 }
 
 export async function initializeDeviceStore() {
+  if (!db()) return;
   await ensureSchema();
+  if (!schemaReady) throw new Error("Device store schema initialization failed");
 }
 
 export async function registerDevice(input: FroshDeviceRegistration) {
