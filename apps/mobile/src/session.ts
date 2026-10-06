@@ -5,6 +5,21 @@ const CREDENTIAL_KEY = "frosh.device.credential";
 const MAX_DEVICE_ID_LENGTH = 200;
 const MAX_DEVICE_TOKEN_LENGTH = 512;
 
+type CredentialListener = (credential: FroshDeviceCredential | null) => void;
+const credentialListeners = new Set<CredentialListener>();
+let credentialMutation = Promise.resolve();
+
+export function onDeviceCredentialChange(listener: CredentialListener) {
+  credentialListeners.add(listener);
+  return () => credentialListeners.delete(listener);
+}
+
+function notifyCredentialChange(value: FroshDeviceCredential | null) {
+  for (const listener of credentialListeners) {
+    try { listener(value); } catch { /* listener failures must not affect credential state */ }
+  }
+}
+
 function validCredential(value: unknown): value is FroshDeviceCredential {
   if (!value || typeof value !== "object") return false;
   const credential = value as Partial<FroshDeviceCredential>;
@@ -54,9 +69,27 @@ export async function saveDeviceCredential(value: FroshDeviceCredential) {
   if (!validCredential(value)) {
     throw new Error("Invalid or expired device credential");
   }
-  await SecureStore.setItemAsync(CREDENTIAL_KEY, JSON.stringify(value));
+  const previousMutation = credentialMutation;
+  let release!: () => void;
+  credentialMutation = new Promise<void>((resolve) => { release = resolve; });
+  await previousMutation;
+  try {
+    await SecureStore.setItemAsync(CREDENTIAL_KEY, JSON.stringify(value));
+    notifyCredentialChange(value);
+  } finally {
+    release();
+  }
 }
 
 export async function clearDeviceCredential() {
-  await SecureStore.deleteItemAsync(CREDENTIAL_KEY);
+  const previousMutation = credentialMutation;
+  let release!: () => void;
+  credentialMutation = new Promise<void>((resolve) => { release = resolve; });
+  await previousMutation;
+  try {
+    await SecureStore.deleteItemAsync(CREDENTIAL_KEY);
+    notifyCredentialChange(null);
+  } finally {
+    release();
+  }
 }
