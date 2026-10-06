@@ -57,6 +57,7 @@ async function sendCommandResult(
     type: "device.command.result",
     requestId,
     deviceId,
+    command: String(command.command ?? ""),
     accepted: result.accepted,
     message: result.message,
     ...(result.data !== undefined ? { data: result.data } : {}),
