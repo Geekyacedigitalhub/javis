@@ -721,7 +721,17 @@ const server = Bun.serve({
           const reconciled=new Set<string>();
           let recoveryRequiresReview=false;
           for(const staleStep of staleRunningSteps){
-            if(!staleStep.runId) continue;
+            if(!staleStep.runId){
+              steps=steps.map(step=>step.id===staleStep.id?{
+                ...step,
+                status:"failed",
+                result:"The mission step was marked running but has no durable agent run reference. It was stopped and requires recovery instead of being replayed blindly.",
+                updatedAt:new Date().toISOString()
+              }:step);
+              recoveryRequiresReview=true;
+              reconciled.add(staleStep.id);
+              continue;
+            }
             const savedRun=await agentRunStore.get(staleStep.runId);
             if(savedRun?.status==="completed"){
               steps=steps.map(step=>step.id===staleStep.id?{...step,status:"completed",result:savedRun.result??step.result,context:[step.context??"",savedRun.result??""].filter(Boolean).join("\n\n").slice(-12000),updatedAt:new Date().toISOString()}:step);
@@ -749,7 +759,17 @@ const server = Bun.serve({
                   error:approval.status==="approved"?"Approved action outcome is unknown after execution restart":`Approval was ${approval.status} before execution restart`
                 }).catch(()=>undefined);
               }
-            }else if(savedRun?.status==="running"){
+            }else if(!savedRun){
+              steps=steps.map(step=>step.id===staleStep.id?{
+                ...step,
+                status:"failed",
+                result:"The mission step references an agent run that no longer exists. The step was stopped and requires recovery review.",
+                updatedAt:new Date().toISOString()
+              }:step);
+              recoveryRequiresReview=true;
+              reconciled.add(staleStep.id);
+              continue;
+            }else if(savedRun.status==="running"){
               const plannedApproval=savedRun.toolCalls.find(call=>call.status==="planned" && call.id.startsWith("approved-"));
               const plannedApprovalId=plannedApproval?.id.slice("approved-".length);
               const approval=plannedApprovalId?await approvalStore.get(plannedApprovalId):null;
