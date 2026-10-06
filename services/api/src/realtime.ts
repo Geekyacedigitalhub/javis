@@ -13,6 +13,19 @@ type Client = {
 const clients = new Map<string, Client>();
 const latestClientByDevice = new Map<string, string>();
 
+function resolvePendingCommandsForClient(clientId: string) {
+  for (const [requestId, pending] of pendingCommands) {
+    if (pending.clientId !== clientId) continue;
+    pendingCommands.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve({
+      accepted: false,
+      message: "The Android device connection was removed before acknowledging the command. The outcome is unknown; do not automatically retry a side-effecting action.",
+      data: { outcome: "unknown", retryable: false, reason: "device_connection_removed" },
+    });
+  }
+}
+
 export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceToken?: string) {
   const id = crypto.randomUUID();
   const configuredInterval = Number(process.env.FROSH_DEVICE_AUTH_CHECK_INTERVAL_MS ?? 5000);
@@ -36,27 +49,23 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
       latestClientByDevice.delete(deviceId);
       void markDeviceOffline(deviceId).catch(() => undefined);
     }
-    for (const [requestId, pending] of pendingCommands) {
-      if (pending.clientId !== id) continue;
-      pendingCommands.delete(requestId);
-      clearTimeout(pending.timeout);
-      pending.resolve({
-        accepted: false,
-        message: "The Android device disconnected before acknowledging the command. The outcome is unknown; do not automatically retry a side-effecting action.",
-        data: { outcome: "unknown", retryable: false, reason: "device_disconnected" },
-      });
-    }
+    resolvePendingCommandsForClient(id);
   });
   return id;
 }
 
 export function removeRealtimeClient(id: string) {
   const client = clients.get(id);
-  if (client?.authCheck) clearInterval(client.authCheck);
+  if (!client) return;
+  if (client.authCheck) clearInterval(client.authCheck);
+  resolvePendingCommandsForClient(id);
   clients.delete(id);
-  if (client?.deviceId && latestClientByDevice.get(client.deviceId) === id) {
+  if (client.deviceId && latestClientByDevice.get(client.deviceId) === id) {
     latestClientByDevice.delete(client.deviceId);
     void markDeviceOffline(client.deviceId).catch(() => undefined);
+  }
+  if (client.socket.readyState === WebSocket.OPEN || client.socket.readyState === WebSocket.CONNECTING) {
+    try { client.socket.close(); } catch { /* already closed */ }
   }
 }
 
