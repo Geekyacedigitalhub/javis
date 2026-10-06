@@ -55,6 +55,37 @@ export class PostgresAutomationStore implements FroshAutomationStore {
     return rows[0];
   }
 
+  async updateIfIdle(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>) {
+    const current = await this.get(id, userId);
+    if (!current) return null;
+    const next = { ...current, ...patch };
+    const rows = await this.sql.unsafe<FroshAutomation[]>(
+      `UPDATE frosh_automations SET name=$3,prompt=$4,schedule=$5::jsonb,status=$6,next_run_at=$7,last_run_at=$8,updated_at=NOW()
+       WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until <= NOW())
+       RETURNING id,user_id AS "userId",name,prompt,schedule,status,next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",created_at AS "createdAt",updated_at AS "updatedAt"`,
+      [id,userId,next.name,next.prompt,JSON.stringify(next.schedule),next.status,next.nextRunAt ?? null,next.lastRunAt ?? null]
+    );
+    return rows[0] ?? null;
+  }
+
+  async updateOwned(id: string, userId: string, owner: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>) {
+    const current = await this.get(id, userId);
+    if (!current || current.leaseOwner !== owner || !current.leaseUntil || Date.parse(current.leaseUntil) <= Date.now()) return null;
+    const next = { ...current, ...patch };
+    const rows = await this.sql.unsafe<FroshAutomation[]>(
+      `UPDATE frosh_automations SET name=$3,prompt=$4,schedule=$5::jsonb,status=$6,next_run_at=$7,last_run_at=$8,updated_at=NOW()
+       WHERE id=$1 AND user_id=$2 AND lease_owner=$9 AND lease_until > NOW()
+       RETURNING id,user_id AS "userId",name,prompt,schedule,status,next_run_at AS "nextRunAt",last_run_at AS "lastRunAt",created_at AS "createdAt",updated_at AS "updatedAt"`,
+      [id,userId,next.name,next.prompt,JSON.stringify(next.schedule),next.status,next.nextRunAt ?? null,next.lastRunAt ?? null,owner]
+    );
+    return rows[0] ?? null;
+  }
+
+  async deleteIfIdle(id: string, userId: string) {
+    const result = await this.sql.unsafe("DELETE FROM frosh_automations WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until <= NOW())",[id,userId]);
+    return result.count > 0;
+  }
+
   async claimDue(id: string, userId: string, owner: string, leaseMs: number) {
     const rows = await this.sql.unsafe<FroshAutomation[]>(
       `UPDATE frosh_automations
@@ -109,6 +140,19 @@ export class InMemoryAutomationStore implements FroshAutomationStore {
   async update(id:string,userId:string,patch:Partial<Pick<FroshAutomation,"name"|"prompt"|"schedule"|"status"|"nextRunAt"|"lastRunAt">>){
     const item=await this.get(id,userId); if(!item) throw new Error("Automation not found");
     const next={...item,...patch,updatedAt:new Date().toISOString()}; this.items.set(id,next); return next;
+  }
+  async updateIfIdle(id:string,userId:string,patch:Partial<Pick<FroshAutomation,"name"|"prompt"|"schedule"|"status"|"nextRunAt"|"lastRunAt">>){
+    const item=await this.get(id,userId); if(!item || (item.leaseUntil && Date.parse(item.leaseUntil)>Date.now())) return null;
+    const next={...item,...patch,updatedAt:new Date().toISOString()}; this.items.set(id,next); return next;
+  }
+  async updateOwned(id:string,userId:string,owner:string,patch:Partial<Pick<FroshAutomation,"name"|"prompt"|"schedule"|"status"|"nextRunAt"|"lastRunAt">>){
+    const item=await this.get(id,userId);
+    if(!item || item.leaseOwner!==owner || !item.leaseUntil || Date.parse(item.leaseUntil)<=Date.now()) return null;
+    const next={...item,...patch,updatedAt:new Date().toISOString()}; this.items.set(id,next); return next;
+  }
+  async deleteIfIdle(id:string,userId:string){
+    const item=await this.get(id,userId); if(!item || (item.leaseUntil && Date.parse(item.leaseUntil)>Date.now())) return false;
+    this.items.delete(id); return true;
   }
   async claimDue(id:string,userId:string,owner:string,leaseMs:number){
     const item=await this.get(id,userId);
