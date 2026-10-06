@@ -57,10 +57,20 @@ export function removeRealtimeClient(id: string) {
 }
 
 export function broadcast(event: FroshEvent) {
-  const payload = JSON.stringify(event);
-  for (const client of clients.values()) {
-    if (client.socket.readyState === WebSocket.OPEN) client.socket.send(payload);
-  }
+  // Device-authenticated realtime sockets must never receive global control-center events.
+  // Only device-scoped events are eligible for delivery, and they are routed to the
+  // authenticated socket for that exact device.
+  if (event.type !== "device.updated") return;
+  sendToDevice(event.device.id, event);
+}
+
+export function sendToDevice(deviceId: string, event: FroshEvent) {
+  const clientId = latestClientByDevice.get(deviceId);
+  if (!clientId) return false;
+  const client = clients.get(clientId);
+  if (!client || client.deviceId !== deviceId || client.socket.readyState !== WebSocket.OPEN) return false;
+  client.socket.send(JSON.stringify(event));
+  return true;
 }
 
 export function realtimeClientCount() {
