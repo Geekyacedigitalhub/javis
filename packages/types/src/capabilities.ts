@@ -31,3 +31,20 @@ export const FROSH_CAPABILITIES: readonly FroshCapability[] = [
 export function isFroshCapability(value: string): value is FroshCapability {
   return (FROSH_CAPABILITIES as readonly string[]).includes(value);
 }
+
+export const FROSH_IMPLEMENTED_CAPABILITIES: readonly FroshCapability[] = [
+  "device.info",
+  "apps.launch",
+  "media.control",
+  "calls.dialer",
+  "calls.direct",
+  "messages.compose",
+  "messages.send",
+  "contacts.read",
+  "notifications.reply",
+  "notifications.read",
+];
+
+export function isImplementedFroshCapability(value: string): value is FroshCapability {
+  return (FROSH_IMPLEMENTED_CAPABILITIES as readonly string[]).includes(value);
+}
