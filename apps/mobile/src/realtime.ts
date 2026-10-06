@@ -175,47 +175,58 @@ export function connectFroshRealtime(
           inFlightCommands.set(requestId, lock);
           releaseCommand = release;
 
-          const existing = await loadCommandRecord(requestId);
-          if (existing?.state === "completed" && existing.command === commandType) {
-            await sendCommandResult(socket, parsed, existing);
-            inFlightCommands.delete(requestId);
-            releaseCommand();
-            return;
-          }
-          if (existing?.state === "completed" && existing.command !== commandType) {
-            await sendCommandResult(socket, parsed, {
-              accepted: false,
-              message: "This request ID was previously used for a different command. The outcome is unknown; do not execute automatically.",
-              data: { outcome: "unknown", retryable: false, reason: "request_id_command_mismatch" },
-            });
-            inFlightCommands.delete(requestId);
-            releaseCommand();
-            return;
-          }
-          if (existing?.state === "started") {
-            if (existing.command !== commandType) {
+          try {
+            const existing = await loadCommandRecord(requestId);
+            if (existing?.state === "completed" && existing.command === commandType) {
+              await sendCommandResult(socket, parsed, existing);
+              inFlightCommands.delete(requestId);
+              releaseCommand();
+              return;
+            }
+            if (existing?.state === "completed" && existing.command !== commandType) {
               await sendCommandResult(socket, parsed, {
                 accepted: false,
-                message: "This request ID was previously started for a different command. The outcome is unknown; do not execute automatically.",
+                message: "This request ID was previously used for a different command. The outcome is unknown; do not execute automatically.",
                 data: { outcome: "unknown", retryable: false, reason: "request_id_command_mismatch" },
               });
-            } else {
+              inFlightCommands.delete(requestId);
+              releaseCommand();
+              return;
+            }
+            if (existing?.state === "started") {
+              if (existing.command !== commandType) {
+                await sendCommandResult(socket, parsed, {
+                  accepted: false,
+                  message: "This request ID was previously started for a different command. The outcome is unknown; do not execute automatically.",
+                  data: { outcome: "unknown", retryable: false, reason: "request_id_command_mismatch" },
+                });
+              } else {
+                await sendCommandResult(socket, parsed, {
+                  accepted: false,
+                  message: "This command was already started before this connection began. The outcome is unknown; do not retry automatically.",
+                  data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
+                });
+              }
+              inFlightCommands.delete(requestId);
+              releaseCommand();
+              return;
+            }
+            const startedPersisted = await saveCommandRecord(requestId, { state: "started", command: commandType, createdAt: Date.now() });
+            if (!startedPersisted) {
               await sendCommandResult(socket, parsed, {
                 accepted: false,
-                message: "This command was already started before this connection began. The outcome is unknown; do not retry automatically.",
-                data: { outcome: "unknown", retryable: false, reason: "prior_execution_started" },
-              });
+                message: "The Android device could not durably record this command before execution. The action was not started; do not retry automatically until storage is healthy.",
+                data: { outcome: "unknown", retryable: false, reason: "command_record_persist_failed" },
+              }).catch(() => undefined);
+              inFlightCommands.delete(requestId);
+              releaseCommand();
+              return;
             }
-            inFlightCommands.delete(requestId);
-            releaseCommand();
-            return;
-          }
-          const startedPersisted = await saveCommandRecord(requestId, { state: "started", command: commandType, createdAt: Date.now() });
-          if (!startedPersisted) {
+          } catch {
             await sendCommandResult(socket, parsed, {
               accepted: false,
-              message: "The Android device could not durably record this command before execution. The action was not started; do not retry automatically until storage is healthy.",
-              data: { outcome: "unknown", retryable: false, reason: "command_record_persist_failed" },
+              message: "The Android device could not verify its durable command history. The action was not started; do not retry until storage is healthy.",
+              data: { outcome: "unknown", retryable: false, reason: "command_record_read_failed" },
             }).catch(() => undefined);
             inFlightCommands.delete(requestId);
             releaseCommand();
