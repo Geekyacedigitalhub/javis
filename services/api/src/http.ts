@@ -806,6 +806,10 @@ const server = Bun.serve({
             run=await codingSessions.start({
               goal:step.title+"\nOverall objective: "+mission.goal,
               messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}],
+              canPersist:async()=>{
+                const current=await store.get(id,userId);
+                return Boolean(current && current.leaseOwner===executionOwner && current.leaseUntil && Date.parse(current.leaseUntil)>Date.now());
+              },
               onRunCreated:async(createdRun)=>{
                 activeRunId=createdRun.id;
                 const updated=await updateOwned({
