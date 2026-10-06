@@ -126,6 +126,24 @@ export function realtimeClientCount() {
   return clients.size;
 }
 
+export function shutdownRealtime() {
+  const clientIds = [...clients.keys()];
+  for (const clientId of clientIds) {
+    removeRealtimeClient(clientId);
+  }
+  // Any pending command not tied to a currently tracked client is also terminal
+  // on process shutdown: never leave a caller waiting for a result that cannot arrive.
+  for (const [requestId, pending] of pendingCommands) {
+    pendingCommands.delete(requestId);
+    clearTimeout(pending.timeout);
+    pending.resolve({
+      accepted: false,
+      message: "The realtime service is shutting down before the command was acknowledged. The outcome is unknown; do not automatically retry a side-effecting action.",
+      data: { outcome: "unknown", retryable: false, reason: "realtime_shutdown" },
+    });
+  }
+}
+
 type DeviceCommandResult = { accepted: boolean; message: string; data?: unknown };
 
 type PendingCommand = {
