@@ -11,12 +11,18 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
   const effectivePath = userScopedMatch
     ? userScopedMatch[1] + encodeURIComponent(USER_ID) + userScopedMatch[3]
     : relativePath;
-  const target = new URL(effectivePath, API_URL + "/");
+  const target = new URL(API_URL);
+  target.pathname = "/" + effectivePath.replace(/^\/+/, "");
   target.search = request.nextUrl.search;
 
   const headers = new Headers(request.headers);
   headers.delete("host");
   headers.delete("authorization");
+  headers.delete("cookie");
+  headers.delete("x-frosh-web-token");
+  headers.delete("x-frosh-device-id");
+  headers.delete("x-frosh-device-token");
+  headers.delete("x-frosh-device-enrollment-token");
   headers.set("x-frosh-web-token", WEB_TOKEN);
 
   let body: string | undefined;
