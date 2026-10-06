@@ -754,7 +754,7 @@ const server = Bun.serve({
                   pendingApprovalId:undefined,
                   result:"An approved action was in progress when execution stopped, but its outcome is unknown. The run was stopped safely to prevent duplicate execution.",
                   error:"Approved action outcome is unknown after execution restart"
-                } as any).catch(()=>undefined);
+                }).catch(()=>undefined);
                 continue;
               }
               const heartbeatAgeMs=Date.now()-Date.parse(savedRun.updatedAt);
