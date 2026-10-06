@@ -40,6 +40,21 @@ async function ensureSchema() {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )`);
       await client.unsafe(`CREATE INDEX IF NOT EXISTS frosh_device_credentials_expiry_idx ON frosh_device_credentials(expires_at)`);
+      await client.unsafe(`CREATE TABLE IF NOT EXISTS frosh_device_command_ledger (
+        request_id TEXT PRIMARY KEY,
+        device_id TEXT NOT NULL REFERENCES frosh_devices(id) ON DELETE CASCADE,
+        command TEXT NOT NULL,
+        payload_hash TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('pending','dispatched','completed','unknown')),
+        accepted BOOLEAN,
+        message TEXT,
+        data JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        dispatched_at TIMESTAMPTZ,
+        completed_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )`);
+      await client.unsafe(`CREATE INDEX IF NOT EXISTS frosh_device_command_ledger_device_idx ON frosh_device_command_ledger(device_id,created_at)`);
     })().catch(error => {
       schemaPromise = undefined;
       schemaReady = false;
@@ -78,6 +93,7 @@ export async function closeDeviceStore() {
   sql = undefined;
   schemaPromise = undefined;
   schemaReady = false;
+  memoryCommandLedger.clear();
   if (!client) return;
   await client.end({ timeout: 5 });
 }
@@ -195,6 +211,181 @@ export async function issueDeviceCredential(deviceId: string) {
   disconnectDeviceClients(deviceId);
 
   return { deviceId, token, expiresAt: new Date(expiresAt).toISOString() };
+}
+
+
+export type DeviceCommandLedgerState = "pending" | "dispatched" | "completed" | "unknown";
+
+export type DeviceCommandLedgerRecord = {
+  requestId: string;
+  deviceId: string;
+  command: string;
+  payloadHash: string;
+  state: DeviceCommandLedgerState;
+  accepted?: boolean;
+  message?: string;
+  data?: unknown;
+  createdAt: string;
+  dispatchedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+};
+
+function normalizeCommandLedgerRow(row: {
+  requestId: string;
+  deviceId: string;
+  command: string;
+  payloadHash: string;
+  state: DeviceCommandLedgerState;
+  accepted: boolean | null;
+  message: string | null;
+  data: unknown;
+  createdAt: string;
+  dispatchedAt: string | null;
+  completedAt: string | null;
+  updatedAt: string;
+}): DeviceCommandLedgerRecord {
+  return {
+    requestId: row.requestId,
+    deviceId: row.deviceId,
+    command: row.command,
+    payloadHash: row.payloadHash,
+    state: row.state,
+    ...(row.accepted === null ? {} : { accepted: row.accepted }),
+    ...(row.message === null ? {} : { message: row.message }),
+    ...(row.data === null ? {} : { data: row.data }),
+    createdAt: row.createdAt,
+    ...(row.dispatchedAt ? { dispatchedAt: row.dispatchedAt } : {}),
+    ...(row.completedAt ? { completedAt: row.completedAt } : {}),
+    updatedAt: row.updatedAt,
+  };
+}
+
+const memoryCommandLedger = new Map<string, DeviceCommandLedgerRecord>();
+
+export async function createDeviceCommandLedger(input: {
+  requestId: string;
+  deviceId: string;
+  command: string;
+  payloadHash: string;
+}) {
+  const client = db();
+  const now = new Date().toISOString();
+  if (!client) {
+    if (memoryCommandLedger.has(input.requestId)) return false;
+    memoryCommandLedger.set(input.requestId, {
+      ...input,
+      state: "pending",
+      createdAt: now,
+      updatedAt: now,
+    });
+    return true;
+  }
+  await ensureSchema();
+  const result = await client.unsafe(
+    `INSERT INTO frosh_device_command_ledger(request_id,device_id,command,payload_hash,state,created_at,updated_at)
+     VALUES($1,$2,$3,$4,'pending',NOW(),NOW())
+     ON CONFLICT(request_id) DO NOTHING`,
+    [input.requestId, input.deviceId, input.command, input.payloadHash],
+  );
+  return result.count > 0;
+}
+
+export async function markDeviceCommandDispatched(requestId: string) {
+  const client = db();
+  const now = new Date().toISOString();
+  if (!client) {
+    const record = memoryCommandLedger.get(requestId);
+    if (!record || record.state !== "pending") return false;
+    memoryCommandLedger.set(requestId, { ...record, state: "dispatched", dispatchedAt: now, updatedAt: now });
+    return true;
+  }
+  await ensureSchema();
+  const result = await client.unsafe(
+    `UPDATE frosh_device_command_ledger
+     SET state='dispatched',dispatched_at=COALESCE(dispatched_at,NOW()),updated_at=NOW()
+     WHERE request_id=$1 AND state='pending'`,
+    [requestId],
+  );
+  return result.count > 0;
+}
+
+export async function completeDeviceCommandLedger(requestId: string, result: { accepted: boolean; message: string; data?: unknown }) {
+  const client = db();
+  const now = new Date().toISOString();
+  if (!client) {
+    const record = memoryCommandLedger.get(requestId);
+    if (!record || (record.state !== "pending" && record.state !== "dispatched")) return false;
+    memoryCommandLedger.set(requestId, {
+      ...record,
+      state: "completed",
+      accepted: result.accepted,
+      message: result.message,
+      ...(result.data === undefined ? {} : { data: result.data }),
+      completedAt: now,
+      updatedAt: now,
+    });
+    return true;
+  }
+  await ensureSchema();
+  const resultRow = await client.unsafe(
+    `UPDATE frosh_device_command_ledger
+     SET state='completed',accepted=$2,message=$3,data=$4::jsonb,completed_at=COALESCE(completed_at,NOW()),updated_at=NOW()
+     WHERE request_id=$1 AND state IN ('pending','dispatched')
+     RETURNING request_id`,
+    [requestId, result.accepted, result.message, JSON.stringify(result.data ?? null)],
+  );
+  return resultRow.count > 0;
+}
+
+export async function markDeviceCommandUnknown(requestId: string, reason?: string) {
+  const client = db();
+  const now = new Date().toISOString();
+  if (!client) {
+    const record = memoryCommandLedger.get(requestId);
+    if (!record || record.state === "completed" || record.state === "unknown") return false;
+    memoryCommandLedger.set(requestId, {
+      ...record,
+      state: "unknown",
+      ...(reason ? { message: reason } : {}),
+      updatedAt: now,
+    });
+    return true;
+  }
+  await ensureSchema();
+  const result = await client.unsafe(
+    `UPDATE frosh_device_command_ledger
+     SET state='unknown',message=COALESCE($2,message),updated_at=NOW()
+     WHERE request_id=$1 AND state IN ('pending','dispatched')`,
+    [requestId, reason ?? null],
+  );
+  return result.count > 0;
+}
+
+export async function getDeviceCommandLedger(requestId: string) {
+  const client = db();
+  if (!client) return memoryCommandLedger.get(requestId) ?? null;
+  await ensureSchema();
+  const rows = await client.unsafe<{
+    requestId: string;
+    deviceId: string;
+    command: string;
+    payloadHash: string;
+    state: DeviceCommandLedgerState;
+    accepted: boolean | null;
+    message: string | null;
+    data: unknown;
+    createdAt: string;
+    dispatchedAt: string | null;
+    completedAt: string | null;
+    updatedAt: string;
+  }[]>(
+    `SELECT request_id AS "requestId",device_id AS "deviceId",command,payload_hash AS "payloadHash",state,accepted,message,data,
+            created_at AS "createdAt",dispatched_at AS "dispatchedAt",completed_at AS "completedAt",updated_at AS "updatedAt"
+     FROM frosh_device_command_ledger WHERE request_id=$1 LIMIT 1`,
+    [requestId],
+  );
+  return rows[0] ? normalizeCommandLedgerRow(rows[0]) : null;
 }
 
 export async function purgeExpiredDeviceCredentials() {
