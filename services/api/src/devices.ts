@@ -42,7 +42,11 @@ export function markDeviceOffline(id: string) {
 export function issueDeviceCredential(deviceId: string) {
   if (!devices.has(deviceId)) return null;
   const token = `${crypto.randomUUID()}-${crypto.randomUUID()}`;
-  const expiresAt = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const configuredTtl = Number(process.env.FROSH_DEVICE_CREDENTIAL_TTL_MS ?? 30 * 24 * 60 * 60 * 1000);
+  const ttlMs = Number.isFinite(configuredTtl)
+    ? Math.min(90 * 24 * 60 * 60 * 1000, Math.max(5 * 60 * 1000, Math.floor(configuredTtl)))
+    : 30 * 24 * 60 * 60 * 1000;
+  const expiresAt = Date.now() + ttlMs;
   credentials.set(deviceId, { token, expiresAt });
   return { deviceId, token, expiresAt: new Date(expiresAt).toISOString() };
 }
