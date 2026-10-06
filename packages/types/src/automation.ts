@@ -26,7 +26,10 @@ export interface FroshAutomationStore {
   get(id: string, userId: string): Promise<FroshAutomation | null>;
   create(input: Omit<FroshAutomation, "id" | "createdAt" | "updatedAt">): Promise<FroshAutomation>;
   update(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation>;
+  updateIfIdle(id: string, userId: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation | null>;
+  updateOwned(id: string, userId: string, owner: string, patch: Partial<Pick<FroshAutomation, "name" | "prompt" | "schedule" | "status" | "nextRunAt" | "lastRunAt">>): Promise<FroshAutomation | null>;
   delete(id: string, userId: string): Promise<boolean>;
+  deleteIfIdle(id: string, userId: string): Promise<boolean>;
   claimDue(id: string, userId: string, owner: string, leaseMs: number): Promise<FroshAutomation | null>;
   renewLease(id: string, userId: string, owner: string, leaseMs: number): Promise<boolean>;
   releaseLease(id: string, userId: string, owner: string): Promise<boolean>;
