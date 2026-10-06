@@ -47,7 +47,6 @@ const commandRecordPrefix = "frosh:device-command:";
 const commandRecordIndexKey = "frosh:device-command-index";
 const COMPLETED_COMMAND_RECORD_RETENTION_MS = 24 * 60 * 60 * 1000;
 const STARTED_COMMAND_RECORD_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
-const MAX_COMMAND_RECORD_INDEX_ENTRIES = 256;
 const requestIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function isSafeCommandRequestId(value: string): boolean {
@@ -151,14 +150,14 @@ async function loadCommandRecordIndex(): Promise<string[]> {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== "string" || !isSafeCommandRequestId(item))) return [];
-    return [...new Set(parsed)].slice(-MAX_COMMAND_RECORD_INDEX_ENTRIES);
+    return [...new Set(parsed)];
   } catch {
     return [];
   }
 }
 
 async function saveCommandRecordIndex(ids: string[]) {
-  const normalized = [...new Set(ids.filter(isSafeCommandRequestId))].slice(-MAX_COMMAND_RECORD_INDEX_ENTRIES);
+  const normalized = [...new Set(ids.filter(isSafeCommandRequestId))];
   try {
     await SecureStore.setItemAsync(commandRecordIndexKey, JSON.stringify(normalized));
   } catch {
