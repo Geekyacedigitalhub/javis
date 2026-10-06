@@ -60,6 +60,26 @@ async function saveCommandRecord(requestId: string, record: CommandRecord) {
   }
 }
 
+async function sendStoredCommandResult(
+  socket: WebSocket,
+  command: Record<string, unknown>,
+  record: Extract<CommandRecord, { state: "completed" }>,
+) {
+  try {
+    socket.send(JSON.stringify({
+      type: "device.command.result",
+      requestId: String(command.requestId ?? ""),
+      deviceId: String(command.deviceId ?? ""),
+      command: record.command,
+      accepted: record.accepted,
+      message: record.message,
+      ...(record.data !== undefined ? { data: record.data } : {}),
+    }));
+  } catch {
+    // The durable result is already authoritative; a later duplicate can replay it.
+  }
+}
+
 async function sendCommandResult(
   socket: WebSocket,
   command: Record<string, unknown>,
@@ -68,29 +88,32 @@ async function sendCommandResult(
   const requestId = String(command.requestId ?? "");
   const deviceId = String(command.deviceId ?? "");
   const commandType = String(command.command ?? "");
-  const record: CommandRecord = { state: "completed", createdAt: Date.now(), command: commandType, accepted: result.accepted, message: result.message, data: result.data };
-  const persisted = await saveCommandRecord(requestId, record);
-  if (!persisted) {
-    socket.send(JSON.stringify({
-      type: "device.command.result",
-      requestId,
-      deviceId,
-      command: commandType,
-      accepted: false,
-      message: "The command completed but its final outcome could not be durably recorded. The outcome is unknown; do not automatically retry the side-effecting action.",
-      data: { outcome: "unknown", retryable: false, reason: "command_result_persist_failed" },
-    }));
-    return;
-  }
-  socket.send(JSON.stringify({
-    type: "device.command.result",
-    requestId,
-    deviceId,
+  const record: Extract<CommandRecord, { state: "completed" }> = {
+    state: "completed",
+    createdAt: Date.now(),
     command: commandType,
     accepted: result.accepted,
     message: result.message,
-    ...(result.data !== undefined ? { data: result.data } : {}),
-  }));
+    data: result.data,
+  };
+  const persisted = await saveCommandRecord(requestId, record);
+  if (!persisted) {
+    try {
+      socket.send(JSON.stringify({
+        type: "device.command.result",
+        requestId,
+        deviceId,
+        command: commandType,
+        accepted: false,
+        message: "The command completed but its final outcome could not be durably recorded. The outcome is unknown; do not automatically retry the side-effecting action.",
+        data: { outcome: "unknown", retryable: false, reason: "command_result_persist_failed" },
+      }));
+    } catch {
+      // No durable record exists; the server will treat the missing acknowledgement as unknown.
+    }
+    return;
+  }
+  await sendStoredCommandResult(socket, command, record);
 }
 
 export function connectFroshRealtime(
