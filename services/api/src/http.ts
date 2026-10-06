@@ -498,9 +498,20 @@ const server = Bun.serve({
           );
         }
 
+        const name = body.name.trim();
+        const platform = body.platform;
+        const existingDevice = listDevices().find(
+          (item) => item.name === name && item.platform === platform,
+        );
+        if (existingDevice && !webAuthenticated) {
+          return Response.json(
+            { error: "A device with this name and platform is already registered. Use the trusted web console to re-enroll it." },
+            { status: 409 },
+          );
+        }
         const device = registerDevice({
-          name: body.name.trim(),
-          platform: body.platform,
+          name,
+          platform,
           capabilities: body.capabilities.filter(
             (capability: unknown): capability is string =>
               typeof capability === "string",
