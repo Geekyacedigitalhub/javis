@@ -273,7 +273,20 @@ const server = Bun.serve({
     if (request.method === "POST" && url.pathname === "/v1/chat") {
       try {
         const body = await request.json();
-        return Response.json(await postChat(body));
+        const chatBody =
+          body && typeof body === "object" && !Array.isArray(body)
+            ? { ...(body as Record<string, unknown>) }
+            : body;
+        if (!webAuthenticated && deviceId && chatBody && typeof chatBody === "object") {
+          const requestedUserId = typeof (chatBody as Record<string, unknown>).userId === "string"
+            ? (chatBody as Record<string, unknown>).userId
+            : undefined;
+          if (requestedUserId && requestedUserId !== configuredUserId) {
+            return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
+          }
+          (chatBody as Record<string, unknown>).userId = configuredUserId;
+        }
+        return Response.json(await postChat(chatBody));
       } catch (error) {
         const message = error instanceof Error ? error.message : "Request failed";
         return Response.json(
