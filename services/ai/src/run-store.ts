@@ -51,6 +51,22 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return updated;
   }
 
+  async stopWaitingApproval(id: string, approvalId: string, result: string, error: string) {
+    const current = this.runs.get(id);
+    if (!current || current.status !== "waiting_approval" || current.pendingApprovalId !== approvalId) return null;
+    const updated: FroshAgentRun = {
+      ...current,
+      status: "failed",
+      pendingApprovalId: undefined,
+      providerContinuation: undefined,
+      result,
+      error,
+      updatedAt: new Date().toISOString(),
+    };
+    this.runs.set(id, updated);
+    return updated;
+  }
+
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");
