@@ -259,7 +259,7 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
   });
 }
 
-export function handleDeviceCommandResult(clientId: string, message: FroshDeviceCommand & { type: "device.command.result" }) {
+export async function handleDeviceCommandResult(clientId: string, message: FroshDeviceCommand & { type: "device.command.result" }) {
   if (!message || message.type !== "device.command.result" || typeof message.requestId !== "string" || typeof message.deviceId !== "string" || typeof message.accepted !== "boolean" || typeof message.message !== "string") return;
   const pending = pendingCommands.get(message.requestId);
   if (!pending) return;
