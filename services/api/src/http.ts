@@ -221,10 +221,14 @@ const server = Bun.serve({
     );
     const webAuthenticated = Boolean(webToken && suppliedWebToken && suppliedWebToken === webToken);
     const deviceEnrollmentAuthorized = validEnrollmentToken;
+    const enrollmentRequest =
+      request.method === "POST" &&
+      url.pathname === "/v1/devices" &&
+      deviceEnrollmentAuthorized;
     const publicPath =
       url.pathname === "/health" ||
       url.pathname === "/v1/realtime";
-    if (!publicPath && !webAuthenticated && (!deviceId || !deviceToken || !(await authenticateDevice(deviceId, deviceToken)))) {
+    if (!publicPath && !enrollmentRequest && !webAuthenticated && (!deviceId || !deviceToken || !(await authenticateDevice(deviceId, deviceToken)))) {
       return Response.json({ error: "FROSH authentication required" }, { status: 401 });
     }
 
