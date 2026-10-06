@@ -21,7 +21,9 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
     : 5000;
   const authCheck = deviceId && deviceToken
     ? setInterval(() => {
-        if (!authenticateDevice(deviceId, deviceToken)) socket.close();
+        void authenticateDevice(deviceId, deviceToken)
+          .then((authenticated) => { if (!authenticated) socket.close(); })
+          .catch(() => socket.close());
       }, authCheckInterval)
     : undefined;
   clients.set(id, { id, socket, deviceId, deviceToken, authCheck });
