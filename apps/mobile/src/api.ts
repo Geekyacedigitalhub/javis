@@ -78,7 +78,13 @@ export function listDevices() {
   return request<{ devices: FroshDevice[] }>("/v1/devices");
 }
 
-export async function registerDevice(name: string, capabilities: string[]) {
+const MAX_ENROLLMENT_TOKEN_LENGTH = 512;
+
+export async function registerDevice(name: string, capabilities: string[], enrollmentToken: string) {
+  const token = enrollmentToken.trim();
+  if (!token || token.length > MAX_ENROLLMENT_TOKEN_LENGTH || /[\\u0000-\\u001f\\u007f]/.test(token)) {
+    throw new Error("Enrollment token is invalid.");
+  }
   const result = await request<{ device: FroshDevice; credential: FroshDeviceCredential }>("/v1/devices", {
     method: "POST",
     body: JSON.stringify({ name, platform: "android", capabilities }),
