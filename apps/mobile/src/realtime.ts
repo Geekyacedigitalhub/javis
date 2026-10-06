@@ -12,8 +12,8 @@ function websocketUrl() {
 }
 
 type CommandRecord =
-  | { state: "started"; createdAt: number }
-  | { state: "completed"; createdAt: number; accepted: boolean; message: string; data?: unknown };
+  | { state: "started"; createdAt: number; command: string }
+  | { state: "completed"; createdAt: number; command: string; accepted: boolean; message: string; data?: unknown };
 
 const commandRecords = new Map<string, CommandRecord>();
 const inFlightCommands = new Map<string, Promise<void>>();
@@ -26,7 +26,7 @@ async function loadCommandRecord(requestId: string): Promise<CommandRecord | nul
     const raw = await SecureStore.getItemAsync(commandRecordPrefix + requestId);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CommandRecord;
-    if (!parsed || typeof parsed.createdAt !== "number" || Date.now() - parsed.createdAt > 24 * 60 * 60 * 1000) {
+    if (!parsed || typeof parsed.createdAt !== "number" || typeof parsed.command !== "string" || Date.now() - parsed.createdAt > 24 * 60 * 60 * 1000) {
       await SecureStore.deleteItemAsync(commandRecordPrefix + requestId).catch(() => undefined);
       return null;
     }
@@ -51,7 +51,8 @@ async function sendCommandResult(
 ) {
   const requestId = String(command.requestId ?? "");
   const deviceId = String(command.deviceId ?? "");
-  const record: CommandRecord = { state: "completed", createdAt: Date.now(), accepted: result.accepted, message: result.message, data: result.data };
+  const commandType = String(command.command ?? "");
+  const record: CommandRecord = { state: "completed", createdAt: Date.now(), command: commandType, accepted: result.accepted, message: result.message, data: result.data };
   await saveCommandRecord(requestId, record);
   socket.send(JSON.stringify({
     type: "device.command.result",
@@ -100,11 +101,13 @@ export function connectFroshRealtime(
           return;
         }
         commandRequestId = requestId;
+          const commandType = typeof parsed.command === "string" ? parsed.command : "";
+          if (!commandType) return;
           const existingInFlight = inFlightCommands.get(requestId);
           if (existingInFlight) {
             await existingInFlight;
             const completed = await loadCommandRecord(requestId);
-            if (completed?.state === "completed") {
+            if (completed?.state === "completed" && completed.command === commandType) {
               await sendCommandResult(socket, parsed, completed);
             } else {
               await sendCommandResult(socket, parsed, {
@@ -122,8 +125,18 @@ export function connectFroshRealtime(
           releaseCommand = release;
 
           const existing = await loadCommandRecord(requestId);
-          if (existing?.state === "completed") {
+          if (existing?.state === "completed" && existing.command === commandType) {
             await sendCommandResult(socket, parsed, existing);
+            inFlightCommands.delete(requestId);
+            releaseCommand();
+            return;
+          }
+          if (existing?.state === "completed" && existing.command !== commandType) {
+            await sendCommandResult(socket, parsed, {
+              accepted: false,
+              message: "This request ID was previously used for a different command. The outcome is unknown; do not execute automatically.",
+              data: { outcome: "unknown", retryable: false, reason: "request_id_command_mismatch" },
+            });
             inFlightCommands.delete(requestId);
             releaseCommand();
             return;
@@ -138,7 +151,7 @@ export function connectFroshRealtime(
             releaseCommand();
             return;
           }
-          await saveCommandRecord(requestId, { state: "started", createdAt: Date.now() });
+          await saveCommandRecord(requestId, { state: "started", command: commandType, createdAt: Date.now() });
       }
 
       try {
