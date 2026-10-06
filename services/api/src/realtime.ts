@@ -184,6 +184,17 @@ async function hashCommandPayload(payload: unknown) {
   return Array.from(new Uint8Array(digest)).map(byte => byte.toString(16).padStart(2, "0")).join("");
 }
 
+const MAX_COMMAND_VALUE_LENGTH = 512;
+const MAX_MESSAGE_RECIPIENT_LENGTH = 320;
+const MAX_MESSAGE_BODY_LENGTH = 8000;
+const MAX_NOTIFICATION_ID_LENGTH = 200;
+const MAX_PROVIDER_LENGTH = 40;
+const MAX_COMMAND_PAYLOAD_BYTES = 32 * 1024;
+
+function validCommandText(value: string | undefined, maxLength: number) {
+  return value === undefined || value.length <= maxLength;
+}
+
 async function prepareCommandLedger(input: {
   requestId: string;
   deviceId: string;
@@ -191,6 +202,10 @@ async function prepareCommandLedger(input: {
   payload: unknown;
   idempotencyKey?: string;
 }) {
+  const serializedPayload = stableCommandPayload(input.payload);
+  if (serializedPayload.length > MAX_COMMAND_PAYLOAD_BYTES) {
+    return { kind: "error" as const, reason: "command_payload_too_large" };
+  }
   const payloadHash = await hashCommandPayload(input.payload);
   const idempotencyKey = input.idempotencyKey?.trim() || input.requestId;
   if (idempotencyKey.length > 200) return { kind: "error" as const, reason: "idempotency_key_too_long" };
@@ -238,6 +253,9 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
+  if (!validCommandText(value, MAX_COMMAND_VALUE_LENGTH)) {
+    return { accepted: false, message: "Command value is too large." };
+  }
   const requestId = crypto.randomUUID();
   const payload = {
     type: "device.command",
@@ -339,6 +357,9 @@ export async function sendMessageCommand(deviceId: string, recipient: string, me
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
+  if (!validCommandText(provider, MAX_PROVIDER_LENGTH) || !validCommandText(recipient, MAX_MESSAGE_RECIPIENT_LENGTH) || !validCommandText(message, MAX_MESSAGE_BODY_LENGTH)) {
+    return { accepted: false, message: "Message command payload is too large." };
+  }
   const requestId = crypto.randomUUID();
   const payload = { type: "device.command", deviceId, command: "send_message", provider, recipient, message };
   const ledger = await prepareCommandLedger({ requestId, deviceId, command: "send_message", payload, idempotencyKey });
@@ -373,6 +394,9 @@ export async function replyToMessageCommand(deviceId: string, notificationId: st
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   const latestId = client.id;
+  if (!validCommandText(notificationId, MAX_NOTIFICATION_ID_LENGTH) || !validCommandText(message, MAX_MESSAGE_BODY_LENGTH)) {
+    return { accepted: false, message: "Message reply payload is too large." };
+  }
   const requestId = crypto.randomUUID();
   const payload = { type: "device.command", deviceId, command: "message_reply", notificationId, message };
   const ledger = await prepareCommandLedger({ requestId, deviceId, command: "message_reply", payload, idempotencyKey });
