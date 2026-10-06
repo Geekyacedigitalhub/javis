@@ -67,6 +67,32 @@ async function tick(): Promise<void> {
       } catch (error) {
         const errorName = error instanceof Error && error.name ? error.name : "UnknownError";
         console.error("FROSH automation failed", claimed.id, errorName);
+
+        // Never leave a failed due item permanently runnable. Without advancing the
+        // schedule, the minute tick would reclaim the same item indefinitely.
+        if (!leaseLost && !stopping) {
+          try {
+            if (claimed.schedule.type === "once") {
+              const finalized = await store.updateOwned(claimed.id, userId, owner, {
+                status: "completed",
+                nextRunAt: undefined,
+              });
+              if (!finalized) console.error("FROSH automation failure finalization lost lease", claimed.id);
+            } else {
+              const next = calculateNextRun(claimed.schedule, new Date());
+              const finalized = await store.updateOwned(claimed.id, userId, owner, {
+                nextRunAt: next,
+              });
+              if (!finalized) console.error("FROSH automation failure reschedule lost lease", claimed.id);
+            }
+          } catch (finalizationError) {
+            const finalizationName =
+              finalizationError instanceof Error && finalizationError.name
+                ? finalizationError.name
+                : "UnknownError";
+            console.error("FROSH automation failure finalization failed", claimed.id, finalizationName);
+          }
+        }
       } finally {
         clearInterval(renewTimer);
         try { await store.releaseLease(claimed.id, userId, owner); } catch {}
