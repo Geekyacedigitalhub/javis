@@ -105,6 +105,15 @@ function isSafetyPausedMission(mission:FroshMission){
 
 const MAX_DEVICE_COMMAND_HTTP_BODY_BYTES = 64 * 1024;
 
+function safeErrorMessage(fallback: string): string {
+  return fallback;
+}
+
+function logOperationalError(context: string, error: unknown): void {
+  const name = error instanceof Error && error.name ? error.name : "UnknownError";
+  console.error(context, name);
+}
+
 async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_HTTP_BODY_BYTES): Promise<unknown> {
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {
