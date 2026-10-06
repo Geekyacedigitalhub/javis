@@ -1,6 +1,6 @@
 import type { FroshEvent } from "../../../packages/types/src/events";
 import type { FroshDeviceCommand } from "../../../packages/types/src/events";
-import { authenticateDevice } from "./devices";
+import { authenticateDevice, markDeviceOffline } from "./devices";
 
 type Client = {
   id: string;
@@ -34,6 +34,7 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
     clients.delete(id);
     if (deviceId && latestClientByDevice.get(deviceId) === id) {
       latestClientByDevice.delete(deviceId);
+      void markDeviceOffline(deviceId).catch(() => undefined);
     }
     for (const [requestId, pending] of pendingCommands) {
       if (pending.clientId !== id) continue;
@@ -55,6 +56,7 @@ export function removeRealtimeClient(id: string) {
   clients.delete(id);
   if (client?.deviceId && latestClientByDevice.get(client.deviceId) === id) {
     latestClientByDevice.delete(client.deviceId);
+    void markDeviceOffline(client.deviceId).catch(() => undefined);
   }
 }
 
