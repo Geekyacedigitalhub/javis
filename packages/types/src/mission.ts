@@ -38,6 +38,7 @@ export interface FroshMission {
 
 export type FroshMissionEventType =
   | "mission.created"
+  | "mission.updated"
   | "mission.claimed"
   | "mission.step.started"
   | "mission.step.completed"
