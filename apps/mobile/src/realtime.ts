@@ -347,10 +347,14 @@ export function connectFroshRealtime(
   onStatus?.("connecting");
   const socket = new WebSocket(websocketUrl());
   let authenticatedDeviceId: string | undefined;
+  let authenticatedCredentialToken: string | undefined;
+  let authenticatedCredentialExpiry: string | undefined;
   let credentialListenerCleanup: (() => void) | undefined;
   credentialListenerCleanup = onDeviceCredentialChange((nextCredential) => {
-    if (!nextCredential || nextCredential.deviceId !== authenticatedDeviceId) {
+    if (!nextCredential || nextCredential.deviceId !== authenticatedDeviceId || nextCredential.token !== authenticatedCredentialToken || nextCredential.expiresAt !== authenticatedCredentialExpiry) {
       authenticatedDeviceId = undefined;
+      authenticatedCredentialToken = undefined;
+      authenticatedCredentialExpiry = undefined;
       try { socket.close(); } catch { /* already closed */ }
     }
   });
@@ -363,6 +367,8 @@ export function connectFroshRealtime(
       return;
     }
     authenticatedDeviceId = credential.deviceId;
+    authenticatedCredentialToken = credential.token;
+    authenticatedCredentialExpiry = credential.expiresAt;
     socket.send(JSON.stringify({
       type: "auth",
       deviceId: credential.deviceId,
