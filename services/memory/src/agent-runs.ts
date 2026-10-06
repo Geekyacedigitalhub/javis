@@ -36,6 +36,22 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return rows[0];
   }
 
+  async claimApproval(id: string, approvalId: string, toolCall: import("../../../packages/types/src/javis").FroshToolCall) {
+    const rows = await this.query<FroshAgentRun>(
+      'UPDATE frosh_agent_runs SET status=$3, pending_approval_id=NULL, tool_calls=tool_calls || $4::jsonb, updated_at=NOW() WHERE id=$1 AND status=$2 AND pending_approval_id=$5 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+      [id, "waiting_approval", "running", JSON.stringify([toolCall]), approvalId],
+    );
+    return rows[0] ?? null;
+  }
+
+  async restoreApprovalWait(id: string, approvalId: string, toolCalls: import("../../../packages/types/src/javis").FroshToolCall[]) {
+    const rows = await this.query<FroshAgentRun>(
+      'UPDATE frosh_agent_runs SET status=$2, pending_approval_id=$3, tool_calls=$4::jsonb, updated_at=NOW() WHERE id=$1 AND status=$5 AND pending_approval_id IS NULL RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',
+      [id, "waiting_approval", approvalId, JSON.stringify(toolCalls), "running"],
+    );
+    return rows[0] ?? null;
+  }
+
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>) {
     const fields: string[] = [];
     const values: unknown[] = [id];
