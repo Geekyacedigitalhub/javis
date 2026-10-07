@@ -85,6 +85,8 @@ function validateMissionPatch(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"
   if(patch.executionDurationMs!==undefined&&(!Number.isInteger(patch.executionDurationMs)||patch.executionDurationMs<0||patch.executionDurationMs>MAX_EXECUTION_DURATION_MS))throw new Error("Mission execution duration exceeds safety bounds");
 }
 function validateMissionEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
+  const eventTypes=["mission.created","mission.updated","mission.claimed","mission.step.started","mission.step.completed","mission.step.failed","mission.step.retry","mission.approval.required","mission.paused","mission.cancelled","mission.recovered","mission.completed","mission.failed","mission.tool.completed","mission.tool.failed","mission.budget.exceeded"];
+  if(!eventTypes.includes(input.type))throw new Error("Invalid mission event type");
   boundedId(input.missionId,"Mission ID");
   boundedId(input.userId,"Mission user ID");
   boundedText(input.message,"Mission event message",MAX_EVENT_MESSAGE_CHARS,16*1024);
@@ -284,7 +286,7 @@ export class PostgresMissionStore implements FroshMissionStore {
     return rows;
   }
   async listEvents(missionId:string,userId:string,limit=100){
-    return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),500)]);
+    return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),200)]);
   }
   async delete(id:string,userId:string){
     return this.deleteIfIdle(id,userId);
