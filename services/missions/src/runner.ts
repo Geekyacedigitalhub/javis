@@ -1,10 +1,29 @@
-import { getMissionStore } from "./factory";
+import { closeMissionStore, getMissionStore } from "./factory";
 
 let started=false;
 let stopping=false;
 let tickRunning=false;
 let tickTimer:ReturnType<typeof setInterval>|undefined;
 let activeTick:Promise<void>|undefined;
+let signalHandlersInstalled=false;
+
+async function handleProcessShutdown():Promise<void>{
+  await stopMissionRunner();
+}
+
+function installProcessShutdownHandlers():void{
+  if(signalHandlersInstalled)return;
+  process.once("SIGINT",handleProcessShutdown);
+  process.once("SIGTERM",handleProcessShutdown);
+  signalHandlersInstalled=true;
+}
+
+function removeProcessShutdownHandlers():void{
+  if(!signalHandlersInstalled)return;
+  process.removeListener("SIGINT",handleProcessShutdown);
+  process.removeListener("SIGTERM",handleProcessShutdown);
+  signalHandlersInstalled=false;
+}
 
 async function tick(){
   if(tickRunning||stopping)return;
@@ -104,6 +123,7 @@ function scheduleTick(){
 export function startMissionRunner(){
   if(started||stopping)return;
   started=true;
+  installProcessShutdownHandlers();
   scheduleTick();
   tickTimer=setInterval(scheduleTick,10_000);
 }
@@ -118,4 +138,6 @@ export async function stopMissionRunner(){
   if(activeTick)await activeTick;
   started=false;
   stopping=false;
+  removeProcessShutdownHandlers();
+  await closeMissionStore();
 }
