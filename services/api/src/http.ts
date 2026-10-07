@@ -827,7 +827,7 @@ const server = Bun.serve({
       const userId=decodeBoundedUserId(missionUsers[1]);
       if(!userId)return Response.json({error:"Invalid user ID"},{status:400});
       const { getMissionStore } = await import("../../missions/src");
-      return Response.json({ missions: await getMissionStore().list(userId) });
+      return Response.json({ missions: (await getMissionStore().list(userId)).map(publicMissionResponse) });
     }
 
     if (missionUsers && request.method === "POST") {
@@ -1450,7 +1450,7 @@ const server = Bun.serve({
             const reason=toolCount>maxTools?"Mission tool-call budget was exceeded.":"Mission execution time budget was exceeded.";
             await emit("mission.budget.exceeded",reason,step.id,run.id,{toolCount,maxTools,executionDurationMs,maxDurationMs});
             mission=await updateOwned({status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:run.id,pendingApprovalId:undefined,result:run.result,toolCallsUsed:toolCount,executionDurationMs,leaseUntil:undefined,leaseOwner:undefined});
-            return Response.json({mission,budgetExceeded:true});
+            return Response.json({mission:publicMissionResponse(mission),budgetExceeded:true});
           }
 
           if(stepStatus==="completed") await emit("mission.step.completed","Completed: "+step.title,step.id,run.id);
@@ -1511,7 +1511,7 @@ const server = Bun.serve({
                     leaseUntil:undefined,
                     leaseOwner:undefined
                   });
-                  return Response.json({mission,budgetExceeded:true});
+                  return Response.json({mission:publicMissionResponse(mission),budgetExceeded:true});
                 }
                 const timestamp=new Date().toISOString();
                 steps.push({id:crypto.randomUUID(),title:nextTitle,status:"pending",createdAt:timestamp,updatedAt:timestamp});
@@ -1761,7 +1761,7 @@ const server = Bun.serve({
           if(updated.status==="running"){
             return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
           }
-          return Response.json({mission:updated,run});
+          return Response.json({mission:publicMissionResponse(updated),run});
         }
         const response=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
         return response;
