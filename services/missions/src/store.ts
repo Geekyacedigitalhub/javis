@@ -81,7 +81,7 @@ export class PostgresMissionStore implements FroshMissionStore {
         "SELECT COUNT(*)::text AS count FROM frosh_missions WHERE user_id=$1 AND status NOT IN ('completed','failed','cancelled')",
         [input.userId]
       );
-      if(Number(countRows[0]?.count??0)>=maxActive)throw new Error("Mission limit reached for this user");
+      if(Number(countRows[0]?.count??0)>=maxActive)return null;
       const rows=await tx.unsafe<FroshMission[]>(`INSERT INTO frosh_missions(id,user_id,goal,status,priority,budget_profile,progress,steps,active_run_id,pending_approval_id,lease_until,lease_owner,result,tool_calls_used,execution_duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14) RETURNING ${SELECT_FIELDS}`,[id,input.userId,input.goal,input.status,input.priority,input.budgetProfile,input.progress,JSON.stringify(input.steps),input.activeRunId??null,input.pendingApprovalId??null,input.leaseUntil??null,input.leaseOwner??null,input.result??null,input.toolCallsUsed??0,input.executionDurationMs??0]);
       return rows[0];
     });
@@ -272,7 +272,7 @@ export class InMemoryMissionStore implements FroshMissionStore {
     const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
     const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
     const activeCount=[...this.items.values()].filter((mission)=>mission.userId===input.userId&&!["completed","failed","cancelled"].includes(mission.status)).length;
-    if(activeCount>=maxActive)throw new Error("Mission limit reached for this user");
+    if(activeCount>=maxActive)return null;
     const now=new Date().toISOString();
     const x={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};
     this.items.set(x.id,x);
