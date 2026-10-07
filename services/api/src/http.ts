@@ -788,16 +788,10 @@ const server = Bun.serve({
         if (typeof patch.prompt === "string" && (patch.prompt.length > 8000 || new TextEncoder().encode(patch.prompt).byteLength > 32 * 1024)) return Response.json({ error: "Automation prompt is too large." }, { status: 400 });
         if (body?.status === "active" || body?.status === "paused" || body?.status === "completed") patch.status = body.status;
         if (body?.schedule?.type) patch.schedule = body.schedule;
-        const { calculateNextRun, getAutomationStore } = await import("../../automation/src");
+        const { calculateNextRun, getAutomationStore, validateAutomationSchedule } = await import("../../automation/src");
         if (patch.schedule) {
           if (new TextEncoder().encode(JSON.stringify(patch.schedule)).byteLength > 8 * 1024) return Response.json({ error: "Automation schedule is too large." }, { status: 400 });
-          const schedule = patch.schedule as Record<string, unknown>;
-          const valid =
-            schedule.type === "once" && typeof schedule.runAt === "string" ||
-            schedule.type === "daily" && Number.isInteger(schedule.hour) && Number.isInteger(schedule.minute) ||
-            schedule.type === "weekly" && Number.isInteger(schedule.dayOfWeek) && Number.isInteger(schedule.hour) && Number.isInteger(schedule.minute) ||
-            schedule.type === "interval" && Number.isInteger(schedule.minutes) && Number(schedule.minutes) >= 60;
-          if (!valid) return Response.json({ error: "Invalid schedule. Interval must be at least 60 minutes." }, { status: 400 });
+          if (!validateAutomationSchedule(patch.schedule)) return Response.json({ error: "Invalid automation schedule." }, { status: 400 });
           patch.nextRunAt = calculateNextRun(patch.schedule as any);
         }
         const automation = await getAutomationStore().update(id, userId, patch as any);
@@ -824,8 +818,10 @@ const server = Bun.serve({
 
     const missionUsers = url.pathname.match(/^\/v1\/missions\/users\/([^/]+)$/);
     if (missionUsers && request.method === "GET") {
+      const userId=decodeBoundedUserId(missionUsers[1]);
+      if(!userId)return Response.json({error:"Invalid user ID"},{status:400});
       const { getMissionStore } = await import("../../missions/src");
-      return Response.json({ missions: await getMissionStore().list(decodeBoundedUserId(missionUsers[1])) });
+      return Response.json({ missions: await getMissionStore().list(userId) });
     }
 
     if (missionUsers && request.method === "POST") {
@@ -833,6 +829,8 @@ const server = Bun.serve({
         const userId=decodeBoundedUserId(missionUsers[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const body=await parseBoundedJson(request);
+        if(!body||typeof body!=="object"||Array.isArray(body))return Response.json({error:"Mission request body must be an object"},{status:400});
+        if(Object.keys(body as Record<string,unknown>).length>3)return Response.json({error:"Mission creation contains too many fields"},{status:400});
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
         if(!goal)return Response.json({error:"goal is required"},{status:400});        const { getMissionStore }=await import("../../missions/src");
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
@@ -1028,6 +1026,7 @@ const server = Bun.serve({
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeBoundedResourceId(missionPriorityMatch[2]);
         const body=await parseBoundedJson(request);
+        if(!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body as Record<string,unknown>).length!==1)return Response.json({error:"Priority request must contain only priority"},{status:400});
         const priority=body?.priority;
         if(priority!=="low"&&priority!=="normal"&&priority!=="high")return Response.json({error:"priority must be low, normal, or high"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
@@ -1048,6 +1047,7 @@ const server = Bun.serve({
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
         const id=decodeBoundedResourceId(missionBudgetProfileMatch[2]);
         const body=await parseBoundedJson(request);
+        if(!body||typeof body!=="object"||Array.isArray(body)||Object.keys(body as Record<string,unknown>).length!==1)return Response.json({error:"Budget request must contain only budgetProfile"},{status:400});
         const budgetProfile=body?.budgetProfile;
         if(budgetProfile!=="standard"&&budgetProfile!=="extended"&&budgetProfile!=="intensive")return Response.json({error:"invalid budget profile"},{status:400});
         const {getMissionStore}=await import("../../missions/src");
