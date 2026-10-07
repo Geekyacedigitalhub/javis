@@ -134,6 +134,12 @@ function decodeBoundedUserId(value: string): string | null {
   return decoded;
 }
 
+function publicMissionResponse(mission: FroshMission | null | undefined): FroshMission | null {
+  if (!mission) return null;
+  const { leaseOwner: _, leaseUntil: __, ...publicMission } = mission;
+  return publicMission;
+}
+
 function decodeBoundedResourceId(value: string): string | null {
   let decoded: string;
   try { decoded = decodeURIComponent(value); } catch { return null; }
@@ -857,7 +863,7 @@ const server = Bun.serve({
         const updated=await store.pauseIfIdle(id,userId);
         if(!updated)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.paused",message:"Mission paused by user."});
-        return Response.json({mission:updated});
+        return Response.json({mission:publicMissionResponse(updated)});
       }
       if(action==="resume"){
         if(mission.status!=="paused")return Response.json({error:"Only paused missions can be resumed"},{status:409});
@@ -865,9 +871,9 @@ const server = Bun.serve({
         const updated=await store.resumeIfPaused(id,userId);
         if(!updated)return Response.json({error:"Mission is no longer paused; refresh and try again"},{status:409});
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:updated.status==="waiting_approval"?"Mission resumed into its pending approval state.":"Mission resumed by user.",metadata:{resumedStatus:updated.status}});
-        return Response.json({mission:updated});
+        return Response.json({mission:publicMissionResponse(updated)});
       }
-      if(["completed","cancelled"].includes(mission.status))return Response.json({mission});
+      if(["completed","cancelled"].includes(mission.status))return Response.json({mission:publicMissionResponse(mission)});
       let cancelledApprovalId:string|undefined;
       let cancelledApprovalRunId:string|undefined;
       if(mission.pendingApprovalId){
@@ -909,7 +915,7 @@ const server = Bun.serve({
         message:"Mission cancelled by user.",
         metadata:{approvalCancelled:Boolean(cancelledApprovalId),approvalRunStopped}
       });
-      return Response.json({mission:updated});
+      return Response.json({mission:publicMissionResponse(updated)});
     }
 
     const missionRerunStepMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun-from-step\/([^/]+)$/);
@@ -953,7 +959,7 @@ const server = Bun.serve({
         message:"Mission rerun from step "+source.steps[stepIndex].title,
         metadata:{sourceMissionId:source.id,sourceStepId:stepId,rerunFromStepId:stepId}
       });
-      return Response.json({mission:rerunMission});
+      return Response.json({mission:publicMissionResponse(rerunMission)});
     }
 
     const missionRerunMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/rerun$/);
@@ -967,7 +973,7 @@ const server = Bun.serve({
       if(!["completed","failed","cancelled"].includes(source.status))return Response.json({error:"Only completed, failed, or cancelled missions can be rerun"},{status:409});
       const rerunMission=await store.create({userId,goal:source.goal,status:"planning",priority:source.priority,budgetProfile:source.budgetProfile,progress:0,steps:[]});
       await addMissionEventWithRetry(store, {missionId:rerunMission.id,userId,type:"mission.created",message:"Mission rerun created from "+source.id,metadata:{sourceMissionId:source.id}});
-      return Response.json({mission:rerunMission});
+      return Response.json({mission:publicMissionResponse(rerunMission)});
     }
 
     const missionMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)$/);
@@ -1016,7 +1022,7 @@ const server = Bun.serve({
     if(missionMatch && request.method==="GET"){
       const {getMissionStore}=await import("../../missions/src");
       const mission=await getMissionStore().get(decodeBoundedResourceId(missionMatch[2]),decodeBoundedUserId(missionMatch[1]));
-      return mission?Response.json({mission}):Response.json({error:"Mission not found"},{status:404});
+      return mission?Response.json({mission:publicMissionResponse(mission)}):Response.json({error:"Mission not found"},{status:404});
     }
 
     const missionPriorityMatch=url.pathname.match(/^\/v1\/missions\/users\/([^/]+)\/([^/]+)\/priority$/);
@@ -1036,7 +1042,7 @@ const server = Bun.serve({
         const updated=await store.updatePriorityIfIdle(id,userId,priority);
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.updated",message:"Priority changed to "+priority+".",metadata:{field:"priority",value:priority}});
-        return Response.json({mission:updated});
+        return Response.json({mission:publicMissionResponse(updated)});
       }catch(error){return Response.json({error:"Priority update failed"},{status:400});}
     }
 
@@ -1057,7 +1063,7 @@ const server = Bun.serve({
         const updated=await store.updateBudgetProfileIfIdle(id,userId,budgetProfile);
         if(!updated)return Response.json({error:"Mission is currently being executed or cannot be reconfigured"},{status:409});
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.updated",message:"Budget profile changed to "+budgetProfile+".",metadata:{field:"budgetProfile",value:budgetProfile}});
-        return Response.json({mission:updated});
+        return Response.json({mission:publicMissionResponse(updated)});
       }catch(error){return Response.json({error:"Budget profile update failed"},{status:400});}
     }
 
@@ -1084,7 +1090,7 @@ const server = Bun.serve({
         const store=getMissionStore();
         let mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
-        if(mission.status==="completed")return Response.json({mission});
+        if(mission.status==="completed")return Response.json({mission:publicMissionResponse(mission)});
         const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
         const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
         const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await store.updateOwned(id,userId,executionOwner,patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
@@ -1124,7 +1130,7 @@ const server = Bun.serve({
               if(approval?.status==="pending"){
                 await updateOwned({status:"waiting_approval",steps,activeRunId:savedRun.id,pendingApprovalId:savedRun.pendingApprovalId,result:savedRun.result,leaseUntil:undefined,leaseOwner:undefined});
                 await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:"Recovered an approval-blocked agent run after execution restart.",stepId:staleStep.id,runId:savedRun.id});
-                return Response.json({mission:await store.get(id,userId)});
+                return Response.json({mission:publicMissionResponse(await store.get(id,userId))});
               }
               if(approval?.status==="approved" || approval?.status==="rejected" || approval?.status==="expired"){
                 const outcome=approval.status==="approved"
@@ -1198,7 +1204,7 @@ const server = Bun.serve({
                     runId:savedRun.id,
                     metadata:{approvalId:orphanApproval.id}
                   });
-                  return Response.json({mission:await store.get(id,userId)});
+                  return Response.json({mission:publicMissionResponse(await store.get(id,userId))});
                 }
               }
               const plannedApproval=savedRun.toolCalls.find(call=>call.status==="planned" && call.id.startsWith("approved-"));
@@ -1246,7 +1252,7 @@ const server = Bun.serve({
                 leaseOwner:undefined
               });
               await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.recovered",message:"Recovered a blocked step that is still waiting for approval.",stepId:blockedStep.id,runId:blockedRun.id});
-              return Response.json({mission:await store.get(id,userId)});
+              return Response.json({mission:publicMissionResponse(await store.get(id,userId))});
             }
             if(approval?.status==="approved"){
               const outcome="An approval was accepted before execution restarted, but the blocked agent run did not durably record whether the approved action executed. The mission is paused for safety review to prevent duplicate execution.";
@@ -1286,13 +1292,13 @@ const server = Bun.serve({
             leaseOwner:undefined
           });
           await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.paused",message:"Mission paused after restart because an approval/action outcome could not be safely reconciled."});
-          return Response.json({mission:paused});
+          return Response.json({mission:publicMissionResponse(paused)});
         }
         if(steps.length>0 && steps.every(step=>step.status==="completed")){
           const recoveredResult=steps[steps.length-1]?.result??mission.result;
           const completedMission=await updateOwned({status:"completed",progress:1,steps,activeRunId:mission.activeRunId,pendingApprovalId:undefined,result:recoveredResult,leaseUntil:undefined,leaseOwner:undefined});
           await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.completed",message:"Mission completed during recovery reconciliation."});
-          return Response.json({mission:completedMission});
+          return Response.json({mission:publicMissionResponse(completedMission)});
         }
         let lastRunId=mission.activeRunId;
         let lastApproval=mission.pendingApprovalId;
@@ -1334,7 +1340,7 @@ const server = Bun.serve({
             if(!hasPending && !hasFailed && !hasBlocked && steps.length>0){
               mission=await updateOwned({status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
               await emit("mission.completed","Mission completed.");
-              return Response.json({mission});
+              return Response.json({mission:publicMissionResponse(mission)});
             }
             break;
           }
@@ -1518,22 +1524,22 @@ const server = Bun.serve({
 
           if(run.status==="waiting_approval"){
             mission=await updateOwned({status:"waiting_approval",progress,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
-            return Response.json({mission});
+            return Response.json({mission:publicMissionResponse(mission)});
           }
           if(run.status==="failed"){
             mission=await updateOwned({status:"running",progress,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
-            return Response.json({mission});
+            return Response.json({mission:publicMissionResponse(mission)});
           }
           if(progress>=1){
             mission=await updateOwned({status:"completed",progress:1,steps,activeRunId:lastRunId,pendingApprovalId:undefined,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
             await emit("mission.completed","Mission completed.");
-            return Response.json({mission});
+            return Response.json({mission:publicMissionResponse(mission)});
           }
         }
 
         const completed=steps.filter(item=>item.status==="completed").length;
         mission=await updateOwned({status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt)});
-        return Response.json({mission});
+        return Response.json({mission:publicMissionResponse(mission)});
       }catch(error){
         try{
           const current=await store.get(id,userId);
@@ -1573,7 +1579,7 @@ const server = Bun.serve({
         }
         await addMissionEventWithRetry(store, {missionId:id,userId,type:"mission.step.retry",message:"Retry requested: "+step.title,stepId});
         await store.releaseLeaseIfOwned(id,userId,executionOwner);
-        return Response.json({mission:await store.get(id,userId)});
+        return Response.json({mission:publicMissionResponse(await store.get(id,userId))});
       }catch(error){return Response.json({error:"Mission retry failed"},{status:400});}
     }
 
@@ -1586,9 +1592,9 @@ const server = Bun.serve({
         const {getMissionStore}=await import("../../missions/src");
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
-        if(["completed","waiting_approval","paused","cancelled"].includes(mission.status))return Response.json({mission});
+        if(["completed","waiting_approval","paused","cancelled"].includes(mission.status))return Response.json({mission:publicMissionResponse(mission)});
         const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
-        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner!==requestedWorkerId)return Response.json({mission});
+        if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner!==requestedWorkerId)return Response.json({mission:publicMissionResponse(mission)});
         if(mission.leaseUntil && Date.parse(mission.leaseUntil)>Date.now() && mission.leaseOwner===requestedWorkerId){
           const next=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
           return next;
@@ -1650,7 +1656,7 @@ const server = Bun.serve({
           if(mission.steps.length>maxSteps || existingToolCount>=maxTools || existingDurationMs>=maxDurationMs){
             await emit("mission.budget.exceeded","Mission approval continuation cannot start because the mission budget is already exhausted.",mission.activeRunId,{toolCount:existingToolCount,maxTools,executionDurationMs:existingDurationMs,maxDurationMs});
             const paused=await updateOwned({status:"paused",pendingApprovalId:mission.pendingApprovalId,toolCallsUsed:existingToolCount,executionDurationMs:existingDurationMs,leaseUntil:undefined,leaseOwner:undefined});
-            return Response.json({mission:paused,budgetExceeded:true},{status:409});
+            return Response.json({mission:publicMissionResponse(paused),budgetExceeded:true},{status:409});
           }
 
           const continuationStartedAt=Date.now();
@@ -1695,7 +1701,7 @@ const server = Bun.serve({
               result:"Mission approval continuation failed"
             });
             await emit("mission.failed","Approval continuation failed: "+("Unknown error"),mission.activeRunId,{executionDurationMs});
-            return Response.json({mission:failed},{status:500});
+            return Response.json({mission:publicMissionResponse(failed)},{status:500});
           }
 
           clearInterval(leaseRenewTimer);
