@@ -134,6 +134,13 @@ function decodeBoundedUserId(value: string): string | null {
   return decoded;
 }
 
+function decodeBoundedResourceId(value: string): string | null {
+  let decoded: string;
+  try { decoded = decodeURIComponent(value); } catch { return null; }
+  if (!decoded || decoded.length > 200 || new TextEncoder().encode(decoded).byteLength > 512 || /[\u0000-\u001f\u007f]/.test(decoded)) return null;
+  return decoded;
+}
+
 async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_HTTP_BODY_BYTES): Promise<unknown> {
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {
@@ -818,7 +825,7 @@ const server = Bun.serve({
     const missionUsers = url.pathname.match(/^\/v1\/missions\/users\/([^/]+)$/);
     if (missionUsers && request.method === "GET") {
       const { getMissionStore } = await import("../../missions/src");
-      return Response.json({ missions: await getMissionStore().list(decodeURIComponent(missionUsers[1])) });
+      return Response.json({ missions: await getMissionStore().list(decodeBoundedUserId(missionUsers[1])) });
     }
 
     if (missionUsers && request.method === "POST") {
@@ -831,6 +838,7 @@ const server = Bun.serve({
         const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
       const budgetProfile=body?.budgetProfile==="extended"||body?.budgetProfile==="intensive"?body.budgetProfile:"standard";
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
+        if(!mission)return Response.json({error:"Mission limit reached for this user; pause, complete, or delete an existing mission before creating another."},{status:429});
       await getMissionStore().addEvent({missionId:mission.id,userId,type:"mission.created",message:"Mission created: "+goal});
         return Response.json({mission},{status:201});
       } catch(error){return Response.json({error:"Mission creation failed"},{status:400});}
@@ -841,7 +849,7 @@ const server = Bun.serve({
       const {getMissionStore}=await import("../../missions/src");
       const userId=decodeBoundedUserId(missionControlMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionControlMatch[2]);
+      const id=decodeBoundedResourceId(missionControlMatch[2]);
       const action=missionControlMatch[3];
       const store=getMissionStore();
       const mission=await store.get(id,userId);
@@ -910,8 +918,8 @@ const server = Bun.serve({
     if(missionRerunStepMatch && request.method==="POST"){
       const userId=decodeBoundedUserId(missionRerunStepMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionRerunStepMatch[2]);
-      const stepId=decodeURIComponent(missionRerunStepMatch[3]);
+      const id=decodeBoundedResourceId(missionRerunStepMatch[2]);
+      const stepId=decodeBoundedResourceId(missionRerunStepMatch[3]);
       const store=(await import("../../missions/src")).getMissionStore();
       const source=await store.get(id,userId);
       if(!source)return Response.json({error:"Mission not found"},{status:404});
@@ -939,6 +947,7 @@ const server = Bun.serve({
         progress:steps.length?completedBefore/steps.length:0,
         steps
       });
+      if(!rerunMission)return Response.json({error:"Mission limit reached for this user; pause, complete, or delete an existing mission before creating another."},{status:429});
       await addMissionEventWithRetry(store, {
         missionId:rerunMission.id,
         userId,
@@ -953,7 +962,7 @@ const server = Bun.serve({
     if(missionRerunMatch && request.method==="POST"){
       const userId=decodeBoundedUserId(missionRerunMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionRerunMatch[2]);
+      const id=decodeBoundedResourceId(missionRerunMatch[2]);
       const store=(await import("../../missions/src")).getMissionStore();
       const source=await store.get(id,userId);
       if(!source)return Response.json({error:"Mission not found"},{status:404});
@@ -968,7 +977,7 @@ const server = Bun.serve({
     if(missionEventStreamMatch && request.method==="GET"){
       const userId=decodeBoundedUserId(missionEventStreamMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionEventStreamMatch[2]);
+      const id=decodeBoundedResourceId(missionEventStreamMatch[2]);
       const {getMissionStore}=await import("../../missions/src");
       const mission=await getMissionStore().get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -999,7 +1008,7 @@ const server = Bun.serve({
       const {getMissionStore}=await import("../../missions/src");
       const userId=decodeBoundedUserId(missionEventsMatch[1]);
       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionEventsMatch[2]);
+      const id=decodeBoundedResourceId(missionEventsMatch[2]);
       const mission=await getMissionStore().get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       const limit=Number(url.searchParams.get("limit")??"100");
@@ -1008,7 +1017,7 @@ const server = Bun.serve({
 
     if(missionMatch && request.method==="GET"){
       const {getMissionStore}=await import("../../missions/src");
-      const mission=await getMissionStore().get(decodeURIComponent(missionMatch[2]),decodeURIComponent(missionMatch[1]));
+      const mission=await getMissionStore().get(decodeBoundedResourceId(missionMatch[2]),decodeBoundedUserId(missionMatch[1]));
       return mission?Response.json({mission}):Response.json({error:"Mission not found"},{status:404});
     }
 
@@ -1017,7 +1026,7 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionPriorityMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionPriorityMatch[2]);
+        const id=decodeBoundedResourceId(missionPriorityMatch[2]);
         const body=await parseBoundedJson(request);
         const priority=body?.priority;
         if(priority!=="low"&&priority!=="normal"&&priority!=="high")return Response.json({error:"priority must be low, normal, or high"},{status:400});
@@ -1037,7 +1046,7 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionBudgetProfileMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionBudgetProfileMatch[2]);
+        const id=decodeBoundedResourceId(missionBudgetProfileMatch[2]);
         const body=await parseBoundedJson(request);
         const budgetProfile=body?.budgetProfile;
         if(budgetProfile!=="standard"&&budgetProfile!=="extended"&&budgetProfile!=="intensive")return Response.json({error:"invalid budget profile"},{status:400});
@@ -1057,7 +1066,7 @@ const server = Bun.serve({
       const store=getMissionStore();
       const userId=decodeBoundedUserId(missionMatch[1]);
        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-      const id=decodeURIComponent(missionMatch[2]);
+      const id=decodeBoundedResourceId(missionMatch[2]);
       const mission=await store.get(id,userId);
       if(!mission)return Response.json({error:"Mission not found"},{status:404});
       const deleted=await store.deleteIfIdle(id,userId);
@@ -1069,7 +1078,7 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionMatch[1]);
        if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionMatch[2]);
+        const id=decodeBoundedResourceId(missionMatch[2]);
         const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
         const missionEvaluator=new OpenAIProvider();
         const store=getMissionStore();
