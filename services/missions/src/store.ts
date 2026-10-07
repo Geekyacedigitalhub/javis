@@ -11,6 +11,8 @@ const MAX_STEP_RESULT_CHARS=16_000;
 const MAX_MISSION_RESULT_CHARS=16_000;
 const MAX_EVENT_MESSAGE_CHARS=4_000;
 const MAX_EVENT_METADATA_BYTES=32*1024;
+const MAX_MISSION_EVENTS=10_000;
+const MAX_MISSION_EVENT_AGE_MS=90*24*60*60*1000;
 const MAX_RESOURCE_ID_CHARS=200;
 const MAX_RESOURCE_ID_BYTES=512;
 
@@ -234,13 +236,22 @@ export class PostgresMissionStore implements FroshMissionStore {
       const step=mission[0].steps.find(item=>item.id===input.stepId);
       if(step?.runId && step.runId!==input.runId) throw new Error("Agent run does not match mission step for event");
     }
-    const rows=await this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`INSERT INTO frosh_mission_events(id,mission_id,user_id,type,message,step_id,run_id,metadata)
-      SELECT $1,m.id,$3,$4,$5,$6,$7,$8::jsonb
-      FROM frosh_missions m
-      WHERE m.id=$2 AND m.user_id=$3
-      RETURNING id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt"`,[id,input.missionId,input.userId,input.type,input.message,input.stepId??null,input.runId??null,input.metadata?JSON.stringify(input.metadata):null]);
-    if(!rows[0]) throw new Error("Mission not found for event");
-    return rows[0];
+    const rows=await this.sql.begin(async(tx)=>{
+      await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))",[input.missionId]);
+      const inserted=await tx.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`INSERT INTO frosh_mission_events(id,mission_id,user_id,type,message,step_id,run_id,metadata)
+        SELECT $1,m.id,$3,$4,$5,$6,$7,$8::jsonb
+        FROM frosh_missions m
+        WHERE m.id=$2 AND m.user_id=$3
+        RETURNING id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt"`,[id,input.missionId,input.userId,input.type,input.message,input.stepId??null,input.runId??null,input.metadata?JSON.stringify(input.metadata):null]);
+      if(!inserted[0]) throw new Error("Mission not found for event");
+      await tx.unsafe(`WITH ranked AS (
+        SELECT id,ROW_NUMBER() OVER (ORDER BY created_at DESC,id DESC) AS row_num
+        FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2
+      ) DELETE FROM frosh_mission_events e USING ranked r
+        WHERE e.id=r.id AND (r.row_num>$3 OR e.created_at<NOW()-INTERVAL '90 days')`,[input.missionId,input.userId,MAX_MISSION_EVENTS]);
+      return inserted[0];
+    });
+    return rows;
   }
   async listEvents(missionId:string,userId:string,limit=100){
     return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),500)]);
@@ -304,8 +315,8 @@ export class InMemoryMissionStore implements FroshMissionStore {
       if(step && step.runId && step.runId!==input.runId) throw new Error("Agent run does not match mission step for event");
     }
     const event={...input,id:crypto.randomUUID(),createdAt:new Date().toISOString()};
-    const list=this.events.get(input.missionId)??[];
-    list.unshift(event);
+    const cutoff=Date.now()-MAX_MISSION_EVENT_AGE_MS;
+    const list=[event,...(this.events.get(input.missionId)??[])].filter(item=>Date.parse(item.createdAt)>=cutoff).slice(0,MAX_MISSION_EVENTS);
     this.events.set(input.missionId,list);
     return event;
   }
