@@ -35,7 +35,6 @@ export interface FroshMission {
   updatedAt: string;
 }
 
-
 export type FroshMissionEventType =
   | "mission.created"
   | "mission.updated"
@@ -69,7 +68,7 @@ export interface FroshMissionEvent {
 export interface FroshMissionStore {
   list(userId: string): Promise<FroshMission[]>;
   get(id: string, userId: string): Promise<FroshMission | null>;
-  create(input: Omit<FroshMission, "id" | "createdAt" | "updatedAt">): Promise<FroshMission>;
+  create(input: Omit<FroshMission, "id" | "createdAt" | "updatedAt">): Promise<FroshMission | null>;
   update(id: string, userId: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission>;
   updateOwned(id: string, userId: string, leaseOwner: string, patch: Partial<Omit<FroshMission, "id" | "createdAt" | "updatedAt">>): Promise<FroshMission | null>;
   delete(id: string, userId: string): Promise<boolean>;
