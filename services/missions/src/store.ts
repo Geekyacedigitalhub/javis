@@ -21,7 +21,7 @@ const MAX_EXECUTION_DURATION_MS=7*24*60*60*1000;
 
 export const MISSION_LEASE_MS=2*60*1000;
 export const MISSION_LEASE_HEARTBEAT_MS=30*1000;
-const MISSION_LEASE_SQL="${MISSION_LEASE_SQL}";
+const MISSION_LEASE_SQL="NOW()+INTERVAL '2 minutes'";
 
 function boundedText(value:string,label:string,maxChars:number,maxBytes:number):string{
   if(typeof value!=="string"||value.length>maxChars||new TextEncoder().encode(value).byteLength>maxBytes||/[\\u0000-\\u001f\\u007f]/.test(value))throw new Error(label+" exceeds safety bounds");
