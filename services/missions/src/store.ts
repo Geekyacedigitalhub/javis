@@ -40,6 +40,9 @@ function validateMissionSteps(steps:FroshMission["steps"]):FroshMission["steps"]
     ids.add(stepId);
     const retryCount=step.retryCount??0;
     if(!Number.isInteger(retryCount)||retryCount<0||retryCount>MAX_STEP_RETRY_COUNT)throw new Error("Mission step retry count exceeds safety bounds");
+    if(step.status!=="pending"&&step.status!=="running"&&step.status!=="completed"&&step.status!=="blocked"&&step.status!=="failed")throw new Error("Invalid mission step status");
+    if(typeof step.createdAt!=="string"||!Number.isFinite(Date.parse(step.createdAt)))throw new Error("Invalid mission step creation time");
+    if(typeof step.updatedAt!=="string"||!Number.isFinite(Date.parse(step.updatedAt)))throw new Error("Invalid mission step update time");
     if(step.nextRetryAt!==undefined&&(!Number.isFinite(Date.parse(step.nextRetryAt))))throw new Error("Invalid mission step retry time");
     const normalized={...step,
       id:stepId,
@@ -54,6 +57,9 @@ function validateMissionSteps(steps:FroshMission["steps"]):FroshMission["steps"]
 }
 function validateMissionInput(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){
   boundedId(input.userId,"Mission user ID");
+  if(!["planning","running","waiting_approval","completed","failed","paused","cancelled"].includes(input.status))throw new Error("Invalid mission status");
+  if(!["low","normal","high"].includes(input.priority))throw new Error("Invalid mission priority");
+  if(!["standard","extended","intensive"].includes(input.budgetProfile))throw new Error("Invalid mission budget profile");
   boundedText(input.goal,"Mission goal",MAX_MISSION_GOAL_CHARS,MAX_MISSION_GOAL_BYTES);
   validateMissionSteps(input.steps);
   if(input.activeRunId!==undefined)boundedId(input.activeRunId,"Active run ID");
@@ -65,6 +71,9 @@ function validateMissionInput(input:Omit<FroshMission,"id"|"createdAt"|"updatedA
   if(input.executionDurationMs!==undefined&&(!Number.isInteger(input.executionDurationMs)||input.executionDurationMs<0||input.executionDurationMs>MAX_EXECUTION_DURATION_MS))throw new Error("Mission execution duration exceeds safety bounds");
 }
 function validateMissionPatch(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
+  if(patch.status!==undefined&&!["planning","running","waiting_approval","completed","failed","paused","cancelled"].includes(patch.status))throw new Error("Invalid mission status");
+  if(patch.priority!==undefined&&!["low","normal","high"].includes(patch.priority))throw new Error("Invalid mission priority");
+  if(patch.budgetProfile!==undefined&&!["standard","extended","intensive"].includes(patch.budgetProfile))throw new Error("Invalid mission budget profile");
   if(patch.goal!==undefined)boundedText(patch.goal,"Mission goal",MAX_MISSION_GOAL_CHARS,MAX_MISSION_GOAL_BYTES);
   if(patch.steps!==undefined)validateMissionSteps(patch.steps);
   if(patch.activeRunId!==undefined)boundedId(patch.activeRunId,"Active run ID");
