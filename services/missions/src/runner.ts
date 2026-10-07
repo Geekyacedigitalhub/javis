@@ -5,6 +5,7 @@ let stopping=false;
 let tickRunning=false;
 let tickTimer:ReturnType<typeof setInterval>|undefined;
 let activeTick:Promise<void>|undefined;
+let stopPromise:Promise<void>|undefined;
 let signalHandlersInstalled=false;
 
 async function handleProcessShutdown():Promise<void>{
@@ -123,23 +124,33 @@ function scheduleTick(){
 }
 
 export function startMissionRunner(){
-  if(started||stopping)return;
+  if(started||stopping||stopPromise)return;
   started=true;
   installProcessShutdownHandlers();
   scheduleTick();
   tickTimer=setInterval(scheduleTick,10_000);
 }
 
-export async function stopMissionRunner(){
-  if(!started)return;
-  stopping=true;
-  if(tickTimer){
-    clearInterval(tickTimer);
-    tickTimer=undefined;
-  }
-  if(activeTick)await activeTick;
-  started=false;
-  stopping=false;
-  removeProcessShutdownHandlers();
-  await closeMissionStore();
+export function stopMissionRunner():Promise<void>{
+  if(stopPromise)return stopPromise;
+  if(!started)return Promise.resolve();
+
+  const promise=(async()=>{
+    stopping=true;
+    if(tickTimer){
+      clearInterval(tickTimer);
+      tickTimer=undefined;
+    }
+    if(activeTick)await activeTick;
+    started=false;
+    removeProcessShutdownHandlers();
+    await closeMissionStore();
+    stopping=false;
+  })();
+
+  stopPromise=promise;
+  void promise.finally(()=>{
+    if(stopPromise===promise)stopPromise=undefined;
+  });
+  return promise;
 }
