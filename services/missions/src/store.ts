@@ -86,31 +86,54 @@ export class PostgresMissionStore implements FroshMissionStore {
   }
   async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
     validateMissionPatch(patch);
-    const fields:string[]=[];
-    const values:unknown[]=[id,userId];
-    const add=(column:string,value:unknown)=>{
-      fields.push(column+"=$"+String(values.length+1));
-      values.push(value);
+    const activeStatus=patch.status!==undefined&&!["completed","failed","cancelled"].includes(patch.status);
+    const current=patch.status!==undefined&&activeStatus?await this.get(id,userId):null;
+    const needsQuotaFence=Boolean(current&&["completed","failed","cancelled"].includes(current.status));
+    const apply=async(executor:Sql)=>{
+      const fields:string[]=[];
+      const values:unknown[]=[id,userId];
+      const add=(column:string,value:unknown)=>{
+        fields.push(column+"=$"+String(values.length+1));
+        values.push(value);
+      };
+      if(Object.prototype.hasOwnProperty.call(patch,"goal"))add("goal",patch.goal);
+      if(Object.prototype.hasOwnProperty.call(patch,"status"))add("status",patch.status);
+      if(Object.prototype.hasOwnProperty.call(patch,"priority"))add("priority",patch.priority);
+      if(Object.prototype.hasOwnProperty.call(patch,"budgetProfile"))add("budget_profile",patch.budgetProfile);
+      if(Object.prototype.hasOwnProperty.call(patch,"progress"))add("progress",patch.progress);
+      if(Object.prototype.hasOwnProperty.call(patch,"steps"))add("steps",JSON.stringify(patch.steps));
+      if(Object.prototype.hasOwnProperty.call(patch,"activeRunId"))add("active_run_id",patch.activeRunId??null);
+      if(Object.prototype.hasOwnProperty.call(patch,"pendingApprovalId"))add("pending_approval_id",patch.pendingApprovalId??null);
+      if(Object.prototype.hasOwnProperty.call(patch,"leaseUntil"))add("lease_until",patch.leaseUntil??null);
+      if(Object.prototype.hasOwnProperty.call(patch,"leaseOwner"))add("lease_owner",patch.leaseOwner??null);
+      if(Object.prototype.hasOwnProperty.call(patch,"result"))add("result",patch.result??null);
+      if(Object.prototype.hasOwnProperty.call(patch,"toolCallsUsed"))add("tool_calls_used",patch.toolCallsUsed);
+      if(Object.prototype.hasOwnProperty.call(patch,"executionDurationMs"))add("execution_duration_ms",patch.executionDurationMs);
+      const setClause=fields.map(field=>field.startsWith("steps=")?field+"::jsonb":field).join(",");
+      const sql=setClause
+        ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`
+        : `UPDATE frosh_missions SET updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`;
+      const rows=await executor.unsafe<FroshMission[]>(sql,values);
+      return rows[0]??null;
     };
-    if(Object.prototype.hasOwnProperty.call(patch,"goal"))add("goal",patch.goal);
-    if(Object.prototype.hasOwnProperty.call(patch,"status"))add("status",patch.status);
-    if(Object.prototype.hasOwnProperty.call(patch,"priority"))add("priority",patch.priority);
-    if(Object.prototype.hasOwnProperty.call(patch,"budgetProfile"))add("budget_profile",patch.budgetProfile);
-    if(Object.prototype.hasOwnProperty.call(patch,"progress"))add("progress",patch.progress);
-    if(Object.prototype.hasOwnProperty.call(patch,"steps"))add("steps",JSON.stringify(patch.steps));
-    if(Object.prototype.hasOwnProperty.call(patch,"activeRunId"))add("active_run_id",patch.activeRunId??null);
-    if(Object.prototype.hasOwnProperty.call(patch,"pendingApprovalId"))add("pending_approval_id",patch.pendingApprovalId??null);
-    if(Object.prototype.hasOwnProperty.call(patch,"leaseUntil"))add("lease_until",patch.leaseUntil??null);
-    if(Object.prototype.hasOwnProperty.call(patch,"leaseOwner"))add("lease_owner",patch.leaseOwner??null);
-    if(Object.prototype.hasOwnProperty.call(patch,"result"))add("result",patch.result??null);
-    if(Object.prototype.hasOwnProperty.call(patch,"toolCallsUsed"))add("tool_calls_used",patch.toolCallsUsed);
-    if(Object.prototype.hasOwnProperty.call(patch,"executionDurationMs"))add("execution_duration_ms",patch.executionDurationMs);
-    const setClause=fields.map(field=>field.startsWith("steps=")?field+"::jsonb":field).join(",");
-    const sql=setClause
-      ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`
-      : `UPDATE frosh_missions SET updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`;
-    const rows=await this.sql.unsafe<FroshMission[]>(sql,values);
-    if(rows[0])return rows[0];
+    let updated:FroshMission|null=null;
+    if(needsQuotaFence){
+      const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
+      const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
+      updated=await this.sql.begin(async(tx)=>{
+        await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))",[userId]);
+        const locked=await tx.unsafe<{status:FroshMission["status"]}[]>("SELECT status FROM frosh_missions WHERE id=$1 AND user_id=$2 FOR UPDATE",[id,userId]);
+        if(!locked[0])return null;
+        if(["completed","failed","cancelled"].includes(locked[0].status)){
+          const countRows=await tx.unsafe<{count:string}[]>("SELECT COUNT(*)::text AS count FROM frosh_missions WHERE user_id=$1 AND status NOT IN ('completed','failed','cancelled')",[userId]);
+          if(Number(countRows[0]?.count??0)>=maxActive)throw new Error("Mission limit reached for this user");
+        }
+        return apply(tx);
+      });
+    }else{
+      updated=await apply(this.sql);
+    }
+    if(updated)return updated;
     const existing=await this.get(id,userId);
     if(!existing)throw new Error("Mission not found");
     throw new Error("Mission is currently executing");
@@ -152,17 +175,37 @@ export class PostgresMissionStore implements FroshMissionStore {
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET budget_profile=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) AND status NOT IN ('completed','cancelled') RETURNING ${SELECT_FIELDS}`,[id,userId,budgetProfile]);
     return rows[0]??null;
   }
-  async recoverFailedIfIdle(id:string,userId:string,leaseOwner:string,steps:FroshMission["steps"]){validateMissionSteps(steps);boundedId(leaseOwner,"Lease owner");
-    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',steps=$4::jsonb,lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='failed' AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner,JSON.stringify(steps)]);
-    return rows[0]??null;
+  async recoverFailedIfIdle(id:string,userId:string,leaseOwner:string,steps:FroshMission["steps"]){
+    validateMissionSteps(steps);boundedId(leaseOwner,"Lease owner");
+    const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
+    const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
+    return this.sql.begin(async(tx)=>{
+      await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))",[userId]);
+      const countRows=await tx.unsafe<{count:string}[]>("SELECT COUNT(*)::text AS count FROM frosh_missions WHERE user_id=$1 AND status NOT IN ('completed','failed','cancelled')",[userId]);
+      if(Number(countRows[0]?.count??0)>=maxActive)return null;
+      const rows=await tx.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',steps=$4::jsonb,lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='failed' AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner,JSON.stringify(steps)]);
+      return rows[0]??null;
+    });
   }
   async claim(id:string,userId:string,leaseOwner:string){
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status IN ('planning','running') AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
     return rows[0]??null;
   }
   async claimStepRetry(id:string,userId:string,leaseOwner:string){
-    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status NOT IN ('completed','cancelled','waiting_approval') AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
-    return rows[0]??null;
+    boundedId(leaseOwner,"Lease owner");
+    const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
+    const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
+    return this.sql.begin(async(tx)=>{
+      await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))",[userId]);
+      const current=await tx.unsafe<{status:FroshMission["status"]}[]>("SELECT status FROM frosh_missions WHERE id=$1 AND user_id=$2 FOR UPDATE",[id,userId]);
+      if(!current[0]||["completed","cancelled","waiting_approval"].includes(current[0].status))return null;
+      if(current[0].status==="failed"){
+        const countRows=await tx.unsafe<{count:string}[]>("SELECT COUNT(*)::text AS count FROM frosh_missions WHERE user_id=$1 AND status NOT IN ('completed','failed','cancelled')",[userId]);
+        if(Number(countRows[0]?.count??0)>=maxActive)return null;
+      }
+      const rows=await tx.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status NOT IN ('completed','cancelled','waiting_approval') AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
+      return rows[0]??null;
+    });
   }
   async claimApprovalContinuation(id:string,userId:string,leaseOwner:string){
     const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET status='running',lease_until=NOW()+INTERVAL '2 minutes',lease_owner=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND status='waiting_approval' AND pending_approval_id IS NOT NULL AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`,[id,userId,leaseOwner]);
@@ -229,6 +272,13 @@ export class InMemoryMissionStore implements FroshMissionStore {
     const x=await this.get(id,userId);
     if(!x)throw new Error("Mission not found");
     if(x.leaseUntil&&Date.parse(x.leaseUntil)>Date.now())throw new Error("Mission is currently executing");
+    const nextStatus=patch.status??x.status;
+    if(["completed","failed","cancelled"].includes(x.status)&&!["completed","failed","cancelled"].includes(nextStatus)){
+      const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
+      const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
+      const activeCount=[...this.items.values()].filter((mission)=>mission.userId===userId&&!["completed","failed","cancelled"].includes(mission.status)).length;
+      if(activeCount>=maxActive)throw new Error("Mission limit reached for this user");
+    }
     const next={...x,...patch,updatedAt:new Date().toISOString()};
     this.items.set(id,next);
     return next;
@@ -236,9 +286,9 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async updateOwned(id:string,userId:string,leaseOwner:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){validateMissionPatch(patch);boundedId(leaseOwner,"Lease owner");const current=await this.get(id,userId);if(!current||current.leaseOwner!==leaseOwner||!current.leaseUntil||Date.parse(current.leaseUntil)<=Date.now())return null;const next={...current,...patch,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async updatePriorityIfIdle(id:string,userId:string,priority:FroshMission["priority"]){const mission=await this.get(id,userId);if(!mission||["completed","cancelled"].includes(mission.status)||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const next={...mission,priority,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async updateBudgetProfileIfIdle(id:string,userId:string,budgetProfile:FroshMission["budgetProfile"]){const mission=await this.get(id,userId);if(!mission||["completed","cancelled"].includes(mission.status)||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const next={...mission,budgetProfile,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
-  async recoverFailedIfIdle(id:string,userId:string,leaseOwner:string,steps:FroshMission["steps"]){validateMissionSteps(steps);boundedId(leaseOwner,"Lease owner");const mission=await this.get(id,userId);if(!mission||mission.status!=="failed"||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const next={...mission,status:"running" as const,steps,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
+  async recoverFailedIfIdle(id:string,userId:string,leaseOwner:string,steps:FroshMission["steps"]){validateMissionSteps(steps);boundedId(leaseOwner,"Lease owner");const mission=await this.get(id,userId);if(!mission||mission.status!=="failed"||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;const activeCount=[...this.items.values()].filter((item)=>item.userId===userId&&!["completed","failed","cancelled"].includes(item.status)).length;if(activeCount>=maxActive)return null;const next={...mission,status:"running" as const,steps,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async claim(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||!["planning","running"].includes(mission.status))return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
-  async claimStepRetry(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||["completed","cancelled","waiting_approval"].includes(mission.status))return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
+  async claimStepRetry(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||["completed","cancelled","waiting_approval"].includes(mission.status))return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;if(mission.status==="failed"){const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;const activeCount=[...this.items.values()].filter((item)=>item.userId===userId&&!["completed","failed","cancelled"].includes(item.status)).length;if(activeCount>=maxActive)return null;}const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async claimApprovalContinuation(id:string,userId:string,leaseOwner:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="waiting_approval"||!mission.pendingApprovalId)return null;if(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now())return null;const next={...mission,status:"running" as const,leaseUntil:new Date(Date.now()+120000).toISOString(),leaseOwner,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async pauseIfIdle(id:string,userId:string){const mission=await this.get(id,userId);if(!mission||["completed","failed","cancelled"].includes(mission.status)||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const next={...mission,status:"paused" as const,leaseUntil:undefined,leaseOwner:undefined,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async resumeIfPaused(id:string,userId:string){const mission=await this.get(id,userId);if(!mission||mission.status!=="paused")return null;const next={...mission,status:(mission.pendingApprovalId?"waiting_approval":"running") as FroshMission["status"],result:undefined,leaseUntil:undefined,leaseOwner:undefined,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
