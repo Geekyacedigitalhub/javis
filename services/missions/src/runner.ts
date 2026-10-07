@@ -9,7 +9,12 @@ let stopPromise:Promise<void>|undefined;
 let signalHandlersInstalled=false;
 
 async function handleProcessShutdown():Promise<void>{
-  await stopMissionRunner();
+  try{
+    await stopMissionRunner();
+  }catch(error){
+    const errorName=error instanceof Error&&error.name?error.name:"UnknownError";
+    console.error("FROSH mission runner shutdown failed",errorName);
+  }
 }
 
 function installProcessShutdownHandlers():void{
@@ -137,20 +142,26 @@ export function stopMissionRunner():Promise<void>{
 
   const promise=(async()=>{
     stopping=true;
-    if(tickTimer){
-      clearInterval(tickTimer);
-      tickTimer=undefined;
+    try{
+      if(tickTimer){
+        clearInterval(tickTimer);
+        tickTimer=undefined;
+      }
+      if(activeTick)await activeTick;
+      started=false;
+      removeProcessShutdownHandlers();
+      await closeMissionStore();
+    }finally{
+      started=false;
+      stopping=false;
+      removeProcessShutdownHandlers();
     }
-    if(activeTick)await activeTick;
-    started=false;
-    removeProcessShutdownHandlers();
-    await closeMissionStore();
-    stopping=false;
   })();
 
   stopPromise=promise;
-  void promise.finally(()=>{
-    if(stopPromise===promise)stopPromise=undefined;
-  });
+  void promise.then(
+    ()=>{if(stopPromise===promise)stopPromise=undefined;},
+    ()=>{if(stopPromise===promise)stopPromise=undefined;}
+  );
   return promise;
 }
