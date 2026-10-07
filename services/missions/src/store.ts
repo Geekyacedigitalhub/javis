@@ -68,7 +68,22 @@ export class PostgresMissionStore implements FroshMissionStore {
   constructor(private readonly sql:Sql){}
   async list(userId:string){return this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE user_id=$1 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC`,[userId]);}
   async get(id:string,userId:string){const rows=await this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE id=$1 AND user_id=$2 LIMIT 1`,[id,userId]);return rows[0]??null;}
-  async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){validateMissionInput(input);const id=crypto.randomUUID();const rows=await this.sql.unsafe<FroshMission[]>(`INSERT INTO frosh_missions(id,user_id,goal,status,priority,budget_profile,progress,steps,active_run_id,pending_approval_id,lease_until,lease_owner,result,tool_calls_used,execution_duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14) RETURNING ${SELECT_FIELDS}`,[id,input.userId,input.goal,input.status,input.priority,input.budgetProfile,input.progress,JSON.stringify(input.steps),input.activeRunId??null,input.pendingApprovalId??null,input.leaseUntil??null,input.leaseOwner??null,input.result??null,input.toolCallsUsed??0,input.executionDurationMs??0]);return rows[0];}
+  async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){
+    validateMissionInput(input);
+    const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
+    const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
+    const id=crypto.randomUUID();
+    return this.sql.begin(async(tx)=>{
+      await tx.unsafe("SELECT pg_advisory_xact_lock(hashtext($1))",[input.userId]);
+      const countRows=await tx.unsafe<{count:string}[]>(
+        "SELECT COUNT(*)::text AS count FROM frosh_missions WHERE user_id=$1 AND status NOT IN ('completed','failed','cancelled')",
+        [input.userId]
+      );
+      if(Number(countRows[0]?.count??0)>=maxActive)throw new Error("Mission limit reached for this user");
+      const rows=await tx.unsafe<FroshMission[]>(`INSERT INTO frosh_missions(id,user_id,goal,status,priority,budget_profile,progress,steps,active_run_id,pending_approval_id,lease_until,lease_owner,result,tool_calls_used,execution_duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14) RETURNING ${SELECT_FIELDS}`,[id,input.userId,input.goal,input.status,input.priority,input.budgetProfile,input.progress,JSON.stringify(input.steps),input.activeRunId??null,input.pendingApprovalId??null,input.leaseUntil??null,input.leaseOwner??null,input.result??null,input.toolCallsUsed??0,input.executionDurationMs??0]);
+      return rows[0];
+    });
+  }
   async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
     validateMissionPatch(patch);
     const fields:string[]=[];
@@ -198,7 +213,17 @@ export class InMemoryMissionStore implements FroshMissionStore {
   private events=new Map<string,import("../../../packages/types/src/mission").FroshMissionEvent[]>();
   async list(userId:string){return [...this.items.values()].filter(x=>x.userId===userId).sort((a,b)=>{const rank=(p:string)=>p==="high"?0:p==="normal"?1:2;return rank(a.priority)-rank(b.priority)||Date.parse(b.updatedAt)-Date.parse(a.updatedAt);});}
   async get(id:string,userId:string){const x=this.items.get(id);return x?.userId===userId?x:null;}
-  async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){validateMissionInput(input);const now=new Date().toISOString();const x={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};this.items.set(x.id,x);return x;}
+  async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){
+    validateMissionInput(input);
+    const configuredLimit=Number(process.env.FROSH_MAX_ACTIVE_MISSIONS_PER_USER??50);
+    const maxActive=Number.isFinite(configuredLimit)?Math.min(500,Math.max(1,Math.floor(configuredLimit))):50;
+    const activeCount=[...this.items.values()].filter((mission)=>mission.userId===input.userId&&!["completed","failed","cancelled"].includes(mission.status)).length;
+    if(activeCount>=maxActive)throw new Error("Mission limit reached for this user");
+    const now=new Date().toISOString();
+    const x={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};
+    this.items.set(x.id,x);
+    return x;
+  }
   async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
     validateMissionPatch(patch);
     const x=await this.get(id,userId);
