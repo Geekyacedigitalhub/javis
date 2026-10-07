@@ -15,6 +15,9 @@ const MAX_MISSION_EVENTS=10_000;
 const MAX_MISSION_EVENT_AGE_MS=90*24*60*60*1000;
 const MAX_RESOURCE_ID_CHARS=200;
 const MAX_RESOURCE_ID_BYTES=512;
+const MAX_STEP_RETRY_COUNT=100;
+const MAX_TOOL_CALLS=1_000_000;
+const MAX_EXECUTION_DURATION_MS=7*24*60*60*1000;
 
 export const MISSION_LEASE_MS=2*60*1000;
 export const MISSION_LEASE_HEARTBEAT_MS=30*1000;
@@ -29,10 +32,18 @@ function boundedId(value:string,label:string):string{
 }
 function validateMissionSteps(steps:FroshMission["steps"]):FroshMission["steps"]{
   if(!Array.isArray(steps)||steps.length>MAX_MISSION_STEPS)throw new Error("Mission has too many steps");
+  const ids=new Set<string>();
   return steps.map((step)=>{
     if(!step||typeof step!=="object")throw new Error("Invalid mission step");
+    const stepId=boundedId(step.id,"Mission step ID");
+    if(ids.has(stepId))throw new Error("Mission contains duplicate step IDs");
+    ids.add(stepId);
+    const retryCount=step.retryCount??0;
+    if(!Number.isInteger(retryCount)||retryCount<0||retryCount>MAX_STEP_RETRY_COUNT)throw new Error("Mission step retry count exceeds safety bounds");
+    if(step.nextRetryAt!==undefined&&(!Number.isFinite(Date.parse(step.nextRetryAt))))throw new Error("Invalid mission step retry time");
     const normalized={...step,
-      id:boundedId(step.id,"Mission step ID"),
+      id:stepId,
+      retryCount,
       title:boundedText(step.title,"Mission step title",MAX_STEP_TITLE_CHARS,2*1024),
       ...(step.context!==undefined?{context:boundedText(step.context,"Mission step context",MAX_STEP_CONTEXT_CHARS,48*1024)}:{}),
       ...(step.result!==undefined?{result:boundedText(step.result,"Mission step result",MAX_STEP_RESULT_CHARS,64*1024)}:{}),
@@ -49,6 +60,9 @@ function validateMissionInput(input:Omit<FroshMission,"id"|"createdAt"|"updatedA
   if(input.pendingApprovalId!==undefined)boundedId(input.pendingApprovalId,"Pending approval ID");
   if(input.leaseOwner!==undefined)boundedId(input.leaseOwner,"Lease owner");
   if(input.result!==undefined)boundedText(input.result,"Mission result",MAX_MISSION_RESULT_CHARS,64*1024);
+  if(!Number.isFinite(input.progress)||input.progress<0||input.progress>100)throw new Error("Mission progress exceeds safety bounds");
+  if(input.toolCallsUsed!==undefined&&(!Number.isInteger(input.toolCallsUsed)||input.toolCallsUsed<0||input.toolCallsUsed>MAX_TOOL_CALLS))throw new Error("Mission tool call count exceeds safety bounds");
+  if(input.executionDurationMs!==undefined&&(!Number.isInteger(input.executionDurationMs)||input.executionDurationMs<0||input.executionDurationMs>MAX_EXECUTION_DURATION_MS))throw new Error("Mission execution duration exceeds safety bounds");
 }
 function validateMissionPatch(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
   if(patch.goal!==undefined)boundedText(patch.goal,"Mission goal",MAX_MISSION_GOAL_CHARS,MAX_MISSION_GOAL_BYTES);
@@ -57,6 +71,9 @@ function validateMissionPatch(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"
   if(patch.pendingApprovalId!==undefined)boundedId(patch.pendingApprovalId,"Pending approval ID");
   if(patch.leaseOwner!==undefined)boundedId(patch.leaseOwner,"Lease owner");
   if(patch.result!==undefined)boundedText(patch.result,"Mission result",MAX_MISSION_RESULT_CHARS,64*1024);
+  if(patch.progress!==undefined&&(!Number.isFinite(patch.progress)||patch.progress<0||patch.progress>100))throw new Error("Mission progress exceeds safety bounds");
+  if(patch.toolCallsUsed!==undefined&&(!Number.isInteger(patch.toolCallsUsed)||patch.toolCallsUsed<0||patch.toolCallsUsed>MAX_TOOL_CALLS))throw new Error("Mission tool call count exceeds safety bounds");
+  if(patch.executionDurationMs!==undefined&&(!Number.isInteger(patch.executionDurationMs)||patch.executionDurationMs<0||patch.executionDurationMs>MAX_EXECUTION_DURATION_MS))throw new Error("Mission execution duration exceeds safety bounds");
 }
 function validateMissionEvent(input:Omit<import("../../../packages/types/src/mission").FroshMissionEvent,"id"|"createdAt">){
   boundedId(input.missionId,"Mission ID");
