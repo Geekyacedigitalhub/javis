@@ -844,7 +844,7 @@ const server = Bun.serve({
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
         if(!mission)return Response.json({error:"Mission limit reached for this user; pause, complete, or delete an existing mission before creating another."},{status:429});
       await getMissionStore().addEvent({missionId:mission.id,userId,type:"mission.created",message:"Mission created: "+goal});
-        return Response.json({mission},{status:201});
+        return Response.json({mission:publicMissionResponse(mission)},{status:201});
       } catch(error){return Response.json({error:"Mission creation failed"},{status:400});}
     }
 
@@ -1330,7 +1330,7 @@ const server = Bun.serve({
           if(steps.length>maxSteps||initialDurationMs+(Date.now()-missionStartedAt)>maxDurationMs||toolCount>=maxTools){
             await emit("mission.budget.exceeded","Mission execution budget reached.");
             mission=await updateOwned({status:"paused",steps,progress:steps.length?steps.filter(item=>item.status==="completed").length/steps.length:0,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt),leaseUntil:undefined,leaseOwner:undefined});
-            return Response.json({mission,budgetExceeded:true});
+            return Response.json({mission:publicMissionResponse(mission),budgetExceeded:true});
           }
           const index=steps.findIndex(step=>step.status==="pending" && (!step.nextRetryAt || Date.parse(step.nextRetryAt)<=Date.now()));
           if(index<0){
@@ -1732,7 +1732,7 @@ const server = Bun.serve({
               leaseUntil:undefined,
               leaseOwner:undefined
             });
-            return Response.json({mission:paused,run,budgetExceeded:true});
+            return Response.json({mission:publicMissionResponse(paused),run,budgetExceeded:true});
           }
 
           const continuationStatus=run.status==="failed"
@@ -1756,7 +1756,7 @@ const server = Bun.serve({
           });
           if(updated.status==="waiting_approval"){
             await emit("mission.approval.required","Another approval is required to continue the mission.",run.id,{toolCallsUsed,executionDurationMs});
-            return Response.json({mission:updated,run});
+            return Response.json({mission:publicMissionResponse(updated),run});
           }
           if(updated.status==="running"){
             return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
