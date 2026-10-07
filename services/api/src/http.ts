@@ -1549,8 +1549,8 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionRetryMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionRetryMatch[2]);
-        const stepId=decodeURIComponent(missionRetryMatch[3]);
+        const id=decodeBoundedResourceId(missionRetryMatch[2]);
+        const stepId=decodeBoundedResourceId(missionRetryMatch[3]);
         const {getMissionStore}=await import("../../missions/src");
         const store=getMissionStore();
         const mission=await store.get(id,userId);
@@ -1582,7 +1582,7 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionRecoveryMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionRecoveryMatch[2]);
+        const id=decodeBoundedResourceId(missionRecoveryMatch[2]);
         const {getMissionStore}=await import("../../missions/src");
         const mission=await getMissionStore().get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
@@ -1620,7 +1620,7 @@ const server = Bun.serve({
       try{
         const userId=decodeBoundedUserId(missionContinueMatch[1]);
         if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeURIComponent(missionContinueMatch[2]);
+        const id=decodeBoundedResourceId(missionContinueMatch[2]);
         const {getMissionStore}=await import("../../missions/src");
         const store=getMissionStore();
         const mission=await store.get(id,userId);
