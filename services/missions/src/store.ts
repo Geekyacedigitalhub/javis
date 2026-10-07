@@ -69,7 +69,8 @@ export class PostgresMissionStore implements FroshMissionStore {
   async list(userId:string){return this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE user_id=$1 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC`,[userId]);}
   async get(id:string,userId:string){const rows=await this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE id=$1 AND user_id=$2 LIMIT 1`,[id,userId]);return rows[0]??null;}
   async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){validateMissionInput(input);const id=crypto.randomUUID();const rows=await this.sql.unsafe<FroshMission[]>(`INSERT INTO frosh_missions(id,user_id,goal,status,priority,budget_profile,progress,steps,active_run_id,pending_approval_id,lease_until,lease_owner,result,tool_calls_used,execution_duration_ms) VALUES($1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9,$10,$11,$12,$13,$14) RETURNING ${SELECT_FIELDS}`,[id,input.userId,input.goal,input.status,input.priority,input.budgetProfile,input.progress,JSON.stringify(input.steps),input.activeRunId??null,input.pendingApprovalId??null,input.leaseUntil??null,input.leaseOwner??null,input.result??null,input.toolCallsUsed??0,input.executionDurationMs??0]);return rows[0];}
-  async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){validateMissionPatch(patch);
+  async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
+    validateMissionPatch(patch);
     const fields:string[]=[];
     const values:unknown[]=[id,userId];
     const add=(column:string,value:unknown)=>{
@@ -91,11 +92,13 @@ export class PostgresMissionStore implements FroshMissionStore {
     if(Object.prototype.hasOwnProperty.call(patch,"executionDurationMs"))add("execution_duration_ms",patch.executionDurationMs);
     const setClause=fields.map(field=>field.startsWith("steps=")?field+"::jsonb":field).join(",");
     const sql=setClause
-      ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING ${SELECT_FIELDS}`
-      : `UPDATE frosh_missions SET updated_at=NOW() WHERE id=$1 AND user_id=$2 RETURNING ${SELECT_FIELDS}`;
+      ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`
+      : `UPDATE frosh_missions SET updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`;
     const rows=await this.sql.unsafe<FroshMission[]>(sql,values);
-    if(!rows[0])throw new Error("Mission not found");
-    return rows[0];
+    if(rows[0])return rows[0];
+    const existing=await this.get(id,userId);
+    if(!existing)throw new Error("Mission not found");
+    throw new Error("Mission is currently executing");
   }
   async updateOwned(id:string,userId:string,leaseOwner:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){validateMissionPatch(patch);boundedId(leaseOwner,"Lease owner");
     const fields:string[]=[];
@@ -184,7 +187,9 @@ export class PostgresMissionStore implements FroshMissionStore {
   async listEvents(missionId:string,userId:string,limit=100){
     return this.sql.unsafe<import("../../../packages/types/src/mission").FroshMissionEvent[]>(`SELECT id,mission_id AS "missionId",user_id AS "userId",type,message,step_id AS "stepId",run_id AS "runId",metadata,created_at AS "createdAt" FROM frosh_mission_events WHERE mission_id=$1 AND user_id=$2 ORDER BY created_at DESC,id DESC LIMIT $3`,[missionId,userId,Math.min(Math.max(limit,1),500)]);
   }
-  async delete(id:string,userId:string){const result=await this.sql.unsafe("DELETE FROM frosh_missions WHERE id=$1 AND user_id=$2",[id,userId]);return result.count>0;}
+  async delete(id:string,userId:string){
+    return this.deleteIfIdle(id,userId);
+  }
   async deleteIfIdle(id:string,userId:string){const result=await this.sql.unsafe("DELETE FROM frosh_missions WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW())",[id,userId]);return result.count>0;}
 }
 
@@ -194,7 +199,15 @@ export class InMemoryMissionStore implements FroshMissionStore {
   async list(userId:string){return [...this.items.values()].filter(x=>x.userId===userId).sort((a,b)=>{const rank=(p:string)=>p==="high"?0:p==="normal"?1:2;return rank(a.priority)-rank(b.priority)||Date.parse(b.updatedAt)-Date.parse(a.updatedAt);});}
   async get(id:string,userId:string){const x=this.items.get(id);return x?.userId===userId?x:null;}
   async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){validateMissionInput(input);const now=new Date().toISOString();const x={...input,id:crypto.randomUUID(),createdAt:now,updatedAt:now};this.items.set(x.id,x);return x;}
-  async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){validateMissionPatch(patch);const x=await this.get(id,userId);if(!x)throw new Error("Mission not found");const next={...x,...patch,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
+  async update(id:string,userId:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){
+    validateMissionPatch(patch);
+    const x=await this.get(id,userId);
+    if(!x)throw new Error("Mission not found");
+    if(x.leaseUntil&&Date.parse(x.leaseUntil)>Date.now())throw new Error("Mission is currently executing");
+    const next={...x,...patch,updatedAt:new Date().toISOString()};
+    this.items.set(id,next);
+    return next;
+  }
   async updateOwned(id:string,userId:string,leaseOwner:string,patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>){validateMissionPatch(patch);boundedId(leaseOwner,"Lease owner");const current=await this.get(id,userId);if(!current||current.leaseOwner!==leaseOwner||!current.leaseUntil||Date.parse(current.leaseUntil)<=Date.now())return null;const next={...current,...patch,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async updatePriorityIfIdle(id:string,userId:string,priority:FroshMission["priority"]){const mission=await this.get(id,userId);if(!mission||["completed","cancelled"].includes(mission.status)||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const next={...mission,priority,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
   async updateBudgetProfileIfIdle(id:string,userId:string,budgetProfile:FroshMission["budgetProfile"]){const mission=await this.get(id,userId);if(!mission||["completed","cancelled"].includes(mission.status)||(mission.leaseUntil&&Date.parse(mission.leaseUntil)>Date.now()))return null;const next={...mission,budgetProfile,updatedAt:new Date().toISOString()};this.items.set(id,next);return next;}
@@ -226,6 +239,6 @@ export class InMemoryMissionStore implements FroshMissionStore {
     if(!mission)return [];
     return (this.events.get(missionId)??[]).slice(0,Math.min(Math.max(limit,1),500));
   }
-  async delete(id:string,userId:string){const x=await this.get(id,userId);if(!x)return false;this.items.delete(id);this.events.delete(id);return true;}
+  async delete(id:string,userId:string){return this.deleteIfIdle(id,userId);}
   async deleteIfIdle(id:string,userId:string){const x=await this.get(id,userId);if(!x||(x.leaseUntil&&Date.parse(x.leaseUntil)>Date.now()))return false;this.items.delete(id);this.events.delete(id);return true;}
 }
