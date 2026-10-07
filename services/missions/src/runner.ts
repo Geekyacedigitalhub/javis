@@ -1,4 +1,5 @@
 import { closeMissionStore, getMissionStore } from "./factory";
+import { MISSION_LEASE_HEARTBEAT_MS, MISSION_LEASE_MS } from "./store";
 
 let started=false;
 let stopping=false;
@@ -45,7 +46,7 @@ async function tick(){
     // Keep a hard buffer before the 2-minute mission lease can expire. This prevents
     // an aborted local handoff from running right up against lease takeover.
     const timeoutMs=Number.isFinite(configuredTimeout)
-      ? Math.min(90_000,Math.max(5_000,Math.floor(configuredTimeout)))
+      ? Math.min(MISSION_LEASE_MS-MISSION_LEASE_HEARTBEAT_MS,Math.max(5_000,Math.floor(configuredTimeout)))
       : 60_000;
     const candidates=missions.filter((mission)=>mission.status==="running"||mission.status==="planning");
     for(let offset=0;offset<candidates.length;offset+=limit){
@@ -70,7 +71,7 @@ async function tick(){
               .then((renewed)=>{if(!renewed)leaseLost=true;})
               .catch(()=>{leaseLost=true;})
               .finally(()=>{renewing=false;});
-          },30_000);
+          },MISSION_LEASE_HEARTBEAT_MS);
           try{
             if(stopping)return;
             const controller=new AbortController();
