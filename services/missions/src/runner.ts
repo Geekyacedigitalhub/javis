@@ -36,8 +36,10 @@ async function tick(){
     const configuredLimit=Number(process.env.FROSH_MAX_CONCURRENT_MISSIONS??2);
     const limit=Number.isFinite(configuredLimit)?Math.max(1,Math.floor(configuredLimit)):2;
     const configuredTimeout=Number(process.env.FROSH_MISSION_RUNNER_TIMEOUT_MS??60_000);
+    // Keep a hard buffer before the 2-minute mission lease can expire. This prevents
+    // an aborted local handoff from running right up against lease takeover.
     const timeoutMs=Number.isFinite(configuredTimeout)
-      ? Math.min(120_000,Math.max(5_000,Math.floor(configuredTimeout)))
+      ? Math.min(90_000,Math.max(5_000,Math.floor(configuredTimeout)))
       : 60_000;
     const candidates=missions.filter((mission)=>mission.status==="running"||mission.status==="planning");
     for(let offset=0;offset<candidates.length;offset+=limit){
