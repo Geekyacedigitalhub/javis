@@ -67,11 +67,30 @@ bun run dev:web    # control center on http://localhost:3000
 
 ```bash
 bun run check          # typecheck backend + web
+bun test               # full test suite (52 tests, no network required)
+bun run test:unit      # fast suite: syntax, stores, validation, schedules
+bun run test:api       # boots the real API and drives it over HTTP
 bun run migrate:dry    # list migrations without touching a database
 bun run migrate        # apply migrations (requires DATABASE_URL)
 bun run migrate:verify # fail if anything is pending or a checksum drifted
 bun run build:web      # production build of the control center
 ```
+
+### Test suite
+
+| File | Covers |
+|---|---|
+| `tests/syntax.test.ts` | Parses every source file; catches truncated or partially written files |
+| `tests/missions.test.ts` | Mission lifecycle, leases, quota fence, event ownership |
+| `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
+| `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
+| `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
+| `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, 404 |
+
+The whole suite runs offline: no `OPENAI_API_KEY` and no database are needed,
+because the API falls back to the in-memory stores and the development provider.
+CI (`.github/workflows/ci.yml`) runs typecheck, tests, migration discovery and a
+production web build on every push to `main`.
 
 ### Provider behaviour
 

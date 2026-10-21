@@ -14,7 +14,10 @@
     "check": "bun run typecheck && bun run typecheck:web",
     "migrate": "bun run scripts/migrate.ts",
     "migrate:dry": "bun run scripts/migrate.ts --dry-run",
-    "migrate:verify": "bun run scripts/migrate.ts --verify"
+    "migrate:verify": "bun run scripts/migrate.ts --verify",
+    "test": "bun test",
+    "test:unit": "bun test tests/syntax.test.ts tests/missions.test.ts tests/validation.test.ts tests/automation.test.ts tests/migrations.test.ts",
+    "test:api": "bun test tests/api.integration.test.ts"
   },
   "dependencies": {
     "postgres": "^3.4.7",

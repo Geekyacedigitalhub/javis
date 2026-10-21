@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install backend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install control center dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/web
+
+      # Fails on any TypeScript error in services, packages, and tests.
+      - name: Typecheck backend
+        run: bun run typecheck
+
+      # Fails on any TypeScript error in the Next.js control center.
+      - name: Typecheck control center
+        run: bun run typecheck:web
+
+      # Includes the parse-integrity guard that catches truncated source files,
+      # the mission/automation behaviour tests, and the HTTP integration suite.
+      - name: Run tests
+        run: bun test
+
+      - name: Verify migrations are discoverable
+        run: bun run migrate:dry
+
+      - name: Build control center
+        run: bun run build:web
+        env:
+          FROSH_WEB_TOKEN: ci-build-token
+          FROSH_API_URL: http://localhost:3001
