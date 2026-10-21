@@ -1,3 +1,4 @@
+import type { ServerWebSocket } from "bun";
 import type { FroshEvent } from "../../../packages/types/src/events";
 import type { FroshDeviceCommand } from "../../../packages/types/src/events";
 import {
@@ -309,7 +310,7 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
       void markCommandUnknown(requestId, "The command could not be confirmed after dispatch. The outcome is unknown.");
-      pending.resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
+      resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
     }
   });
 }
@@ -408,7 +409,7 @@ export async function sendMessageCommand(deviceId: string, recipient: string, me
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
       void markCommandUnknown(requestId, "The message command could not be confirmed after dispatch. The outcome is unknown.");
-      pending.resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
+      resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
     }
   });
 }
@@ -446,7 +447,7 @@ export async function replyToMessageCommand(deviceId: string, notificationId: st
       pendingCommands.delete(requestId);
       clearTimeout(timeout);
       void markCommandUnknown(requestId, "The reply command could not be confirmed after dispatch. The outcome is unknown.");
-      pending.resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
+      resolve({ accepted: false, message: "The Android device command could not be confirmed after dispatch. The outcome is unknown; do not automatically retry a side-effecting action.", data: { outcome: "unknown", retryable: false, reason: "dispatch_error" } });
     }
   });
 }

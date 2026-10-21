@@ -15,7 +15,7 @@ registerTool({
     additionalProperties: false
   },
   async execute(args) {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     const appName = typeof args.appName === "string" ? args.appName.trim() : "";
     if (!appName) return { accepted: false, message: "An app name is required." };
@@ -29,7 +29,7 @@ registerTool({
   permission: "safe",
   parameters: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return sendDeviceCommand(device.id, "open_dialer");
   }
@@ -48,7 +48,7 @@ registerTool({
   async execute(args) {
     const phoneNumber = typeof args.phoneNumber === "string" ? args.phoneNumber.trim() : "";
     if (!phoneNumber) return { accepted: false, message: "A phone number is required." };
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return sendDeviceCommand(device.id, "call_number", phoneNumber);
   }

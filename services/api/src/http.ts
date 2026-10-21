@@ -1,13 +1,20 @@
 import { postChat } from "./routes";
 import { approvalStore } from "../../tools/src";
-import { CodingSessionManager, agentRunStore } from "../../ai/src";
+import { CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
-import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore } from "./devices";
+import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
+import type {
+  FroshMission,
+  FroshMissionEvent,
+  FroshMissionStore,
+  FroshMissionStep,
+  FroshMissionPriority,
+} from "../../../packages/types/src/mission";
 
-const codingSessions = new CodingSessionManager(new OpenAIProvider());
+const codingSessions = new CodingSessionManager(createProvider());
 const port = Number(process.env.PORT ?? 3001);
 await initializeDeviceStore();
 await markAllDevicesOffline();
@@ -111,17 +118,25 @@ function safeErrorMessage(fallback: string): string {
 
 function logOperationalError(context: string, error: unknown): void {
   const name = error instanceof Error && error.name ? error.name : "UnknownError";
-  console.error(context, name);
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  console.error(context, name, message || "(no message)", error instanceof Error ? (error.stack ?? "") : "");
 }
 
 const MAX_USER_ID_LENGTH = 200;
 
-function decodeBoundedUserId(value: string): string | null {
+class InvalidIdentifierError extends Error {
+  constructor() {
+    super("invalid_identifier");
+    this.name = "InvalidIdentifierError";
+  }
+}
+
+function decodeBoundedUserId(value: string): string {
   let decoded: string;
   try {
     decoded = decodeURIComponent(value);
   } catch {
-    return null;
+    throw new InvalidIdentifierError();
   }
   if (
     !decoded ||
@@ -129,7 +144,7 @@ function decodeBoundedUserId(value: string): string | null {
     new TextEncoder().encode(decoded).byteLength > 512 ||
     /[\u0000-\u001f\u007f]/.test(decoded)
   ) {
-    return null;
+    throw new InvalidIdentifierError();
   }
   return decoded;
 }
@@ -140,14 +155,27 @@ function publicMissionResponse(mission: FroshMission | null | undefined): FroshM
   return publicMission;
 }
 
-function decodeBoundedResourceId(value: string): string | null {
+function decodeBoundedResourceId(value: string): string {
   let decoded: string;
-  try { decoded = decodeURIComponent(value); } catch { return null; }
-  if (!decoded || decoded.length > 200 || new TextEncoder().encode(decoded).byteLength > 512 || /[\u0000-\u001f\u007f]/.test(decoded)) return null;
+  try {
+    decoded = decodeURIComponent(value);
+  } catch {
+    throw new InvalidIdentifierError();
+  }
+  if (
+    !decoded ||
+    decoded.length > 200 ||
+    new TextEncoder().encode(decoded).byteLength > 512 ||
+    /[\u0000-\u001f\u007f]/.test(decoded)
+  ) {
+    throw new InvalidIdentifierError();
+  }
   return decoded;
 }
 
-async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_HTTP_BODY_BYTES): Promise<unknown> {
+// Request bodies are untrusted JSON: callers narrow each field explicitly.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_HTTP_BODY_BYTES): Promise<any> {
   const contentLength = request.headers.get("content-length");
   if (contentLength !== null) {
     const declaredLength = Number(contentLength);
@@ -162,7 +190,17 @@ async function parseBoundedJson(request: Request, maxBytes = MAX_DEVICE_COMMAND_
   return JSON.parse(raw);
 }
 
-const server = Bun.serve({
+type RealtimeSocketData = {
+  authenticated: boolean;
+  authenticating: boolean;
+  closed: boolean;
+  malformedMessages: number;
+  deviceId?: string;
+  realtimeClientId?: string;
+  authTimeout?: ReturnType<typeof setTimeout>;
+};
+
+const server = Bun.serve<RealtimeSocketData>({
   port,
   websocket: {
     open(ws) {
@@ -209,14 +247,14 @@ const server = Bun.serve({
           }
           if (ws.data?.closed) return;
           clearTimeout(ws.data?.authTimeout);
-          const realtimeClientId = addRealtimeClient(ws, parsed.deviceId, parsed.token);
+          const realtimeClientId = addRealtimeClient(ws as unknown as WebSocket, parsed.deviceId, parsed.token);
           ws.data = { authenticated: true, authenticating: false, closed: false, malformedMessages: 0, deviceId: parsed.deviceId, realtimeClientId, authTimeout: undefined };
           ws.send(JSON.stringify({ type: "connected", authenticated: true, timestamp: new Date().toISOString() }));
           return;
         }
         if (parsed?.type === "device.command.result") {
           if (!ws.data?.authenticated || ws.data.deviceId !== parsed.deviceId) return;
-          handleDeviceCommandResult(ws.data.realtimeClientId, parsed);
+          handleDeviceCommandResult(ws.data.realtimeClientId!, parsed);
           return;
         }
         if (parsed?.type === "ping") {
@@ -235,6 +273,7 @@ const server = Bun.serve({
     },
   },
   async fetch(request) {
+    try {
     const url = new URL(request.url);
 
     const deviceId = request.headers.get("x-frosh-device-id");
@@ -292,7 +331,12 @@ const server = Bun.serve({
     }
 
     if (request.method === "GET" && url.pathname === "/v1/realtime") {
-      if (server.upgrade(request, { data: {} })) return undefined;
+      if (
+        server.upgrade(request, {
+          data: { authenticated: false, authenticating: false, closed: false, malformedMessages: 0 },
+        })
+      )
+        return undefined;
       return new Response("WebSocket upgrade required", { status: 426 });
     }
 
@@ -424,10 +468,10 @@ const server = Bun.serve({
         }
         return Response.json(await postChat(chatBody));
       } catch (error) {
-        const message = "Request failed";
+        const message = error instanceof Error && error.message ? error.message : "Request failed";
         return Response.json(
           { error: message },
-          { status: message === "message is required" ? 400 : 500 },
+          { status: /required/i.test(message) ? 400 : 500 },
         );
       }
     }
@@ -647,7 +691,7 @@ const server = Bun.serve({
         if (!name || name.length > 120 || new TextEncoder().encode(name).byteLength > 512) {
           return Response.json({ error: "Device name is invalid or too large." }, { status: 400 });
         }
-        if (capabilities.length > 100 || capabilities.some((item) => item.length > 100 || new TextEncoder().encode(item).byteLength > 256)) {
+        if (capabilities.length > 100 || capabilities.some((item: string) => item.length > 100 || new TextEncoder().encode(item).byteLength > 256)) {
           return Response.json({ error: "Device capabilities are invalid or too large." }, { status: 400 });
         }
         const existingDevice = (await listDevices()).find(
@@ -659,12 +703,10 @@ const server = Bun.serve({
             { status: 409 },
           );
         }
-        const device = await registerDevice({
-          name,
-          platform,
-          allowExisting: webAuthenticated,
-          capabilities,
-        });
+        const device = await registerDevice(
+          { name, platform, capabilities },
+          { allowExisting: webAuthenticated },
+        );
         const credential = await issueDeviceCredential(device.id);
         return Response.json({ device, credential }, { status: 201 });
       } catch (error) {
@@ -839,7 +881,7 @@ const server = Bun.serve({
         if(Object.keys(body as Record<string,unknown>).length>3)return Response.json({error:"Mission creation contains too many fields"},{status:400});
         const goal=typeof body?.goal==="string"?body.goal.trim():"";
         if(!goal)return Response.json({error:"goal is required"},{status:400});        const { getMissionStore }=await import("../../missions/src");
-        const priority=body?.priority==="high"||body?.priority==="low"?""+body.priority:"normal";
+        const priority:FroshMissionPriority=body?.priority==="high"||body?.priority==="low"?body.priority:"normal";
       const budgetProfile=body?.budgetProfile==="extended"||body?.budgetProfile==="intensive"?body.budgetProfile:"standard";
         const mission=await getMissionStore().create({userId,goal,status:"planning",priority,budgetProfile,progress:0,steps:[]});
         if(!mission)return Response.json({error:"Mission limit reached for this user; pause, complete, or delete an existing mission before creating another."},{status:429});
@@ -933,7 +975,7 @@ const server = Bun.serve({
       const now=new Date().toISOString();
       const steps=source.steps.map((step,index)=>({
         ...step,
-        status:index<stepIndex?"completed":"pending",
+        status:index<stepIndex?("completed" as const):("pending" as const),
         runId:undefined,
         result:index<stepIndex?step.result:undefined,
         retryCount:0,
@@ -972,6 +1014,7 @@ const server = Bun.serve({
       if(!source)return Response.json({error:"Mission not found"},{status:404});
       if(!["completed","failed","cancelled"].includes(source.status))return Response.json({error:"Only completed, failed, or cancelled missions can be rerun"},{status:409});
       const rerunMission=await store.create({userId,goal:source.goal,status:"planning",priority:source.priority,budgetProfile:source.budgetProfile,progress:0,steps:[]});
+      if(!rerunMission)return Response.json({error:"Mission limit reached for this user; pause, complete, or delete an existing mission before creating another."},{status:429});
       await addMissionEventWithRetry(store, {missionId:rerunMission.id,userId,type:"mission.created",message:"Mission rerun created from "+source.id,metadata:{sourceMissionId:source.id}});
       return Response.json({mission:publicMissionResponse(rerunMission)});
     }
@@ -1081,19 +1124,18 @@ const server = Bun.serve({
     }
 
     if(missionMatch && request.method==="POST"){
+      const userId=decodeBoundedUserId(missionMatch[1]);
+      const id=decodeBoundedResourceId(missionMatch[2]);
+      const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
+      const missionEvaluator=new OpenAIProvider();
+      const store=getMissionStore();
+      const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
+      const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
+      const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await store.updateOwned(id,userId,executionOwner,patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
       try{
-        const userId=decodeBoundedUserId(missionMatch[1]);
-       if (!userId) return Response.json({error:"Invalid user ID"},{status:400});
-        const id=decodeBoundedResourceId(missionMatch[2]);
-        const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
-        const missionEvaluator=new OpenAIProvider();
-        const store=getMissionStore();
         let mission=await store.get(id,userId);
         if(!mission)return Response.json({error:"Mission not found"},{status:404});
         if(mission.status==="completed")return Response.json({mission:publicMissionResponse(mission)});
-        const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
-        const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
-        const updateOwned=async(patch:Partial<Omit<FroshMission,"id"|"createdAt"|"updatedAt">>)=>{const updated=await store.updateOwned(id,userId,executionOwner,patch);if(!updated)throw new Error("Mission execution lease was lost before mission state update");return updated;};
         if(requestedWorkerId){
           if(mission.leaseOwner!==requestedWorkerId || !mission.leaseUntil || Date.parse(mission.leaseUntil)<=Date.now()){
             return Response.json({error:"Mission lease is missing or expired"},{status:409});
@@ -1106,9 +1148,9 @@ const server = Bun.serve({
 
         let steps=mission.steps.length?mission.steps:planMission(mission.goal);
         const staleRunningSteps=steps.filter(step=>step.status==="running");
+        let recoveryRequiresReview=false;
         if(staleRunningSteps.length){
           const reconciled=new Set<string>();
-          let recoveryRequiresReview=false;
           for(const staleStep of staleRunningSteps){
             if(!staleStep.runId){
               steps=steps.map(step=>step.id===staleStep.id?{
@@ -1141,7 +1183,7 @@ const server = Bun.serve({
                 steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
                 reconciled.add(staleStep.id);
                 recoveryRequiresReview=true;
-                await store.update(savedRun.id,userId,{
+                await agentRunStore.update(savedRun.id,{
                   status:"failed",
                   pendingApprovalId:undefined,
                   result:outcome,
@@ -1167,7 +1209,7 @@ const server = Bun.serve({
                 steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
                 reconciled.add(staleStep.id);
                 recoveryRequiresReview=true;
-                await store.update(savedRun.id,userId,{
+                await agentRunStore.update(savedRun.id,{
                   status:"failed",
                   pendingApprovalId:undefined,
                   result:outcome,
@@ -1211,10 +1253,10 @@ const server = Bun.serve({
               const plannedApprovalId=plannedApproval?.id.slice("approved-".length);
               const approval=plannedApprovalId?await approvalStore.get(plannedApprovalId):null;
               if(approval?.status==="approved"){
-                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed",result:"An approved action was in progress when execution stopped. Its outcome is unknown, so FROSH will not replay it automatically.",updatedAt:new Date().toISOString()}:step);
+                steps=steps.map(step=>step.id===staleStep.id?{...step,status:"failed" as const,result:"An approved action was in progress when execution stopped. Its outcome is unknown, so FROSH will not replay it automatically.",updatedAt:new Date().toISOString()}:step);
                 reconciled.add(staleStep.id);
                 recoveryRequiresReview=true;
-                await store.update(savedRun.id,userId,{
+                await agentRunStore.update(savedRun.id,{
                   status:"failed",
                   pendingApprovalId:undefined,
                   result:"An approved action was in progress when execution stopped, but its outcome is unknown. The run was stopped safely to prevent duplicate execution.",
@@ -1256,9 +1298,9 @@ const server = Bun.serve({
             }
             if(approval?.status==="approved"){
               const outcome="An approval was accepted before execution restarted, but the blocked agent run did not durably record whether the approved action executed. The mission is paused for safety review to prevent duplicate execution.";
-              steps=steps.map(step=>step.id===blockedStep.id?{...step,status:"failed",result:outcome,updatedAt:new Date().toISOString()}:step);
+              steps=steps.map(step=>step.id===blockedStep.id?{...step,status:"failed" as const,result:outcome,updatedAt:new Date().toISOString()}:step);
               recoveryRequiresReview=true;
-              await store.update(blockedRun.id,userId,{status:"failed",pendingApprovalId:undefined,result:outcome,error:"Approved action outcome is unknown after execution restart"}).catch(()=>undefined);
+              await agentRunStore.update(blockedRun.id,{status:"failed",pendingApprovalId:undefined,result:outcome,error:"Approved action outcome is unknown after execution restart"}).catch(()=>undefined);
             }
           }
         }
@@ -1475,11 +1517,19 @@ const server = Bun.serve({
           lastApproval=run.pendingApprovalId;
           lastResult=run.result;
           if(run.status==="completed"){
-            const evaluation=await missionEvaluator.evaluateMission({
-              goal:mission.goal,
-              step:step.title,
-              result:run.result??""
-            });
+            // Evaluation is advisory: an unavailable or failing provider must not
+            // invalidate a step whose tool work already completed successfully.
+            let evaluation:{complete:boolean;nextAction:"continue"|"recover"|"finish";reason:string;nextStep?:string};
+            try{
+              evaluation=await missionEvaluator.evaluateMission({
+                goal:mission.goal,
+                step:step.title,
+                result:run.result??""
+              });
+            }catch(error){
+              logOperationalError("FROSH mission evaluator unavailable", error);
+              evaluation={complete:false,nextAction:"continue",reason:"Mission evaluator unavailable; continuing conservatively."};
+            }
             if(evaluation.nextAction==="finish"||evaluation.complete){
               steps=steps.map((item,i)=>i===index?{...item,status:"completed",result:(run.result??"")+"\nEvaluation: "+evaluation.reason,updatedAt:new Date().toISOString()}:item);
             }else if(evaluation.nextAction==="recover"){
@@ -1541,6 +1591,7 @@ const server = Bun.serve({
         mission=await updateOwned({status:"running",progress:steps.length?completed/steps.length:0,steps,activeRunId:lastRunId,pendingApprovalId:lastApproval,result:lastResult,toolCallsUsed:toolCount,executionDurationMs:initialDurationMs+(Date.now()-missionStartedAt)});
         return Response.json({mission:publicMissionResponse(mission)});
       }catch(error){
+        logOperationalError("FROSH mission execution failed", error);
         try{
           const current=await store.get(id,userId);
           if(current && current.status==="running" && current.leaseOwner===executionOwner){
@@ -1571,7 +1622,7 @@ const server = Bun.serve({
         const claimed=await store.claimStepRetry(id,userId,executionOwner);
         if(!claimed)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
         const now=new Date().toISOString();
-        const steps=claimed.steps.map(item=>item.id===stepId?{...item,status:"pending",runId:undefined,result:undefined,retryCount:0,nextRetryAt:undefined,updatedAt:now}:item);
+        const steps: FroshMissionStep[]=claimed.steps.map(item=>item.id===stepId?{...item,status:"pending" as const,runId:undefined,result:undefined,retryCount:0,nextRetryAt:undefined,updatedAt:now}:item);
         const updated=await store.updateOwned(id,userId,executionOwner,{status:"running",steps,pendingApprovalId:undefined});
         if(!updated){
           await store.releaseLeaseIfOwned(id,userId,executionOwner);
@@ -1603,7 +1654,7 @@ const server = Bun.serve({
           const recoverableSteps=mission.steps.filter(step=>step.status==="failed"||step.status==="running");
           if(recoverableSteps.length){
             const now=new Date().toISOString();
-            const steps=mission.steps.map(step=>recoverableSteps.some(item=>item.id===step.id)?{...step,status:"pending",runId:undefined,nextRetryAt:undefined,updatedAt:now}:step);
+            const steps:FroshMissionStep[]=mission.steps.map(step=>recoverableSteps.some(item=>item.id===step.id)?{...step,status:"pending" as const,runId:undefined,nextRetryAt:undefined,updatedAt:now}:step);
             const executionOwner="manual-recovery:"+crypto.randomUUID();
             const recovered=await getMissionStore().recoverFailedIfIdle(id,userId,executionOwner,steps);
             if(!recovered)return Response.json({error:"Mission is currently being executed; wait for the active worker to finish"},{status:409});
@@ -1713,7 +1764,7 @@ const server = Bun.serve({
           }
           const continuationToolCalls=Math.max(0,run.toolCalls.length-continuationBaseToolCount);
           const toolCallsUsed=existingToolCount+continuationToolCalls;
-          const steps=mission.steps.map(step=>step.runId===run.id?{...step,status:run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked",result:run.result,updatedAt:new Date().toISOString()}:step);
+          const steps:FroshMissionStep[]=mission.steps.map(step=>step.runId===run.id?{...step,status:(run.status==="completed"?"completed":run.status==="failed"?"failed":"blocked") as FroshMissionStep["status"],result:run.result,updatedAt:new Date().toISOString()}:step);
           const completed=steps.filter(step=>step.status==="completed").length;
           const progress=steps.length?completed/steps.length:0;
 
@@ -1797,3 +1848,14 @@ const server = Bun.serve({
         return Response.json({ error: message }, { status: 500 });
       }
     }
+
+    return Response.json({ error: "Not found" }, { status: 404 });
+    } catch (error) {
+      if (error instanceof InvalidIdentifierError) {
+        return Response.json({ error: "Invalid request identifier" }, { status: 400 });
+      }
+      logOperationalError("FROSH request failed", error);
+      return Response.json({ error: "Request failed" }, { status: 500 });
+    }
+  },
+});

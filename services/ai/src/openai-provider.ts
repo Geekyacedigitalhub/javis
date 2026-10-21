@@ -4,7 +4,17 @@ import type { FroshProviderContinuation } from "../../../packages/types/src/agen
 import { buildModelInput } from "./provider";
 import { executeToolCall } from "../../tools/src";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let cachedClient: OpenAI | undefined;
+
+// Constructed lazily so the API and tooling can boot without provider credentials.
+function getClient(): OpenAI {
+  if (!cachedClient) {
+    const apiKey = process.env.OPENAI_API_KEY?.trim();
+    if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
+    cachedClient = new OpenAI({ apiKey });
+  }
+  return cachedClient;
+}
 const model = process.env.FROSH_MODEL || "gpt-6-luna";
 const MAX_TOOL_ROUNDS = 8;
 
@@ -85,7 +95,7 @@ export class OpenAIProvider {
     }
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const stream = await client.responses.create({
+      const stream = await getClient().responses.create({
         model,
         instructions: input.system,
         input: continuationInput,
@@ -195,7 +205,7 @@ export class OpenAIProvider {
 
   async evaluateMission(input:{goal:string;step:string;result:string}):Promise<{complete:boolean;nextAction:"continue"|"recover"|"finish";reason:string;nextStep?:string}> {
     if (!process.env.OPENAI_API_KEY) throw new Error("OPENAI_API_KEY is not configured");
-    const response = await client.responses.create({
+    const response = await getClient().responses.create({
       model,
       instructions: [
         "You are FROSH's mission evaluator.",
@@ -275,7 +285,7 @@ export class OpenAIProvider {
     }
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-      const response = await client.responses.create({
+      const response = await getClient().responses.create({
         model,
         instructions: input.system,
         input: continuationInput ?? [],
@@ -340,7 +350,7 @@ export class OpenAIProvider {
             toolCalls: executedCalls,
             waitingForApproval: true,
             continuation: {
-              provider: "openai",
+              provider: "openai" as const,
               responseId: response.id,
               pendingCallId: item.call_id ?? item.id,
               pendingToolName: item.name,

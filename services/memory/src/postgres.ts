@@ -7,7 +7,7 @@ export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly sql: Sql) {}
 
   private query<T extends object>(text: string, values: unknown[] = []) {
-    return this.sql.unsafe<T[]>(text, values);
+    return this.sql.unsafe<T[]>(text, values as never[]);
   }
 
   async getConversation(id: string) {

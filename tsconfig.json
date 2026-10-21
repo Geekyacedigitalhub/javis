@@ -10,11 +10,7 @@
     "types": ["bun"]
   },
   "include": [
-    "apps/**/*.ts",
-    "apps/**/*.tsx",
     "services/**/*.ts",
-    "services/**/*.tsx",
-    "packages/**/*.ts",
-    "packages/**/*.tsx"
+    "packages/**/*.ts"
   ]
 }

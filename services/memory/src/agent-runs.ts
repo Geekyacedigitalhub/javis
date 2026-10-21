@@ -7,7 +7,7 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
   constructor(private readonly sql: Sql) {}
 
   private query<T extends object>(text: string, values: unknown[] = []) {
-    return this.sql.unsafe<T[]>(text, values);
+    return this.sql.unsafe<T[]>(text, values as never[]);
   }
 
   async create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt">) {

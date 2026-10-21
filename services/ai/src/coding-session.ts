@@ -174,7 +174,7 @@ export class CodingSessionManager {
         {
           runId: run.id,
           continuation: {
-            continuation: claimedRun.providerContinuation,
+            continuation: claimedRun.providerContinuation!,
             toolOutput: {
               callId: claimedRun.providerContinuation!.pendingCallId!,
               output: JSON.stringify(resolved.result),

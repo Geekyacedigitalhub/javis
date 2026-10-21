@@ -24,7 +24,7 @@ registerTool({
     const message = typeof args.message === "string" ? args.message.trim() : "";
     if (!providers.includes(provider as (typeof providers)[number])) return { accepted: false, message: "Unsupported messaging provider." };
     if (!recipient || !message) return { accepted: false, message: "A recipient and message are required." };
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return sendMessageCommand(device.id, recipient, message, provider);
   }
@@ -36,7 +36,7 @@ registerTool({
   permission: "safe",
   parameters: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return requestMessageInbox(device.id);
   }
@@ -59,7 +59,7 @@ registerTool({
     const notificationId = typeof args.notificationId === "string" ? args.notificationId.trim() : "";
     const message = typeof args.message === "string" ? args.message.trim() : "";
     if (!notificationId || !message) return { accepted: false, message: "A notification ID and reply message are required." };
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return replyToMessageCommand(device.id, notificationId, message);
   }
@@ -71,7 +71,7 @@ registerTool({
   permission: "safe",
   parameters: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     const inbox = await requestMessageInbox(device.id);
     if (!inbox.accepted) return inbox;
@@ -104,7 +104,7 @@ registerTool({
   permission: "safe",
   parameters: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return requestMessageInbox(device.id);
   }
@@ -134,7 +134,7 @@ registerTool({
   permission: "safe",
   parameters: { type: "object", properties: {}, additionalProperties: false },
   async execute() {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return requestMessageInbox(device.id);
   }

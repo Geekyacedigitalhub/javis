@@ -21,7 +21,7 @@ registerTool({
     if (!actions.includes(action as (typeof actions)[number])) {
       return { accepted: false, message: "Unsupported media action." };
     }
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return sendDeviceCommand(device.id, "media_control", action);
   }
@@ -38,7 +38,7 @@ registerTool({
     additionalProperties: false
   },
   async execute() {
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { available: false, message: "No paired Android FROSH device is online." };
     return sendDeviceCommand(device.id, "media_state");
   }

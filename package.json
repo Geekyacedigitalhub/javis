@@ -6,9 +6,15 @@
   "packageManager": "bun@1.4.1",
   "scripts": {
     "dev": "bun run services/api/src/http.ts",
-    "typecheck": "tsc --noEmit",
     "start": "bun run services/api/src/http.ts",
-    "check": "bun run typecheck"
+    "dev:web": "cd apps/web && bun run dev",
+    "build:web": "cd apps/web && bun run build",
+    "typecheck": "tsc --noEmit",
+    "typecheck:web": "cd apps/web && bun run typecheck",
+    "check": "bun run typecheck && bun run typecheck:web",
+    "migrate": "bun run scripts/migrate.ts",
+    "migrate:dry": "bun run scripts/migrate.ts --dry-run",
+    "migrate:verify": "bun run scripts/migrate.ts --verify"
   },
   "dependencies": {
     "postgres": "^3.4.7",

@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import postgres, { type TransactionSql } from "postgres";
 import type { FroshMission, FroshMissionStore } from "../../../packages/types/src/mission";
 type Sql=ReturnType<typeof postgres>;
 
@@ -24,7 +24,13 @@ export const MISSION_LEASE_HEARTBEAT_MS=30*1000;
 const MISSION_LEASE_SQL="NOW()+INTERVAL '2 minutes'";
 
 function boundedText(value:string,label:string,maxChars:number,maxBytes:number):string{
-  if(typeof value!=="string"||value.length>maxChars||new TextEncoder().encode(value).byteLength>maxBytes||/[\\u0000-\\u001f\\u007f]/.test(value))throw new Error(label+" exceeds safety bounds");
+  if(typeof value!=="string")throw new Error(label+" must be text");
+  const bytes=new TextEncoder().encode(value).byteLength;
+  // Allow tab, newline, and carriage return: mission goals, step context, and
+  // results are legitimately multi-line. Reject every other control character.
+  if(value.length>maxChars||bytes>maxBytes||/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value)){
+    throw new Error(label+" exceeds safety bounds (chars="+value.length+"/"+maxChars+", bytes="+bytes+"/"+maxBytes+")");
+  }
   return value;
 }
 function boundedId(value:string,label:string):string{
@@ -100,6 +106,7 @@ const SELECT_FIELDS=`id,user_id AS "userId",goal,status,priority,budget_profile 
 
 export class PostgresMissionStore implements FroshMissionStore {
   constructor(private readonly sql:Sql){}
+  async close(){await this.sql.end({timeout:5});}
   async list(userId:string){return this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE user_id=$1 ORDER BY CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, updated_at DESC`,[userId]);}
   async get(id:string,userId:string){const rows=await this.sql.unsafe<FroshMission[]>(`SELECT ${SELECT_FIELDS} FROM frosh_missions WHERE id=$1 AND user_id=$2 LIMIT 1`,[id,userId]);return rows[0]??null;}
   async create(input:Omit<FroshMission,"id"|"createdAt"|"updatedAt">){
@@ -123,7 +130,7 @@ export class PostgresMissionStore implements FroshMissionStore {
     const activeStatus=patch.status!==undefined&&!["completed","failed","cancelled"].includes(patch.status);
     const current=patch.status!==undefined&&activeStatus?await this.get(id,userId):null;
     const needsQuotaFence=Boolean(current&&["completed","failed","cancelled"].includes(current.status));
-    const apply=async(executor:Sql)=>{
+    const apply=async(executor:Sql|TransactionSql<Record<string,unknown>>)=>{
       const fields:string[]=[];
       const values:unknown[]=[id,userId];
       const add=(column:string,value:unknown)=>{
@@ -147,7 +154,7 @@ export class PostgresMissionStore implements FroshMissionStore {
       const sql=setClause
         ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`
         : `UPDATE frosh_missions SET updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) RETURNING ${SELECT_FIELDS}`;
-      const rows=await executor.unsafe<FroshMission[]>(sql,values);
+      const rows=await executor.unsafe<FroshMission[]>(sql,values as never[]);
       return rows[0]??null;
     };
     let updated:FroshMission|null=null;
@@ -198,11 +205,11 @@ export class PostgresMissionStore implements FroshMissionStore {
     const sql=setClause
       ? `UPDATE frosh_missions SET ${setClause},updated_at=NOW() WHERE ${where} RETURNING ${SELECT_FIELDS}`
       : `UPDATE frosh_missions SET updated_at=NOW() WHERE ${where} RETURNING ${SELECT_FIELDS}`;
-    const rows=await this.sql.unsafe<FroshMission[]>(sql,values);
+    const rows=await this.sql.unsafe<FroshMission[]>(sql,values as never[]);
     return rows[0]??null;
   }
   async updatePriorityIfIdle(id:string,userId:string,priority:FroshMission["priority"]){
-    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET priority=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) AND status NOT IN ('completed','cancelled') RETURNING ${SELECT_FIELDS}`,[id,userId,priority]);
+    const rows=await this.sql.unsafe<FroshMission[]>(`UPDATE frosh_missions SET priority=$3,updated_at=NOW() WHERE id=$1 AND user_id=$2 AND (lease_until IS NULL OR lease_until<NOW()) AND status NOT IN ('completed','cancelled') RETURNING ${SELECT_FIELDS}`,[id,userId,priority] as never[]);
     return rows[0]??null;
   }
   async updateBudgetProfileIfIdle(id:string,userId:string,budgetProfile:FroshMission["budgetProfile"]){

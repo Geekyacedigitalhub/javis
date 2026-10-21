@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(request: NextRequest) {
+  // Local development escape hatch. Explicit opt-in, and never available in a
+  // production build, so the control center can be opened on a dev machine
+  // without weakening deployed authentication.
+  if (
+    process.env.NODE_ENV !== "production" &&
+    process.env.FROSH_WEB_AUTH_DISABLED === "true"
+  ) {
+    return NextResponse.next();
+  }
+
   const configuredToken = process.env.FROSH_WEB_TOKEN?.trim();
   if (!configuredToken) {
     return new NextResponse("FROSH web authentication is not configured.", { status: 503 });

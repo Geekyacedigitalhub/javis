@@ -17,7 +17,7 @@ registerTool({
   async execute(args) {
     const query = typeof args.query === "string" ? args.query.trim() : "";
     if (!query) return { accepted: false, message: "A contact name is required." };
-    const device = listDevices().find((item) => item.platform === "android" && item.status === "online");
+    const device = (await listDevices()).find((item) => item.platform === "android" && item.status === "online");
     if (!device) return { accepted: false, message: "No paired Android FROSH device is online." };
     return sendDeviceCommand(device.id, "contacts_search", query);
   }

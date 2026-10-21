@@ -122,7 +122,7 @@ registerTool({
     const rawPath = String(args.path);
     const path = encodeURIComponent(rawPath).replace(/%2F/g, "/");
     const branch = args.branch ? String(args.branch) : undefined;
-    const existing = await github(`/repos/${repo}/contents/${path}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}).catch(() => null);
+    const existing = await github(`/repos/${repo}/contents/${path}${branch ? `?ref=${encodeURIComponent(branch)}` : ""}`).catch(() => null);
     const payload: Record<string, unknown> = {
       message: String(args.message),
       content: Buffer.from(String(args.content), "utf8").toString("base64"),

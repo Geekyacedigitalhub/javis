@@ -9,6 +9,17 @@ export type FroshEvent =
   | { type: "device.updated"; device: FroshDevice }
   | { type: "error"; message: string };
 
+export type FroshDeviceCommandName =
+  | "open_app"
+  | "media_control"
+  | "media_state"
+  | "contacts_search"
+  | "open_dialer"
+  | "call_number"
+  | "message_inbox"
+  | "message_reply"
+  | "send_message";
+
 export type FroshDeviceCommand =
   | { type: "device.command"; requestId: string; deviceId: string; command: "open_app"; appName: string }
   | { type: "device.command"; requestId: string; deviceId: string; command: "media_control"; action: string }
@@ -18,4 +29,4 @@ export type FroshDeviceCommand =
   | { type: "device.command"; requestId: string; deviceId: string; command: "message_inbox" }
   | { type: "device.command"; requestId: string; deviceId: string; command: "message_reply"; notificationId: string; message: string }
   | { type: "device.command"; requestId: string; deviceId: string; command: "send_message"; provider: string; recipient: string; message: string }
-  | { type: "device.command.result"; requestId: string; deviceId: string; command: FroshDeviceCommand["command"]; accepted: boolean; message: string; data?: unknown };
+  | { type: "device.command.result"; requestId: string; deviceId: string; command: FroshDeviceCommandName; accepted: boolean; message: string; data?: unknown };

@@ -32,6 +32,61 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - Voice and vision
 - Scheduled automation
 
+
+## Running FROSH locally
+
+Requirements: [Bun](https://bun.sh) 1.4+ and Node-compatible tooling for the web app.
+
+```bash
+bun install                 # backend dependencies
+cd apps/web && bun install  # control center dependencies
+```
+
+Create a `.env` at the repository root:
+
+```bash
+FROSH_WEB_TOKEN=dev-local-token
+FROSH_DEVICE_ENROLLMENT_TOKEN=dev-enroll-token
+FROSH_USER_ID=default-user
+FROSH_AUTOMATION_USER_ID=default-user
+PORT=3001
+# Optional: enables the Postgres-backed stores instead of in-memory stores
+# DATABASE_URL=postgres://user:pass@localhost:5432/frosh
+# Optional: enables the OpenAI provider instead of the development provider
+# OPENAI_API_KEY=
+```
+
+Start the API and the control center:
+
+```bash
+bun run dev        # API on http://localhost:3001
+bun run dev:web    # control center on http://localhost:3000
+```
+
+### Verification commands
+
+```bash
+bun run check          # typecheck backend + web
+bun run migrate:dry    # list migrations without touching a database
+bun run migrate        # apply migrations (requires DATABASE_URL)
+bun run migrate:verify # fail if anything is pending or a checksum drifted
+bun run build:web      # production build of the control center
+```
+
+### Provider behaviour
+
+FROSH never requires model credentials just to run. `createProvider()` returns the
+OpenAI provider when `OPENAI_API_KEY` is set and the offline `DevelopmentProvider`
+otherwise, so the API, missions, automations, and tools can be exercised locally.
+Mission evaluation is advisory: if the evaluator is unavailable the mission
+continues conservatively instead of failing completed work.
+
+### Control center authentication
+
+The control center is protected by HTTP Basic auth whose password is
+`FROSH_WEB_TOKEN`. For local development only, `FROSH_WEB_AUTH_DISABLED=true`
+skips that check. The bypass is ignored in production builds.
+
 ## Development principles
 
 1. Security and explicit permissions before powerful actions.

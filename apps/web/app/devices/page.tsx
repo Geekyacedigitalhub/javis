@@ -157,14 +157,14 @@ export default function DevicesPage() {
                     if (input?.value.trim()) void inspect(device.id, "contacts_search", { query: input.value.trim() });
                   }}>Contacts</button>
                 </div>
-                {inspectData[device.id + ":media_state"] && (
-                  <pre className="inspect-output">{JSON.stringify(inspectData[device.id + ":media_state"], null, 2)}</pre>
+                {!!inspectData[device.id + ":media_state"] && (
+                  <pre className="inspect-output">{String(JSON.stringify(inspectData[device.id + ":media_state"], null, 2) ?? "")}</pre>
                 )}
-                {inspectData[device.id + ":message_inbox"] && (
-                  <pre className="inspect-output">{JSON.stringify(inspectData[device.id + ":message_inbox"], null, 2)}</pre>
+                {!!inspectData[device.id + ":message_inbox"] && (
+                  <pre className="inspect-output">{String(JSON.stringify(inspectData[device.id + ":message_inbox"], null, 2) ?? "")}</pre>
                 )}
-                {inspectData[device.id + ":contacts_search"] && (
-                  <pre className="inspect-output">{JSON.stringify(inspectData[device.id + ":contacts_search"], null, 2)}</pre>
+                {!!inspectData[device.id + ":contacts_search"] && (
+                  <pre className="inspect-output">{String(JSON.stringify(inspectData[device.id + ":contacts_search"], null, 2) ?? "")}</pre>
                 )}
                 <div className="app-control">
                   <input

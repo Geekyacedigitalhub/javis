@@ -1,9 +1,11 @@
 import { FroshOrchestrator } from "../../ai/src";
+import { ConfiguredModelAdapter } from "../../ai/src/provider";
+import { createProvider } from "../../ai/src/provider-factory";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { buildConversationContext, createMemoryStore, getConversationMemoryStore, getUserMemoryStore, extractConversationMemories, createMemoryCandidate } from "../../memory/src";
 
-const provider = new OpenAIProvider();
-const orchestrator = new FroshOrchestrator(provider);
+const provider = createProvider();
+const orchestrator = new FroshOrchestrator(new ConfiguredModelAdapter(provider));
 const memory = createMemoryStore();
 
 export interface FroshHttpRequest {
