@@ -51,20 +51,59 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # Deliberately no android-actions/setup-android here. It failed as the
+      # first step of the first run (its @v3 major is two releases behind and
+      # ubuntu-latest started moving to Ubuntu 26 on 2026-10-19), and every
+      # real step after it was skipped. This resolves an SDK without depending
+      # on a third-party action: use the one baked into the runner image, and
+      # only download command-line tools if the image has none.
+      - name: Ensure an Android SDK is available
+        run: |
+          set -euo pipefail
+          SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [ -z "$SDK" ] || [ ! -d "$SDK" ]; then
+            SDK="$HOME/android-sdk"
+            echo "No SDK on the runner image; installing command-line tools into $SDK"
+            mkdir -p "$SDK/cmdline-tools"
+            curl -fsSL -o /tmp/cmdline-tools.zip \
+              https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/cmdline-tools.zip -d "$SDK/cmdline-tools"
+            mv "$SDK/cmdline-tools/cmdline-tools" "$SDK/cmdline-tools/latest"
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          echo "$SDK/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "Using Android SDK at $SDK"
+          ls "$SDK/platforms" "$SDK/build-tools" "$SDK/ndk" 2>/dev/null || true
 
       # These are the versions ExpoRootProjectPlugin defaults to for SDK 54
       # (compileSdk 35, build-tools 35.0.0, NDK 27.1.12297006) plus the CMake
-      # that AGP expects. The runner image usually has them already; pinning
-      # them here means a runner image update cannot break the build.
-      - name: Install the SDK packages this build needs
+      # that AGP expects. Whatever is already installed is left alone; a
+      # failure here is a warning, not a stop, because AGP downloads missing
+      # components itself during configuration.
+      - name: Install any missing SDK packages
         run: |
-          sdkmanager --install \
-            "platforms;android-35" \
-            "build-tools;35.0.0" \
-            "ndk;27.1.12297006" \
-            "cmake;3.22.1" > /dev/null
+          set -uo pipefail
+          SDKM="$(command -v sdkmanager || true)"
+          if [ -z "$SDKM" ]; then
+            SDKM="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}" -type f -name sdkmanager 2>/dev/null | head -1)"
+          fi
+          if [ -z "$SDKM" ]; then
+            echo "::warning::sdkmanager not found; relying on packages already on the image"
+            exit 0
+          fi
+          yes | "$SDKM" --licenses > /dev/null 2>&1 || true
+          for pkg in "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
+                     "ndk;27.1.12297006" "cmake;3.22.1"; do
+            if "$SDKM" --list_installed 2>/dev/null | grep -qF "$pkg"; then
+              echo "already installed: $pkg"
+            else
+              echo "installing: $pkg"
+              "$SDKM" --install "$pkg" > /dev/null 2>&1 \
+                || echo "::warning::could not install $pkg; the build will try to fetch it"
+            fi
+          done
 
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
