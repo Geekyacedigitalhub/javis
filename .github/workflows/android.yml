@@ -172,49 +172,36 @@ jobs:
 
       # First run downloads Gradle 8.14.3, AGP, and the React Native
       # artifacts, so allow a generous timeout. Later runs hit the cache.
+      # One step deliberately. The job sets defaults.run.working-directory to
+      # apps/mobile, and an earlier split version of this looked for the log
+      # relative to the wrong directory, so a red run only ever said "Gradle
+      # wrote no log". Keeping capture, annotation, and exit in one place makes
+      # the path unambiguous: $RUNNER_TEMP is not affected by working-directory.
       - name: Assemble debug APK
         id: build
         working-directory: apps/mobile/android
         run: |
-          set -o pipefail
-          ./gradlew assembleDebug --no-daemon --console=plain --stacktrace \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" 2>&1 \
-            | tee gradle-build.log
-
-      # Gradle's failure text sits behind an admin-only log endpoint, so a red
-      # run used to say nothing except "exit code 1". Turn the interesting
-      # lines into annotations, which the public checks API can read, and copy
-      # them into the run summary for whoever is looking at the UI.
-      - name: Surface the Gradle failure
-        if: failure()
-        run: |
           set -uo pipefail
-          # Relative to the workspace root: this step must still run if the
-          # build never got far enough to create apps/mobile/android.
-          LOG=apps/mobile/android/gradle-build.log
-          if [ ! -f "$LOG" ]; then
-            echo "::warning::Gradle wrote no log; the failure came from an earlier step"
+          LOG="$RUNNER_TEMP/gradle-build.log"
+
+          if ./gradlew assembleDebug --no-daemon --console=plain --stacktrace \
+               -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" 2>&1 | tee "$LOG"; then
             exit 0
           fi
 
-          emit() {
-            local text="$1"
-            text=${text//'%'/'%25'}
-            text=${text//$'\n'/'%0A'}
-            text=${text//$'\r'/'%0D'}
-            printf '::error title=Gradle build failed::%s\n' "$text"
-          }
-
+          # Gradle's own log endpoint needs repository admin, so turn the useful
+          # lines into an annotation that the public checks API can read.
           EXCERPT="$(
             { grep -E '^e: |What went wrong|FAILURE: Build failed|Execution failed for task|> Task .* FAILED|^Caused by' "$LOG" || true; } \
               | head -40 | cut -c1-300
           )"
-
-          if [ -n "$EXCERPT" ]; then
-            emit "$EXCERPT"
-          else
-            emit "$(tail -40 "$LOG" | cut -c1-300)"
+          if [ -z "$EXCERPT" ]; then
+            EXCERPT="$(tail -40 "$LOG" | cut -c1-300)"
           fi
+          MSG=${EXCERPT//'%'/'%25'}
+          MSG=${MSG//$'\n'/'%0A'}
+          MSG=${MSG//$'\r'/'%0D'}
+          printf '::error title=Gradle build failed::%s\n' "$MSG"
 
           {
             echo '### Gradle failure'
@@ -224,12 +211,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+          exit 1
+
       - name: Upload Gradle log
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: gradle-build-log
-          path: apps/mobile/android/gradle-build.log
+          path: ${{ runner.temp }}/gradle-build.log
           if-no-files-found: ignore
           retention-days: 7
 
