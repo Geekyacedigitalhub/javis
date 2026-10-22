@@ -266,3 +266,63 @@ describe("chat", () => {
     expect(body.message.length).toBeGreaterThan(0);
   });
 });
+
+describe("coding loop", () => {
+  test("the offline provider cannot claim success, so the loop refuses to complete", async () => {
+    const { status, body } = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Refactor the uploader", mode: "loop" }),
+    });
+
+    expect(status).toBe(201);
+    // The development provider never calls a tool, so there is no validation
+    // evidence — and the loop will not report success without it.
+    expect(body.status).toBe("failed");
+    expect(body.error).toBe("Model reported completion without validation evidence");
+    expect(body.result).toContain("stopped without claiming success");
+    expect(body.toolCalls).toEqual([]);
+  });
+
+  test("a loop run can be read back by id", async () => {
+    const created = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Add a healthcheck", mode: "loop" }),
+    });
+    expect(created.status).toBe(201);
+
+    const { status, body } = await call(`/v1/agent-runs/users/${USER}/${created.body.id}`);
+    expect(status).toBe(200);
+    expect(body.run.id).toBe(created.body.id);
+    expect(body.run.goal).toBe("Add a healthcheck");
+    expect(body.pendingApproval).toBeNull();
+  });
+
+  test("an unknown loop run is a 404", async () => {
+    const { status } = await call(`/v1/agent-runs/users/${USER}/00000000-0000-4000-8000-000000000000`);
+    expect(status).toBe(404);
+  });
+
+  test("a loop without a goal is refused", async () => {
+    const { status } = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "   ", mode: "loop" }),
+    });
+    expect(status).toBe(400);
+  });
+
+  test("agent run reads require authentication", async () => {
+    const response = await fetch(`${BASE}/v1/agent-runs/users/${USER}/whatever`);
+    expect(response.status).toBe(401);
+  });
+
+  test("the default mode is still the single-shot session", async () => {
+    const { status, body } = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Say hello" }),
+    });
+    expect(status).toBe(201);
+    // No mode asked for a loop, so the run completes as a plain session would.
+    expect(body.status).toBe("completed");
+    expect(body.error).toBeUndefined();
+  });
+});

@@ -1,6 +1,6 @@
 import { postChat } from "./routes";
 import { approvalStore, resolveApproval } from "../../tools/src";
-import { CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
+import { CodingLoop, CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount, shutdownRealtime } from "./realtime";
@@ -15,6 +15,9 @@ import type {
 } from "../../../packages/types/src/mission";
 
 const codingSessions = new CodingSessionManager(createProvider());
+// The autonomous loop executes tools itself and verifies with real output, so it
+// is a separate driver from the single-shot session manager above.
+const codingLoop = new CodingLoop(createProvider());
 const port = Number(process.env.PORT ?? 3001);
 await initializeDeviceStore();
 await markAllDevicesOffline();
@@ -1930,7 +1933,9 @@ const server = Bun.serve<RealtimeSocketData>({
         if (approval.runId) {
           const run = await agentRunStore.get(approval.runId);
           if (run?.status === "waiting_approval" && run.pendingApprovalId === approvalId) {
-            const stopped = await codingSessions.reject(approvalId);
+            const stopped = run.providerContinuation
+              ? await codingSessions.reject(approvalId)
+              : await codingLoop.reject(approvalId);
             return Response.json({ approval: await approvalStore.get(approvalId), run: stopped });
           }
         }
@@ -1949,7 +1954,12 @@ const server = Bun.serve<RealtimeSocketData>({
         const run = await agentRunStore.get(approval.runId);
         if (run?.status === "waiting_approval" && run.pendingApprovalId === approvalId) {
           try {
-            const resumed = await codingSessions.approveAndResume(approvalId);
+            // A run parked with provider state resumes the model session. A loop
+            // run has no provider continuation: it executes the approved tool
+            // and carries on from the evidence it just recorded.
+            const resumed = run.providerContinuation
+              ? await codingSessions.approveAndResume(approvalId)
+              : await codingLoop.resumeAfterApproval(run.id, approvalId);
             return Response.json({ approval: await approvalStore.get(approvalId), run: resumed });
           } catch (error) {
             return Response.json(
@@ -1978,6 +1988,20 @@ const server = Bun.serve<RealtimeSocketData>({
       }
     }
 
+    const agentRunMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)$/);
+    if (agentRunMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(agentRunMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      const runId = decodeBoundedResourceId(agentRunMatch[2]);
+      if (!runId) return Response.json({ error: "Invalid agent run ID" }, { status: 400 });
+
+      const run = await agentRunStore.get(runId);
+      if (!run) return Response.json({ error: "Agent run not found" }, { status: 404 });
+
+      const pendingApproval = run.pendingApprovalId ? await approvalStore.get(run.pendingApprovalId) : null;
+      return Response.json({ run, pendingApproval });
+    }
+
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
       if (!webAuthenticated) {
         return Response.json({ error: "Direct agent runs require trusted web authentication." }, { status: 403 });
@@ -1994,12 +2018,21 @@ const server = Bun.serve<RealtimeSocketData>({
           return Response.json({ error: "goal is required" }, { status: 400 });
         }
 
-        const run = await codingSessions.start({
-          goal,
-          conversationId:
-            typeof body?.conversationId === "string" ? body.conversationId : undefined,
-          messages: [{ role: "user", content: message }],
-        });
+        const conversationId =
+          typeof body?.conversationId === "string" ? body.conversationId : undefined;
+
+        // mode=loop drives the run to a verified result: it executes tools,
+        // validates with real output, and refuses to report success without it.
+        // The default stays the single-shot session so existing callers are
+        // unaffected.
+        const run =
+          body?.mode === "loop"
+            ? await codingLoop.start({ goal, conversationId })
+            : await codingSessions.start({
+                goal,
+                conversationId,
+                messages: [{ role: "user", content: message }],
+              });
 
         return Response.json(run, { status: 201 });
       } catch (error) {

@@ -7,3 +7,4 @@ export * from "./coding-agent";
 export * from "./run-store";
 export * from "./run-store-factory";
 export * from "./coding-session";
+export * from "./coding-loop";

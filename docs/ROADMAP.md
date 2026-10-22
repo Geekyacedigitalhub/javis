@@ -597,7 +597,9 @@ Next engineering priorities:
 4. ~~Add approval/run status APIs suitable for the mobile/web UI.~~ done — the
    approval center now lists, approves, and rejects, and approving resumes the
    interrupted run or mission.
-5. Complete the autonomous coding loop.
+5. ~~Complete the autonomous coding loop.~~ done — `CodingLoop` executes tools,
+   derives its phase from recorded evidence, and refuses to report success
+   until a validation has actually exited zero.
 6. ~~Build the FROSH web command center.~~ done (9 routes)
 7. ~~Build the Android companion.~~ done — the Kotlin modules compile and the
    workflow publishes a debug APK.

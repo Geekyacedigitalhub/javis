@@ -85,9 +85,10 @@ bun run build:web      # production build of the control center
 | `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
-| `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, 404 |
+| `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, the coding loop, 404 |
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |
 | `tests/approvals.test.ts` | Approval listing, expiry sweep, approve/reject, double-resolve, auth |
+| `tests/coding-loop.test.ts` | Loop phases, evidence gates, approval parking, real tool execution |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the
@@ -183,6 +184,52 @@ Approvals are not user-tagged. The runtime is single-tenant and the auth gate
 already restricts device credentials to the configured `FROSH_USER_ID`, so the
 `/users/:userId` segment exists to apply that same restriction rather than to
 partition the records.
+
+### The coding loop
+
+A single model call is not a loop. Given a goal, FROSH needs to look, change
+something, run the project's own checks, read what came back, and try again —
+and it needs to be unable to call that done on its own say-so.
+
+`CodingLoop` drives that. It asks the model what to do next, executes the tool
+calls itself, records every result, and repeats. Phase is derived from the
+recorded evidence rather than held in memory:
+
+| Evidence recorded | Phase |
+| --- | --- |
+| Nothing yet | `plan` |
+| Reads only | `inspect` |
+| An edit, nothing validating it | `test` |
+| A validation that exited non-zero | `fix` |
+| A failed validation already answered by an edit | `test` |
+| A validation that exited zero | `review` |
+
+Because it is derived, a run that restarts re-enters at the right phase and
+anyone reading the run can see exactly why the loop believes what it believes.
+
+The rule the loop exists for: **a reply that asks for no tools is the model
+declaring it is finished, and that declaration is only accepted in the `review`
+phase** — that is, only once a validation tool has actually exited zero. Say it
+any earlier and the loop asks once for real validation rather than prose; say it
+again and the run fails with "Model reported completion without validation
+evidence" and a result that says so. A `workspace_validate` call that never
+completed, or completed without an exit code, counts as no evidence at all.
+
+Confirm tools park the loop exactly like everything else in FROSH: the run stops
+in `waiting_approval` with the approval id, nothing is recorded for the action
+that has not happened yet, and approving it executes the tool once and resumes
+from the result. That is why the approval center and the loop compose without
+either knowing about the other.
+
+```
+POST /v1/agent-runs        { goal, mode: "loop" }   -> 201, the run
+GET  /v1/agent-runs/users/:userId/:runId            -> run plus its pending approval
+```
+
+Without `mode: "loop"` the endpoint behaves exactly as before. With no
+`OPENAI_API_KEY` the offline provider never calls a tool, so a loop run
+deterministically ends `failed` with the unproven-claim message — which is the
+honest outcome, and what the integration test asserts.
 
 ### Control center authentication
 
