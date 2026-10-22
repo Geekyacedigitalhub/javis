@@ -285,7 +285,8 @@ export default function MissionsPage() {
 
               {mission.pendingApprovalId && (
                 <div className="approval-note">
-                  Approval required before FROSH continues. Approve it in the run, then continue the mission.
+                  Approval required before FROSH continues. <Link href="/approvals">Open the approval center</Link>{" "}
+                  to allow or reject it; approving resumes this mission automatically.
                 </div>
               )}
 

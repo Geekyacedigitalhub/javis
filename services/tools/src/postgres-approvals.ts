@@ -1,5 +1,16 @@
 import postgres from "postgres";
-import type { FroshApprovalRequest, FroshApprovalStore } from "../../../packages/types/src/approval";
+import type {
+  FroshApprovalListFilter,
+  FroshApprovalRequest,
+  FroshApprovalStore,
+} from "../../../packages/types/src/approval";
+
+const COLUMNS = 'id, run_id AS "runId", tool_name AS "toolName", arguments, reason, status, created_at AS "createdAt", expires_at AS "expiresAt", resolved_at AS "resolvedAt"';
+
+function takeLimit(filter: FroshApprovalListFilter | undefined) {
+  const requested = filter?.limit ?? 50;
+  return Number.isFinite(requested) ? Math.min(200, Math.max(1, Math.trunc(requested))) : 50;
+}
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -60,6 +71,24 @@ export class PostgresApprovalStore implements FroshApprovalStore {
       [runId, toolName, "pending", argumentsHash],
     );
     return rows[0] ? this.normalize(rows[0]) : null;
+  }
+
+  async list(filter: FroshApprovalListFilter = {}) {
+    const limit = takeLimit(filter);
+
+    // Sweep expired requests once per call so the statuses the caller sees are
+    // never stale, then read the window it asked for.
+    await this.query(
+      "UPDATE frosh_approvals SET status=$1, resolved_at=NOW() WHERE status=$2 AND expires_at<=NOW()",
+      ["expired", "pending"],
+    );
+
+    const wanted = filter.status ?? "all";
+    const rows = wanted === "all"
+      ? await this.query(`SELECT ${COLUMNS} FROM frosh_approvals ORDER BY created_at DESC LIMIT $1`, [limit])
+      : await this.query(`SELECT ${COLUMNS} FROM frosh_approvals WHERE status=$1 ORDER BY created_at DESC LIMIT $2`, [wanted, limit]);
+
+    return rows.map((row) => this.normalize(row));
   }
 
   async resolve(id: string, status: "approved" | "rejected") {

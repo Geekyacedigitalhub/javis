@@ -87,6 +87,7 @@ bun run build:web      # production build of the control center
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, 404 |
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |
+| `tests/approvals.test.ts` | Approval listing, expiry sweep, approve/reject, double-resolve, auth |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the
@@ -100,13 +101,14 @@ six native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`
 `frosh-messaging`, `frosh-notifications`) are Kotlin sources.
 
 TypeScript cannot see those sources, and for a long time nothing compiled them.
-Three real defects had accumulated, all fatal:
+Four real defects had accumulated, all fatal:
 
 | Module | Defect | Effect |
 | --- | --- | --- |
 | `frosh-contacts` | `"\%"` and `"\_"` written with a single backslash | `error: unsupported escape sequence` |
 | `frosh-apps` | `"\."` in the package-name `Regex` | `error: unsupported escape sequence` |
 | `frosh-messaging` | `appContext.permissions?.askForPermission(...)` | No such method on the Expo `Permissions` interface |
+| `frosh-notifications` | `boundedText` was `private` inside one object but called from another class | `unresolved reference 'boundedText'` |
 
 The backslash is easy to get wrong in both directions, and the two mistakes
 look identical in a diff. Kotlin needs `"\\%"` to produce the single `\%` that
@@ -149,6 +151,38 @@ OpenAI provider when `OPENAI_API_KEY` is set and the offline `DevelopmentProvide
 otherwise, so the API, missions, automations, and tools can be exercised locally.
 Mission evaluation is advisory: if the evaluator is unavailable the mission
 continues conservatively instead of failing completed work.
+
+### Approval center
+
+FROSH asks before it acts. Anything a tool marks `confirm` creates an approval
+request with a five-minute deadline, and the run stops in `waiting_approval`
+until a person decides. Until this existed, nothing could decide: a mission that
+needed confirmation sat there until the request expired.
+
+`/approvals` in the control center lists what is pending, shows the tool, the
+arguments, and the reason it asked, and offers **Approve and run** or **Reject**.
+An `approved`, `rejected`, or `expired` history stays visible.
+
+| Route | Purpose |
+| --- | --- |
+| `GET /v1/approvals/users/:userId?status=pending\|all` | Pending by default, plus counts for every status |
+| `POST /v1/approvals/users/:userId/:id/approve` | Perform the action and resume whatever was waiting |
+| `POST /v1/approvals/users/:userId/:id/reject` | Refuse it and stop the waiting run |
+
+Approving resumes the right thing automatically: a mission's approval runs the
+mission continuation, an agent run's approval continues that run through its
+provider state, and an approval attached to neither simply executes the action
+once. Approving something already resolved returns `409`, so a double click
+cannot run an action twice.
+
+Expiry is enforced by the store rather than the caller: `list()` marks anything
+past its deadline as `expired` before returning, and `resolve()` refuses a
+request that is no longer pending.
+
+Approvals are not user-tagged. The runtime is single-tenant and the auth gate
+already restricts device credentials to the configured `FROSH_USER_ID`, so the
+`/users/:userId` segment exists to apply that same restriction rather than to
+partition the records.
 
 ### Control center authentication
 

@@ -111,6 +111,7 @@ export default function Home() {
           <Link href="/messages">Messages</Link>
           <Link href="/automations">Automations</Link>
           <Link href="/missions">Missions</Link>
+          <Link href="/approvals">Approvals</Link>
         </nav>
         <div className="sidebar-status">
           <span className="status-dot" />

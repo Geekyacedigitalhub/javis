@@ -1,0 +1,46 @@
+.approvals-page { min-height: 100vh; padding: 42px; max-width: 1050px; margin: 0 auto; }
+.approvals-page header { border-bottom: 1px solid #143d29; padding-bottom: 24px; }
+.approvals-page .back { display: inline-block; color: #6ee7b7; font-size: 13px; margin-bottom: 24px; }
+.approvals-page .eyebrow { font-size: 10px; letter-spacing: .16em; color: #6ee7b7; font-weight: 800; }
+.approvals-page h1 { font-size: 44px; margin: 9px 0; }
+.approvals-page header p { color: #86a995; max-width: 720px; line-height: 1.6; margin-bottom: 0; }
+
+.approval-tabs { display: flex; gap: 8px; margin-top: 22px; }
+.approval-tabs button { border: 1px solid #164e32; background: #07170f; color: #9fb9aa; border-radius: 999px; padding: 9px 15px; font-weight: 700; font-size: 13px; }
+.approval-tabs button span { color: #6ee7b7; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.approval-tabs button.active { background: #126b35; border-color: #21613c; color: #fff; }
+.approval-tabs button.active span { color: #d1fae5; }
+
+.approval-status { margin-top: 16px; padding: 11px 14px; border: 1px solid #21613c; border-radius: 9px; color: #a7f3d0; }
+
+.approval-list { display: grid; gap: 14px; margin-top: 22px; }
+.approval-card { background: #0a1b13; border: 1px solid #164e32; border-radius: 16px; padding: 18px; }
+.approval-card.pending { border-color: #5b4810; box-shadow: 0 0 0 1px rgba(245,158,11,.08) inset; }
+
+.approval-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.approval-tool { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; font-weight: 700; color: #ecfdf5; }
+.approval-state { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; padding: 4px 8px; border-radius: 5px; }
+.approval-state.pending { color: #fcd34d; background: #352a0b; }
+.approval-state.approved { color: #86efac; background: #123c25; }
+.approval-state.rejected { color: #fca5a5; background: #451a1a; }
+.approval-state.expired { color: #cbd5e1; background: #1e293b; }
+
+.approval-reason { color: #a7c4b3; font-size: 13px; line-height: 1.55; margin: 12px 0; }
+.approval-args { margin: 0; padding: 12px 14px; background: #07170f; border: 1px solid #17452d; border-radius: 10px; color: #9fb9aa; font-size: 12px; line-height: 1.55; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+
+.approval-meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 12px; color: #668675; font-size: 11px; }
+.approval-meta .approval-run { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+.approval-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.approval-actions button { border: 1px solid #21613c; background: #07170f; color: #c9e6d6; border-radius: 9px; padding: 10px 15px; font-weight: 700; }
+.approval-actions button.approve { background: #126b35; color: #fff; }
+.approval-actions button:disabled { opacity: .45; cursor: not-allowed; }
+
+.approval-empty { text-align: center; color: #668675; padding: 50px; }
+
+@media (max-width: 650px) {
+  .approvals-page { padding: 24px 16px; }
+  .approvals-page h1 { font-size: 36px; }
+  .approval-actions { flex-direction: column; }
+  .approval-actions button { width: 100%; }
+}

@@ -52,9 +52,9 @@ Permission levels:
 
 Build:
 
-- approval center
-- approval expiry
-- approval history
+- approval center — **done** (`/approvals`, `GET /v1/approvals/users/:userId`)
+- approval expiry — **done** (enforced by the store on list and resolve)
+- approval history — **done** (`?status=all`, with per-status counts)
 - capability policies
 - device-specific permissions
 - trusted action rules
@@ -591,13 +591,16 @@ Completed foundation:
 
 Next engineering priorities:
 
-1. Run and fix a real typecheck/build pipeline.
-2. Add database migration execution/verification.
-3. Expose agent-run creation through the API.
-4. Add approval/run status APIs suitable for the mobile/web UI.
+1. ~~Run and fix a real typecheck/build pipeline.~~ done
+2. ~~Add database migration execution/verification.~~ done
+3. ~~Expose agent-run creation through the API.~~ done
+4. ~~Add approval/run status APIs suitable for the mobile/web UI.~~ done — the
+   approval center now lists, approves, and rejects, and approving resumes the
+   interrupted run or mission.
 5. Complete the autonomous coding loop.
-6. Build the FROSH web command center.
-7. Build the Android companion.
+6. ~~Build the FROSH web command center.~~ done (9 routes)
+7. ~~Build the Android companion.~~ done — the Kotlin modules compile and the
+   workflow publishes a debug APK.
 8. Add the Windows device agent.
 9. Connect phone ↔ PC securely.
 10. Expand communication, media, research, browser, automation, and specialist agents.

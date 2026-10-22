@@ -1,5 +1,5 @@
 import { postChat } from "./routes";
-import { approvalStore } from "../../tools/src";
+import { approvalStore, resolveApproval } from "../../tools/src";
 import { CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
@@ -1817,6 +1817,165 @@ const server = Bun.serve<RealtimeSocketData>({
         const response=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
         return response;
       }catch(error){return Response.json({error:"Mission continuation failed"},{status:400});}
+    }
+
+    // ------------------------------------------------------------------
+    // Approval center
+    //
+    // Approvals are not user-tagged: the runtime is single-tenant, and the
+    // auth gate above already restricts device credentials to the configured
+    // FROSH_USER_ID. The /users/:userId segment exists so that restriction
+    // applies to these routes exactly as it does to missions and automations.
+    // ------------------------------------------------------------------
+    const approvalListMatch = url.pathname.match(/^\/v1\/approvals\/users\/([^/]+)$/);
+    if (approvalListMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(approvalListMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+
+      const requested = (url.searchParams.get("status") ?? "pending").trim();
+      const allowed = ["pending", "approved", "rejected", "expired", "all"];
+      if (!allowed.includes(requested)) {
+        return Response.json(
+          { error: "status must be one of pending, approved, rejected, expired, all" },
+          { status: 400 },
+        );
+      }
+
+      const all = await approvalStore.list({ status: "all", limit: 200 });
+      const counts = { pending: 0, approved: 0, rejected: 0, expired: 0 };
+      for (const approval of all) counts[approval.status] += 1;
+
+      const approvals = requested === "all" ? all : all.filter((approval) => approval.status === requested);
+      return Response.json({ approvals, counts });
+    }
+
+    const approvalActionMatch = url.pathname.match(/^\/v1\/approvals\/users\/([^/]+)\/([^/]+)\/(approve|reject)$/);
+    if (approvalActionMatch && request.method === "POST") {
+      const userId = decodeBoundedUserId(approvalActionMatch[1]);
+      const approvalId = decodeBoundedResourceId(approvalActionMatch[2]);
+      const action = approvalActionMatch[3] as "approve" | "reject";
+      if (!userId || !approvalId) {
+        return Response.json({ error: "Invalid approval identifier" }, { status: 400 });
+      }
+
+      const approval = await approvalStore.get(approvalId);
+      if (!approval) return Response.json({ error: "Approval not found" }, { status: 404 });
+      if (approval.status !== "pending") {
+        return Response.json(
+          { error: "Approval is already " + approval.status, approval },
+          { status: 409 },
+        );
+      }
+
+      const { getMissionStore } = await import("../../missions/src");
+      const missionStore = getMissionStore();
+      const missions = await missionStore.list(userId);
+      const mission = missions.find((candidate) => candidate.pendingApprovalId === approvalId) ?? null;
+
+      if (mission) {
+        if (action === "reject") {
+          try {
+            await codingSessions.reject(approvalId);
+          } catch {
+            // The run may already be gone; still resolve the approval so the
+            // mission is not stranded on a request nobody can clear.
+            try {
+              await resolveApproval(approvalId, "rejected");
+            } catch (error) {
+              return Response.json(
+                { error: error instanceof Error ? error.message : "Approval could not be rejected" },
+                { status: 409 },
+              );
+            }
+          }
+          const stopped = await missionStore.update(mission.id, userId, {
+            status: "failed",
+            pendingApprovalId: undefined,
+            leaseUntil: undefined,
+            leaseOwner: undefined,
+            result: "The pending approval was rejected, so the mission stopped before performing the action.",
+          });
+          return Response.json({
+            approval: await approvalStore.get(approvalId),
+            mission: publicMissionResponse(stopped),
+          });
+        }
+
+        // Approving a mission's approval is exactly the mission continuation
+        // path: it resumes the run, performs the action, and re-scores steps.
+        const continuation = await fetch(
+          new URL(
+            "/v1/missions/users/" + encodeURIComponent(userId) + "/" + encodeURIComponent(mission.id) + "/continue",
+            request.url,
+          ),
+          { method: "POST", headers: request.headers },
+        );
+        const payload = await continuation.json().catch(() => ({} as Record<string, unknown>));
+        if (!continuation.ok) {
+          return Response.json(
+            { error: (payload as { error?: string }).error ?? "Mission approval continuation failed",
+              approval: await approvalStore.get(approvalId),
+              mission: (payload as { mission?: unknown }).mission },
+            { status: continuation.status },
+          );
+        }
+        return Response.json({
+          approval: await approvalStore.get(approvalId),
+          mission: (payload as { mission?: unknown }).mission,
+          run: (payload as { run?: unknown }).run,
+        });
+      }
+
+      if (action === "reject") {
+        if (approval.runId) {
+          const run = await agentRunStore.get(approval.runId);
+          if (run?.status === "waiting_approval" && run.pendingApprovalId === approvalId) {
+            const stopped = await codingSessions.reject(approvalId);
+            return Response.json({ approval: await approvalStore.get(approvalId), run: stopped });
+          }
+        }
+        try {
+          const rejected = await resolveApproval(approvalId, "rejected");
+          return Response.json({ approval: rejected.approval });
+        } catch (error) {
+          return Response.json(
+            { error: error instanceof Error ? error.message : "Approval could not be rejected" },
+            { status: 409 },
+          );
+        }
+      }
+
+      if (approval.runId) {
+        const run = await agentRunStore.get(approval.runId);
+        if (run?.status === "waiting_approval" && run.pendingApprovalId === approvalId) {
+          try {
+            const resumed = await codingSessions.approveAndResume(approvalId);
+            return Response.json({ approval: await approvalStore.get(approvalId), run: resumed });
+          } catch (error) {
+            return Response.json(
+              {
+                error: error instanceof Error ? error.message : "Approval continuation failed",
+                approval: await approvalStore.get(approvalId),
+              },
+              { status: 409 },
+            );
+          }
+        }
+      }
+
+      // Orphan approval: nothing is waiting on it, so approving means performing
+      // the action it described, exactly once.
+      try {
+        const resolved = await resolveApproval(approvalId, "approved");
+        return Response.json({ approval: resolved.approval, result: resolved.result });
+      } catch (error) {
+        const latest = await approvalStore.get(approvalId);
+        const status = latest && latest.status !== "pending" ? 409 : 500;
+        return Response.json(
+          { error: error instanceof Error ? error.message : "Approved action failed", approval: latest },
+          { status },
+        );
+      }
     }
 
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
