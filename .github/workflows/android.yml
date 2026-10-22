@@ -173,10 +173,65 @@ jobs:
       # First run downloads Gradle 8.14.3, AGP, and the React Native
       # artifacts, so allow a generous timeout. Later runs hit the cache.
       - name: Assemble debug APK
+        id: build
         working-directory: apps/mobile/android
         run: |
+          set -o pipefail
           ./gradlew assembleDebug --no-daemon --console=plain --stacktrace \
-            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g"
+            -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" 2>&1 \
+            | tee gradle-build.log
+
+      # Gradle's failure text sits behind an admin-only log endpoint, so a red
+      # run used to say nothing except "exit code 1". Turn the interesting
+      # lines into annotations, which the public checks API can read, and copy
+      # them into the run summary for whoever is looking at the UI.
+      - name: Surface the Gradle failure
+        if: failure()
+        run: |
+          set -uo pipefail
+          # Relative to the workspace root: this step must still run if the
+          # build never got far enough to create apps/mobile/android.
+          LOG=apps/mobile/android/gradle-build.log
+          if [ ! -f "$LOG" ]; then
+            echo "::warning::Gradle wrote no log; the failure came from an earlier step"
+            exit 0
+          fi
+
+          emit() {
+            local text="$1"
+            text=${text//'%'/'%25'}
+            text=${text//$'\n'/'%0A'}
+            text=${text//$'\r'/'%0D'}
+            printf '::error title=Gradle build failed::%s\n' "$text"
+          }
+
+          EXCERPT="$(
+            { grep -E '^e: |What went wrong|FAILURE: Build failed|Execution failed for task|> Task .* FAILED|^Caused by' "$LOG" || true; } \
+              | head -40 | cut -c1-300
+          )"
+
+          if [ -n "$EXCERPT" ]; then
+            emit "$EXCERPT"
+          else
+            emit "$(tail -40 "$LOG" | cut -c1-300)"
+          fi
+
+          {
+            echo '### Gradle failure'
+            echo
+            echo '```'
+            tail -150 "$LOG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload Gradle log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: apps/mobile/android/gradle-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
