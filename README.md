@@ -89,6 +89,7 @@ bun run build:web      # production build of the control center
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |
 | `tests/approvals.test.ts` | Approval listing, expiry sweep, approve/reject, double-resolve, auth |
 | `tests/coding-loop.test.ts` | Loop phases, evidence gates, approval parking, real tool execution |
+| `tests/windows-agent.test.ts` | Device agent handlers, reconnect backoff, live enrolment and command dispatch |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the
@@ -230,6 +231,42 @@ Without `mode: "loop"` the endpoint behaves exactly as before. With no
 `OPENAI_API_KEY` the offline provider never calls a tool, so a loop run
 deterministically ends `failed` with the unproven-claim message — which is the
 honest outcome, and what the integration test asserts.
+
+### Device agent
+
+The control center could list devices and the server could dispatch a command to
+one, but nothing lived on a desktop machine to answer. `apps/agent` is that
+process: it enrolls once, holds an authenticated websocket, executes what it is
+sent, and reports the real result.
+
+Two commands exist for a desktop:
+
+| Command | Capability | Returns |
+| --- | --- | --- |
+| `device_info` | `device.info` | Hostname, platform, release, CPU count, memory, working directory, shell |
+| `run_command` | `shell.execute` | Exit code, stdout, stderr, duration, working directory |
+
+`run_command` is arbitrary code execution on the user's machine, so it is gated
+twice: the device must hold the `shell.execute` capability, and only the trusted
+web console can grant it — a device credential cannot escalate itself. The
+command route also refuses `run_command` without web authentication even when
+the caller is that device's own credential.
+
+Commands are synchronous and capped at 14 seconds, because the server waits 15
+for an acknowledgement. Anything slower is marked unknown rather than reported
+as a success. A command killed at the timeout is likewise reported as an unknown
+outcome with `retryable: false`, not as a failure — the same rule the rest of
+FROSH follows for interrupted side effects.
+
+Building this found a real defect in the server. `addRealtimeClient` called
+`socket.addEventListener("close", ...)` on what is a Bun `ServerWebSocket`,
+which has no such method, so every successful device authentication threw and
+the socket was never registered. The realtime command channel had never worked.
+The close path now runs from the server's own `close(ws)` handler instead.
+
+The agent is written for Windows and runs unchanged on Linux and macOS. Its
+Windows shell invocation is unit-tested; running it on an actual Windows machine
+is still unverified, and the repository says so rather than implying otherwise.
 
 ### Control center authentication
 

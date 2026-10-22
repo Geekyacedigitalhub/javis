@@ -603,6 +603,8 @@ Next engineering priorities:
 6. ~~Build the FROSH web command center.~~ done (9 routes)
 7. ~~Build the Android companion.~~ done — the Kotlin modules compile and the
    workflow publishes a debug APK.
-8. Add the Windows device agent.
+8. ~~Add the Windows device agent.~~ done — `apps/agent` enrolls, holds an
+   authenticated websocket, and executes `device_info` and `run_command` under
+   the `device.info` and `shell.execute` capabilities.
 9. Connect phone ↔ PC securely.
 10. Expand communication, media, research, browser, automation, and specialist agents.

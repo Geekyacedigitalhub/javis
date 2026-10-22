@@ -18,7 +18,9 @@ export type FroshDeviceCommandName =
   | "call_number"
   | "message_inbox"
   | "message_reply"
-  | "send_message";
+  | "send_message"
+  | "device_info"
+  | "run_command";
 
 export type FroshDeviceCommand =
   | { type: "device.command"; requestId: string; deviceId: string; command: "open_app"; appName: string }
@@ -29,4 +31,6 @@ export type FroshDeviceCommand =
   | { type: "device.command"; requestId: string; deviceId: string; command: "message_inbox" }
   | { type: "device.command"; requestId: string; deviceId: string; command: "message_reply"; notificationId: string; message: string }
   | { type: "device.command"; requestId: string; deviceId: string; command: "send_message"; provider: string; recipient: string; message: string }
+  | { type: "device.command"; requestId: string; deviceId: string; command: "device_info" }
+  | { type: "device.command"; requestId: string; deviceId: string; command: "run_command"; commandLine: string; cwd?: string; timeoutMs?: number }
   | { type: "device.command.result"; requestId: string; deviceId: string; command: FroshDeviceCommandName; accepted: boolean; message: string; data?: unknown };

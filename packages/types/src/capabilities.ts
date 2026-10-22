@@ -11,7 +11,9 @@ export type FroshCapability =
   | "notifications.read"
   | "camera.capture"
   | "screen.observe"
-  | "location.read";
+  | "location.read"
+  // Desktop agents only. A phone can never declare these.
+  | "shell.execute";
 
 export type FroshCapabilityAvailability = "available" | "permission_required" | "unsupported";
 
@@ -26,6 +28,7 @@ export const FROSH_CAPABILITIES: readonly FroshCapability[] = [
   "device.info", "apps.launch", "media.control", "calls.dialer", "calls.direct",
   "messages.compose", "messages.send", "contacts.read", "notifications.reply",
   "notifications.read", "camera.capture", "screen.observe", "location.read",
+  "shell.execute",
 ];
 
 export function isFroshCapability(value: string): value is FroshCapability {
@@ -43,6 +46,7 @@ export const FROSH_IMPLEMENTED_CAPABILITIES: readonly FroshCapability[] = [
   "contacts.read",
   "notifications.reply",
   "notifications.read",
+  "shell.execute",
 ];
 
 export function isImplementedFroshCapability(value: string): value is FroshCapability {

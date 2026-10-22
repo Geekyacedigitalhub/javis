@@ -1,0 +1,11 @@
+{
+  "name": "@frosh/agent",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FROSH device agent: lets FROSH act on a Windows (or Linux/macOS) machine",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "bun run src/index.ts"
+  }
+}

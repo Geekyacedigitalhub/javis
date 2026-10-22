@@ -64,31 +64,45 @@ export function addRealtimeClient(socket: WebSocket, deviceId?: string, deviceTo
     }
   }
 
-  socket.addEventListener("close", () => {
-    if (authCheck) clearInterval(authCheck);
-    clients.delete(id);
-    if (deviceId && latestClientByDevice.get(deviceId) === id) {
-      latestClientByDevice.delete(deviceId);
-      void markDeviceOffline(deviceId).catch(() => undefined);
-    }
-    resolvePendingCommandsForClient(id);
-  });
   return id;
+}
+
+/**
+ * Release everything a connection held: its auth poll, its pending commands, and
+ * the device's online state.
+ *
+ * This deliberately does not attach a listener to the socket. A Bun
+ * `ServerWebSocket` has no `addEventListener`, so the old code below threw on
+ * every successful device authentication and the socket was never registered —
+ * meaning no device command could ever be dispatched over the realtime channel.
+ * The server's own `close(ws)` handler calls this instead.
+ */
+function releaseClient(client: Client) {
+  if (client.authCheck) clearInterval(client.authCheck);
+  resolvePendingCommandsForClient(client.id);
+  clients.delete(client.id);
+  if (client.deviceId && latestClientByDevice.get(client.deviceId) === client.id) {
+    latestClientByDevice.delete(client.deviceId);
+    void markDeviceOffline(client.deviceId).catch(() => undefined);
+  }
+}
+
+export function handleRealtimeClose(realtimeClientId: string) {
+  const client = clients.get(realtimeClientId);
+  if (client) releaseClient(client);
+}
+
+/** A Bun server socket may not expose `readyState`; treat unknown as open. */
+function isOpen(socket: WebSocket) {
+  const state = (socket as unknown as { readyState?: number }).readyState;
+  return state === undefined || state === 1;
 }
 
 export function removeRealtimeClient(id: string) {
   const client = clients.get(id);
   if (!client) return;
-  if (client.authCheck) clearInterval(client.authCheck);
-  resolvePendingCommandsForClient(id);
-  clients.delete(id);
-  if (client.deviceId && latestClientByDevice.get(client.deviceId) === id) {
-    latestClientByDevice.delete(client.deviceId);
-    void markDeviceOffline(client.deviceId).catch(() => undefined);
-  }
-  if (client.socket.readyState === WebSocket.OPEN || client.socket.readyState === WebSocket.CONNECTING) {
-    try { client.socket.close(); } catch { /* already closed */ }
-  }
+  releaseClient(client);
+  try { client.socket.close(); } catch { /* already closed */ }
 }
 
 export function broadcast(event: FroshEvent) {
@@ -102,7 +116,7 @@ export function broadcast(event: FroshEvent) {
 export async function getAuthenticatedCommandClient(deviceId: string) {
   const clientId = latestClientByDevice.get(deviceId);
   const client = clientId ? clients.get(clientId) : undefined;
-  if (!client || client.deviceId !== deviceId || !client.deviceToken || client.socket.readyState !== WebSocket.OPEN) {
+  if (!client || client.deviceId !== deviceId || !client.deviceToken || !isOpen(client.socket)) {
     return null;
   }
   const authenticated = await authenticateDevice(deviceId, client.deviceToken).catch(() => false);
@@ -111,7 +125,7 @@ export async function getAuthenticatedCommandClient(deviceId: string) {
     return null;
   }
   const current = clients.get(client.id);
-  if (!current || current.deviceId !== deviceId || current.deviceToken !== client.deviceToken || current.socket.readyState !== WebSocket.OPEN) {
+  if (!current || current.deviceId !== deviceId || current.deviceToken !== client.deviceToken || !isOpen(current.socket)) {
     return null;
   }
   return current;
@@ -121,7 +135,7 @@ export function sendToDevice(deviceId: string, event: FroshEvent) {
   const clientId = latestClientByDevice.get(deviceId);
   if (!clientId) return false;
   const client = clients.get(clientId);
-  if (!client || client.deviceId !== deviceId || client.socket.readyState !== WebSocket.OPEN) return false;
+  if (!client || client.deviceId !== deviceId || !isOpen(client.socket)) return false;
   client.socket.send(JSON.stringify(event));
   return true;
 }
@@ -203,6 +217,8 @@ const COMMAND_CAPABILITY: Partial<Record<FroshDeviceCommand["command"], string>>
   media_state: "media.control",
   media_control: "media.control",
   open_app: "apps.launch",
+  device_info: "device.info",
+  run_command: "shell.execute",
 };
 
 async function authorizedForCommand(deviceId: string, command: FroshDeviceCommand["command"]) {
@@ -274,7 +290,13 @@ const commandTimeoutResult = {
   data: { outcome: "unknown", retryable: false },
 };
 
-export async function sendDeviceCommand(deviceId: string, command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"], value?: string, idempotencyKey?: string) {
+export async function sendDeviceCommand(
+  deviceId: string,
+  command: Extract<FroshDeviceCommand, { type: "device.command" }>["command"],
+  value?: string,
+  idempotencyKey?: string,
+  extra?: Record<string, unknown>,
+) {
   const client = await getAuthenticatedCommandClient(deviceId);
   if (!client) return { accepted: false, message: "The Android device is not connected or its credential is no longer valid." };
   if (!(await authorizedForCommand(deviceId, command))) return { accepted: false, message: "This device is not authorized for the requested capability." };
@@ -288,6 +310,7 @@ export async function sendDeviceCommand(deviceId: string, command: Extract<Frosh
     deviceId,
     command,
     ...(command === "open_app" ? { appName: value } : command === "media_control" ? { action: value } : command === "contacts_search" ? { query: value } : command === "call_number" ? { phoneNumber: value } : {}),
+    ...extra,
   };
   const ledger = await prepareCommandLedger({ requestId, deviceId, command, payload, idempotencyKey });
   if (ledger.kind === "completed") return ledger.result;
@@ -337,7 +360,7 @@ export async function handleDeviceCommandResult(clientId: string, message: Frosh
   if (
     !client ||
     client.deviceId !== message.deviceId ||
-    client.socket.readyState !== WebSocket.OPEN ||
+    !isOpen(client.socket) ||
     latestClientByDevice.get(message.deviceId) !== clientId
   ) return;
 

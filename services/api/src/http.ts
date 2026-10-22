@@ -3,7 +3,7 @@ import { approvalStore, resolveApproval } from "../../tools/src";
 import { CodingLoop, CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
-import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, realtimeClientCount, shutdownRealtime } from "./realtime";
+import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 import type {
@@ -220,6 +220,9 @@ const server = Bun.serve<RealtimeSocketData>({
     },
     close(ws) {
       clearTimeout(ws.data?.authTimeout);
+      // The socket itself cannot be listened to from realtime.ts, so this is the
+      // one place a connection is known to be gone.
+      if (ws.data?.realtimeClientId) handleRealtimeClose(ws.data.realtimeClientId);
       ws.data = { ...ws.data, closed: true, authenticating: false };
     },
     async message(ws, message) {
@@ -264,7 +267,8 @@ const server = Bun.serve<RealtimeSocketData>({
           if (!ws.data?.authenticated) return;
           ws.send(JSON.stringify({ type: "connected", timestamp: new Date().toISOString() }));
         }
-      } catch {
+      } catch (error) {
+        if (process.env.FROSH_DEBUG_REALTIME === "1") console.error("[realtime] frame rejected:", error);
         const malformedMessages = (ws.data?.malformedMessages ?? 0) + 1;
         ws.data = { ...ws.data, malformedMessages };
         try { ws.send(JSON.stringify({ type: "error", message: "Invalid realtime message" })); } catch { /* socket may already be closing */ }
@@ -623,9 +627,19 @@ const server = Bun.serve<RealtimeSocketData>({
         }
         const body = await parseBoundedJson(request);
         const command = typeof body?.command === "string" ? body.command : "";
-        const allowed = ["open_dialer", "media_control", "media_state", "open_app", "contacts_search", "message_inbox"];
+        const allowed = ["open_dialer", "media_control", "media_state", "open_app", "contacts_search", "message_inbox", "device_info", "run_command"];
         if (!allowed.includes(command)) {
           return Response.json({ error: "Command is not available from the web console." }, { status: 403 });
+        }
+        // Running a command on a desktop is the most powerful thing the console
+        // can ask a device to do, so it stays behind trusted web authentication
+        // even when the requesting credential is that device's own.
+        if (command === "run_command" && !webAuthenticated) {
+          return Response.json({ error: "Running a command requires trusted web authentication." }, { status: 403 });
+        }
+        const commandLine = typeof body?.commandLine === "string" ? body.commandLine.trim() : "";
+        if (command === "run_command" && (!commandLine || commandLine.length > 4000)) {
+          return Response.json({ error: "commandLine is required and must be under 4000 characters." }, { status: 400 });
         }
         const { sendDeviceCommand } = await import("./realtime");
         const value =
@@ -648,9 +662,16 @@ const server = Bun.serve<RealtimeSocketData>({
           undefined;
         const result = await sendDeviceCommand(
           commandMatch[1],
-          command as "open_dialer" | "media_control" | "media_state" | "open_app" | "contacts_search" | "message_inbox",
+          command as "open_dialer" | "media_control" | "media_state" | "open_app" | "contacts_search" | "message_inbox" | "device_info" | "run_command",
           value,
           idempotencyKey,
+          command === "run_command"
+            ? {
+                commandLine,
+                cwd: typeof body?.cwd === "string" ? body.cwd : undefined,
+                timeoutMs: typeof body?.timeoutMs === "number" ? body.timeoutMs : undefined,
+              }
+            : undefined,
         );
         return Response.json(result);
       } catch (error) {
