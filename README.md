@@ -86,6 +86,7 @@ bun run build:web      # production build of the control center
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, 404 |
+| `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the
@@ -96,8 +97,45 @@ TCP socket for it. Memory work belongs to the server; the phone talks to the API
 
 The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. Its
 six native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
-`frosh-messaging`, `frosh-notifications`) are Kotlin sources that require a
-native Expo build; they are typechecked from the TypeScript side only.
+`frosh-messaging`, `frosh-notifications`) are Kotlin sources.
+
+TypeScript cannot see those sources, and for a long time nothing compiled them.
+Three real defects had accumulated, all fatal:
+
+| Module | Defect | Effect |
+| --- | --- | --- |
+| `frosh-contacts` | `"\%"` and `"\_"` written with a single backslash | `error: unsupported escape sequence` |
+| `frosh-apps` | `"\."` in the package-name `Regex` | `error: unsupported escape sequence` |
+| `frosh-messaging` | `appContext.permissions?.askForPermission(...)` | No such method on the Expo `Permissions` interface |
+
+The backslash is easy to get wrong in both directions, and the two mistakes
+look identical in a diff. Kotlin needs `"\\%"` to produce the single `\%` that
+SQLite's `LIKE ... ESCAPE` consumes, but `\\` is itself an escaped backslash, so
+counting backslashes on a line proves nothing: in `FroshContactsModule.kt`
+line 48 two backslashes form one valid escape, while line 49 had two
+backslashes that were two invalid ones. `tests/android-modules.test.ts` scans
+every `.kt` file the way the compiler does, and the Android workflow compiles
+them for real.
+
+Each module also needs an `android/build.gradle`, which none of them had. Expo
+autolinking drops any module without one *silently* — the app still built, then
+failed at runtime with `Cannot find native module 'Frosh...'`. The same test
+asserts the file exists, that its `namespace` matches the Kotlin package, and
+that every class named in `expo-module.config.json` has a matching `.kt` file.
+
+`apps/mobile/package.json` carries `expo.autolinking.nativeModulesDir: "./modules"`
+so autolinking searches the local module directory at all.
+
+#### Building the APK
+
+`.github/workflows/android.yml` runs `expo prebuild --platform android` followed
+by `./gradlew assembleDebug` on JDK 17, and uploads `frosh-debug-apk`. It needs
+the Android SDK, JDK 17, and roughly 4 GB of RAM, so it runs on GitHub's runners
+rather than as part of the local `bun run check` loop. Two guards run first and
+fail the job by name if any module falls out of the build.
+
+`apps/mobile/android/` is generated and git-ignored; only the Kotlin sources in
+`apps/mobile/modules/*/android/` are tracked.
 
 The whole suite runs offline: no `OPENAI_API_KEY` and no database are needed,
 because the API falls back to the in-memory stores and the development provider.

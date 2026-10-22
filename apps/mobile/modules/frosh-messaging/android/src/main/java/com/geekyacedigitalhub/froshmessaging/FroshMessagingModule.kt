@@ -23,11 +23,16 @@ class FroshMessagingModule : Module() {
       val context = appContext.reactContext ?: return@Function "unsupported"
       if (context.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) "available" else "permission_required"
     }
-    AsyncFunction("requestPermission") {
-      val context = appContext.reactContext ?: return@AsyncFunction false
-      if (context.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) return@AsyncFunction true
-      appContext.permissions?.askForPermission(this@FroshMessagingModule, Manifest.permission.SEND_SMS)
-      false
+    // appContext.permissions is the legacy Permissions interface: it exposes
+    // askForPermissionsWithPermissionsManager / askForPermissionsWithPromise and
+    // has no askForPermission(module, permission). Requesting through the Activity
+    // matches frosh-calls and frosh-contacts and needs no extra state.
+    Function("requestPermission") {
+      val context = appContext.reactContext ?: return@Function false
+      if (context.checkSelfPermission(Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED) return@Function true
+      val activity = appContext.currentActivity ?: return@Function false
+      activity.requestPermissions(arrayOf(Manifest.permission.SEND_SMS), 4819)
+      true
     }
     Function("send") { phoneNumber: String, message: String ->
       val context = appContext.reactContext ?: return@Function mapOf("accepted" to false, "message" to "Android context is unavailable.")

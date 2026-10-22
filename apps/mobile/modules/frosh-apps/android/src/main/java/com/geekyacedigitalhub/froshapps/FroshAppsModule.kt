@@ -65,7 +65,7 @@ class FroshAppsModule : Module() {
       )
       if (packageName.length !in 1..MAX_PACKAGE_NAME_LENGTH ||
         packageName.any { it.code < 0x21 || it.code == 0x7f } ||
-        !packageName.matches(Regex("^[A-Za-z0-9_]+(\.[A-Za-z0-9_]+)+$"))) {
+        !packageName.matches(Regex("^[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+$"))) {
         return@Function mapOf("accepted" to false, "message" to "Invalid Android package name.")
       }
       val target = launchableApps().firstOrNull { it.packageName == packageName }

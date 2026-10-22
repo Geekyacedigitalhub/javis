@@ -46,7 +46,7 @@ class FroshContactsModule : Module() {
         ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
         projection,
         ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " LIKE ? ESCAPE '\\'",
-        arrayOf("%" + trimmed.replace("%", "\%").replace("_", "\_") + "%"),
+        arrayOf("%" + trimmed.replace("%", "\\%").replace("_", "\\_") + "%"),
         ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
       )?.use { cursor ->
         val idIndex = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
