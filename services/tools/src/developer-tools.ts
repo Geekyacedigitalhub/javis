@@ -2,11 +2,23 @@ import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { registerTool } from "./registry";
 
-const workspaceRoot = path.resolve(process.env.FROSH_WORKSPACE ?? process.cwd());
+/**
+ * Resolved per call, not once at import.
+ *
+ * Capturing this at module load made the workspace depend on import order: the
+ * first thing to load the tool registry froze whichever value the environment
+ * held at that moment, for the lifetime of the process. `command-tools` already
+ * reads it per call, and the two disagreeing is how a test came to write outside
+ * the directory it was told to use.
+ */
+function workspaceRoot() {
+  return path.resolve(process.env.FROSH_WORKSPACE ?? process.cwd());
+}
 
 function safePath(relativePath: string) {
-  const resolved = path.resolve(workspaceRoot, relativePath);
-  const relative = path.relative(workspaceRoot, resolved);
+  const root = workspaceRoot();
+  const resolved = path.resolve(root, relativePath);
+  const relative = path.relative(root, resolved);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
     throw new Error("Path is outside the configured FROSH workspace");
   }

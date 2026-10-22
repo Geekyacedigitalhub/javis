@@ -93,6 +93,7 @@ bun run build:web      # production build of the control center
 | `tests/desktop-tools.test.ts` | Desktop tools end to end: safe info, approval-gated commands, refusal without a device |
 | `tests/agent-runs.test.ts` | Run listing, filters, counts, ordering, limit clamp, auth |
 | `tests/run-summary.test.ts` | The console's evidence rules: only a zero exit counts as verified |
+| `tests/tool-workspace.test.ts` | The workspace root follows `FROSH_WORKSPACE` per call instead of being frozen at import |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the

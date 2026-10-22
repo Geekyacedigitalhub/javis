@@ -1,6 +1,6 @@
 import { LOOP_WORKSPACE } from "./loop.setup";
 
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { FroshToolCall } from "../packages/types/src/javis";
@@ -18,6 +18,12 @@ import { approvalStore } from "../services/tools/src";
  * do with a model's output, so the tests supply the output and check the
  * decisions — including the ones that refuse to believe it.
  */
+// Set here rather than at import: another test file may legitimately point the
+// workspace somewhere else, and whichever file ran last would otherwise win.
+beforeAll(() => {
+  process.env.FROSH_WORKSPACE = LOOP_WORKSPACE;
+});
+
 class ScriptedProvider implements ProviderClient {
   readonly prompts: string[] = [];
 

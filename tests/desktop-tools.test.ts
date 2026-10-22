@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,6 @@ process.env.PORT = String(PORT);
 process.env.FROSH_WEB_TOKEN = TOKEN;
 process.env.FROSH_DEVICE_ENROLLMENT_TOKEN = ENROLL;
 process.env.FROSH_USER_ID = "default-user";
-process.env.FROSH_WORKSPACE = WORKDIR;
 delete process.env.DATABASE_URL;
 delete process.env.OPENAI_API_KEY;
 
@@ -76,6 +75,12 @@ async function startAgent() {
   agentStarted = true;
   await waitForOnlineDesktop();
 }
+
+beforeAll(() => {
+  // This file's own workspace, applied at test time so it cannot leak into
+  // another file's run and cannot be overridden by one.
+  process.env.FROSH_WORKSPACE = WORKDIR;
+});
 
 afterAll(async () => {
   for (const agent of agents) agent.kill();
