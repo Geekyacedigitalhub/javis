@@ -31,6 +31,12 @@ export interface FroshToolDefinition {
   description: string;
   permission: "safe" | "confirm" | "restricted";
   parameters?: Record<string, unknown>;
+  /**
+   * Rejects arguments that can never succeed, before anything is asked of the
+   * user. Without this, a malformed request becomes an approval prompt that
+   * cannot be honoured however the user answers it.
+   */
+  validate?: (args: Record<string, unknown>) => string | null;
   execute: (args: Record<string, unknown>) => Promise<unknown>;
 }
 export type JavisToolDefinition = FroshToolDefinition;

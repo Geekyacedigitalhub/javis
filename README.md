@@ -90,6 +90,7 @@ bun run build:web      # production build of the control center
 | `tests/approvals.test.ts` | Approval listing, expiry sweep, approve/reject, double-resolve, auth |
 | `tests/coding-loop.test.ts` | Loop phases, evidence gates, approval parking, real tool execution |
 | `tests/windows-agent.test.ts` | Device agent handlers, reconnect backoff, live enrolment and command dispatch |
+| `tests/desktop-tools.test.ts` | Desktop tools end to end: safe info, approval-gated commands, refusal without a device |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the
@@ -267,6 +268,36 @@ The close path now runs from the server's own `close(ws)` handler instead.
 The agent is written for Windows and runs unchanged on Linux and macOS. Its
 Windows shell invocation is unit-tested; running it on an actual Windows machine
 is still unverified, and the repository says so rather than implying otherwise.
+
+### Acting on the desktop
+
+A device agent that nothing can reach is a curiosity. Two tools close the loop:
+
+| Tool | Permission | What it does |
+| --- | --- | --- |
+| `desktop_info` | `safe` | Reports the paired machine: host, platform, release, CPUs, memory, workdir, shell |
+| `desktop_run_command` | `confirm` | Runs a command line and returns its exit code, stdout and stderr |
+
+`desktop_run_command` is `confirm`, so it is created as an approval request and
+nothing touches the machine until a person approves it. That means the same
+route the control center already uses applies here: the request appears in
+`/approvals`, approving it dispatches the command, and rejecting it means the
+command never ran.
+
+Building this turned up a design gap worth naming. The executor created an
+approval *before* the tool ran, so `desktop_run_command` with a blank command
+line produced a pending request that could not be honoured however the user
+answered it — a dead approval in the user's queue. Tools can now declare
+`validate(args)`, which the executor consults before anything is asked of
+anyone. `listTools()` strips it, so the model never sees it as part of the
+schema. The check is repeated inside `execute` because an approved call is
+re-run with the arguments stored on the approval, not the ones the tool first
+saw.
+
+The desktop tools are tested against a real agent process over a real websocket,
+with the API started in the test process so tool dispatch and the socket registry
+are the same objects the server uses. A fake would have proved nothing about the
+part that was broken.
 
 ### Control center authentication
 

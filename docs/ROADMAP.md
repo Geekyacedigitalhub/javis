@@ -606,5 +606,9 @@ Next engineering priorities:
 8. ~~Add the Windows device agent.~~ done — `apps/agent` enrolls, holds an
    authenticated websocket, and executes `device_info` and `run_command` under
    the `device.info` and `shell.execute` capabilities.
-9. Connect phone ↔ PC securely.
+9. ~~Connect phone ↔ PC securely.~~ done — a phone or the console reaches the
+   desktop through the API: `desktop_info` and an approval-gated
+   `desktop_run_command`, over the device's own credential and the
+   `shell.execute` capability. The connection is server-mediated rather than
+   peer-to-peer, which is the property that lets either side be offline.
 10. Expand communication, media, research, browser, automation, and specialist agents.

@@ -12,6 +12,11 @@ export async function executeToolCall(call: FroshToolCall, options: { runId?: st
     return { ...call, status: "failed" as const, result: { error: `Unknown tool: ${call.name}` } };
   }
 
+  const invalid = tool.validate?.(call.arguments) ?? null;
+  if (invalid) {
+    return { ...call, status: "failed" as const, result: { error: invalid } };
+  }
+
   if (tool.permission !== "safe") {
     const argumentsHash = JSON.stringify(call.arguments);
     const existingApproval = options.runId

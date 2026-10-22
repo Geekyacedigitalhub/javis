@@ -12,5 +12,5 @@ export function getTool(name: string) {
 }
 
 export function listTools() {
-  return [...tools.values()].map(({ execute: _execute, ...definition }) => definition);
+  return [...tools.values()].map(({ execute: _execute, validate: _validate, ...definition }) => definition);
 }

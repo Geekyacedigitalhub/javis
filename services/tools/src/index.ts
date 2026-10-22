@@ -10,6 +10,7 @@ import "./github-tools";
 import "./repo-intelligence";
 import "./validation-tools";
 import "./mobile-tools";
+import "./desktop-tools";
 import "./media-tools";
 import "./contact-tools";
 

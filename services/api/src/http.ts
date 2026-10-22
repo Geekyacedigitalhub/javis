@@ -74,23 +74,32 @@ async function recoverMissionsOnStartup(){
 setTimeout(()=>void recoverMissionsOnStartup(),2000);
 
 let shuttingDown = false;
-async function shutdownApi() {
-  if (shuttingDown) return;
-  shuttingDown = true;
+
+/**
+ * Release everything the server holds, without exiting the process. Tests start
+ * the API in-process so tool dispatch and the socket registry share module
+ * state, and they need a way to put it down again.
+ */
+export async function closeApi() {
   clearInterval(credentialCleanupTimer);
   try {
     shutdownRealtime();
     await server.stop(true);
   } catch (error) {
     logOperationalError("FROSH realtime/API server shutdown failed", error);
-  } finally {
-    try {
-      await closeDeviceStore();
-    } catch (error) {
-      logOperationalError("FROSH device store shutdown failed", error);
-    }
-    process.exit(0);
   }
+  try {
+    await closeDeviceStore();
+  } catch (error) {
+    logOperationalError("FROSH device store shutdown failed", error);
+  }
+}
+
+async function shutdownApi() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await closeApi();
+  process.exit(0);
 }
 process.once("SIGTERM", () => { void shutdownApi(); });
 process.once("SIGINT", () => { void shutdownApi(); });
