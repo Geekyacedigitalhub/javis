@@ -184,7 +184,9 @@ jobs:
           set -uo pipefail
           LOG="$RUNNER_TEMP/gradle-build.log"
 
-          if ./gradlew assembleDebug --no-daemon --console=plain --stacktrace \
+          # --continue keeps compiling the other modules after one fails, so a
+          # single run reports every Kotlin error instead of the first one.
+          if ./gradlew assembleDebug --no-daemon --console=plain --stacktrace --continue \
                -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=1g" 2>&1 | tee "$LOG"; then
             exit 0
           fi

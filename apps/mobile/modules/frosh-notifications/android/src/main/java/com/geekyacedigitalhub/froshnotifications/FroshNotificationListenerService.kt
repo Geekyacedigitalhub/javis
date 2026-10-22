@@ -6,6 +6,11 @@ import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 
+private const val MAX_NOTIFICATION_TEXT_LENGTH = 512
+
+private fun boundedText(value: CharSequence?): String? =
+  value?.toString()?.take(MAX_NOTIFICATION_TEXT_LENGTH)
+
 data class FroshReplyTarget(
   val action: Notification.Action,
   val remoteInputKey: String,
@@ -14,13 +19,9 @@ data class FroshReplyTarget(
 
 object FroshNotificationStore {
   private const val MAX_ITEMS = 100
-  private const val MAX_TEXT_LENGTH = 512
   private const val MAX_REPLY_LENGTH = 8000
   private val items = ArrayDeque<Map<String, Any?>>()
   private val replyTargets = mutableMapOf<String, FroshReplyTarget>()
-
-  private fun boundedText(value: CharSequence?): String? =
-    value?.toString()?.take(MAX_TEXT_LENGTH)
 
   @Synchronized
   fun add(item: Map<String, Any?>, replyTarget: FroshReplyTarget?) {
