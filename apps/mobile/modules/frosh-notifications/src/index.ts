@@ -1,5 +1,5 @@
 import { requireNativeModule } from "expo-modules-core";
-import type { FroshNotification, FroshNotificationCapability } from "../../../../packages/types/src/notifications";
+import type { FroshNotification, FroshNotificationCapability } from "../../../../../packages/types/src/notifications";
 
 type NativeNotifications = {
   getPermissionStatus(): string;

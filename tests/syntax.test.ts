@@ -121,6 +121,34 @@ describe("source parse integrity", () => {
     expect(suspicious).toEqual([]);
   });
 
+  test("the mobile app never imports server-only code", () => {
+    // The Android app once imported services/memory/src/conversation-memory-factory,
+    // which pulls the `postgres` driver into the React Native bundle. There are no
+    // TCP sockets for that driver on a phone, so the feature could never work and
+    // it silently coupled the client to the server's storage layer.
+    const offenders: string[] = [];
+    const mobileFiles = files.filter((file) => file.includes(`${join("apps", "mobile")}`));
+
+    expect(mobileFiles.length).toBeGreaterThan(10);
+
+    for (const file of mobileFiles) {
+      const source = readFileSync(file, "utf8");
+      // Only real imports count; comments and type-only re-exports are fine.
+      const imports = source.match(/(?:^|\n)\s*import[^;]*?from\s*["']([^"']+)["']/g) ?? [];
+      for (const statement of imports) {
+        const specifier = statement.match(/from\s*["']([^"']+)["']/)?.[1] ?? "";
+        const isTypeOnly = /import\s+type\b/.test(statement);
+        // A type-only import is erased at build time, so it cannot ship the driver.
+        if (isTypeOnly) continue;
+        if (/^(\.\.\/)+services\//.test(specifier)) {
+          offenders.push(`${relative(ROOT, file)} -> ${specifier}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
   test("the previously truncated files keep their restored size", () => {
     // Regression floor: these files are far longer than the damaged versions
     // (http.ts 1799 -> 1861 lines, pages 23/14/14 -> 300+). A sudden collapse

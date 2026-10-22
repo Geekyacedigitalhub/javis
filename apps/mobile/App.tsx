@@ -6,6 +6,7 @@ import type { FroshAgentRun } from "../../packages/types/src/agent-run";
 import { listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
+import type { FroshNotification } from "../../packages/types/src/notifications";
 import { loadDeviceCredential } from "./src/session";
 import { runNativePhoneAction } from "./src/native-bridge";
 import { controlMedia, readMediaState } from "./src/media-bridge";
@@ -30,7 +31,7 @@ export default function App() {
   const [enrollmentToken, setEnrollmentToken] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
   const [mediaMessage, setMediaMessage] = useState("Media controls unavailable until Android MediaSession access is connected.");
-  const [notifications, setNotifications] = useState<Array<{ id: string; packageName: string; title?: string; text?: string }>>([]);
+  const [notifications, setNotifications] = useState<FroshNotification[]>([]);
   const [notificationAccess, setNotificationAccess] = useState("checking");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
@@ -284,6 +285,7 @@ const styles = StyleSheet.create({
   card: { backgroundColor: "#0d1b13", borderWidth: 1, borderColor: "#173524", borderRadius: 18, padding: 18, gap: 12 },
   cardTitle: { color: "#dcfce7", fontSize: 17, fontWeight: "800" },
   reply: { color: "#d1d5db", fontSize: 15, lineHeight: 22 },
+  replyRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
   inputSingle: { minHeight: 48, backgroundColor: "#07110b", borderRadius: 12, padding: 14, color: "#fff" },
   input: { minHeight: 90, backgroundColor: "#07110b", borderRadius: 12, padding: 14, color: "#fff", textAlignVertical: "top" },
   actions: { flexDirection: "row", gap: 10 },

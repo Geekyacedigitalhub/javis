@@ -33,6 +33,10 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: apps/web
 
+      - name: Install mobile dependencies
+        run: bun install --frozen-lockfile
+        working-directory: apps/mobile
+
       # Fails on any TypeScript error in services, packages, and tests.
       - name: Typecheck backend
         run: bun run typecheck
@@ -40,6 +44,10 @@ jobs:
       # Fails on any TypeScript error in the Next.js control center.
       - name: Typecheck control center
         run: bun run typecheck:web
+
+      # The Android client had never been typechecked before this job existed.
+      - name: Typecheck Android client
+        run: bun run typecheck:mobile
 
       # Includes the parse-integrity guard that catches truncated source files,
       # the mission/automation behaviour tests, and the HTTP integration suite.

@@ -8,7 +8,8 @@ import { sendSms } from "../modules/frosh-messaging/src";
 const MAX_PHONE_VALUE_LENGTH = 512;
 const MAX_MESSAGE_LENGTH = 8000;
 
-function validInput(value: string | undefined, maxLength: number) {
+// A type predicate, so every call site narrows an optional field to string.
+function validInput(value: string | undefined, maxLength: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength && !/[\u0000-\u001f\u007f]/.test(value);
 }
 

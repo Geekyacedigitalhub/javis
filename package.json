@@ -11,13 +11,14 @@
     "build:web": "cd apps/web && bun run build",
     "typecheck": "tsc --noEmit",
     "typecheck:web": "cd apps/web && bun run typecheck",
-    "check": "bun run typecheck && bun run typecheck:web",
+    "check": "bun run typecheck && bun run typecheck:web && bun run typecheck:mobile",
     "migrate": "bun run scripts/migrate.ts",
     "migrate:dry": "bun run scripts/migrate.ts --dry-run",
     "migrate:verify": "bun run scripts/migrate.ts --verify",
     "test": "bun test",
     "test:unit": "bun test tests/syntax.test.ts tests/missions.test.ts tests/validation.test.ts tests/automation.test.ts tests/migrations.test.ts",
-    "test:api": "bun test tests/api.integration.test.ts"
+    "test:api": "bun test tests/api.integration.test.ts",
+    "typecheck:mobile": "cd apps/mobile && bun run typecheck"
   },
   "dependencies": {
     "postgres": "^3.4.7",

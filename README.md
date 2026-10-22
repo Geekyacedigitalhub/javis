@@ -87,6 +87,18 @@ bun run build:web      # production build of the control center
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, 404 |
 
+`tests/syntax.test.ts` also enforces an architectural boundary: the Android app
+must never import from `services/`. It once pulled `services/memory` into the
+React Native bundle, which ships the `postgres` driver to a device that has no
+TCP socket for it. Memory work belongs to the server; the phone talks to the API.
+
+### Android client
+
+The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. Its
+six native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
+`frosh-messaging`, `frosh-notifications`) are Kotlin sources that require a
+native Expo build; they are typechecked from the TypeScript side only.
+
 The whole suite runs offline: no `OPENAI_API_KEY` and no database are needed,
 because the API falls back to the in-memory stores and the development provider.
 CI (`.github/workflows/ci.yml`) runs typecheck, tests, migration discovery and a
