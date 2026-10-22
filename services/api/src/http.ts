@@ -2018,6 +2018,33 @@ const server = Bun.serve<RealtimeSocketData>({
       }
     }
 
+    const agentRunListMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)$/);
+    if (agentRunListMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(agentRunListMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+
+      const requested = (url.searchParams.get("status") ?? "all").trim();
+      const allowed = ["running", "waiting_approval", "completed", "failed", "all"];
+      if (!allowed.includes(requested)) {
+        return Response.json(
+          { error: "status must be one of running, waiting_approval, completed, failed, all" },
+          { status: 400 },
+        );
+      }
+
+      const rawLimit = Number(url.searchParams.get("limit") ?? 50);
+      const limit = Number.isFinite(rawLimit) ? Math.min(200, Math.max(1, Math.trunc(rawLimit))) : 50;
+
+      // Counts come from the whole set, so the console can show what exists
+      // while displaying only one status.
+      const all = await agentRunStore.list({ status: "all", limit: 200 });
+      const counts = { running: 0, waiting_approval: 0, completed: 0, failed: 0 };
+      for (const run of all) counts[run.status] += 1;
+
+      const runs = (requested === "all" ? all : all.filter((run) => run.status === requested)).slice(0, limit);
+      return Response.json({ runs, counts });
+    }
+
     const agentRunMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)$/);
     if (agentRunMatch && request.method === "GET") {
       const userId = decodeBoundedUserId(agentRunMatch[1]);

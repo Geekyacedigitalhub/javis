@@ -91,6 +91,8 @@ bun run build:web      # production build of the control center
 | `tests/coding-loop.test.ts` | Loop phases, evidence gates, approval parking, real tool execution |
 | `tests/windows-agent.test.ts` | Device agent handlers, reconnect backoff, live enrolment and command dispatch |
 | `tests/desktop-tools.test.ts` | Desktop tools end to end: safe info, approval-gated commands, refusal without a device |
+| `tests/agent-runs.test.ts` | Run listing, filters, counts, ordering, limit clamp, auth |
+| `tests/run-summary.test.ts` | The console's evidence rules: only a zero exit counts as verified |
 
 `tests/syntax.test.ts` also enforces an architectural boundary: the Android app
 must never import from `services/`. It once pulled `services/memory` into the
@@ -298,6 +300,32 @@ The desktop tools are tested against a real agent process over a real websocket,
 with the API started in the test process so tool dispatch and the socket registry
 are the same objects the server uses. A fake would have proved nothing about the
 part that was broken.
+
+### Watching a run
+
+A loop that can be started but not observed is half a feature. `/runs` shows
+every agent run with the evidence behind it, and the evidence is the point:
+
+| Label | Means |
+| --- | --- |
+| **Verified** | A validation command actually exited 0, with the command named |
+| **Not verified** — exited N | A validation ran and failed, with the real code |
+| **Not verified** — edits, nothing validated | The workspace changed and nothing proved it |
+| **No evidence** | Nothing has run yet |
+
+That rule is applied twice — once in the loop that decides whether a run may
+complete, and once in `apps/web/app/runs/summary.ts` that decides what the page
+may claim. It lives in its own module precisely so it can be tested, because a
+console that rounded "a validation ran" up to "verified" would undo the promise
+in the one place a person actually looks. Approving a parked run is a link away:
+a run in `waiting_approval` points at `/approvals`.
+
+```
+GET /v1/agent-runs/users/:userId?status=&limit=
+  -> { runs, counts: { running, waiting_approval, completed, failed } }
+```
+
+Counts describe the whole set so the tabs stay honest while one status is shown.
 
 ### Control center authentication
 

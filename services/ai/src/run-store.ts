@@ -15,6 +15,14 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return this.runs.get(id) ?? null;
   }
 
+  async list(filter: { status?: FroshAgentRun["status"] | "all"; limit?: number } = {}) {
+    const limit = Math.min(200, Math.max(1, Math.trunc(filter.limit ?? 50)));
+    return [...this.runs.values()]
+      .filter((run) => !filter.status || filter.status === "all" || run.status === filter.status)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+  }
+
   async touch(id: string) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");

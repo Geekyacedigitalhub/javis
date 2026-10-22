@@ -27,6 +27,22 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return rows[0] ?? null;
   }
 
+  async list(filter: { status?: FroshAgentRun["status"] | "all"; limit?: number } = {}) {
+    const limit = Math.min(200, Math.max(1, Math.trunc(filter.limit ?? 50)));
+    const columns =
+      'id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error';
+    if (!filter.status || filter.status === "all") {
+      return this.query<FroshAgentRun>(
+        `SELECT ${columns} FROM frosh_agent_runs ORDER BY created_at DESC LIMIT $1`,
+        [limit],
+      );
+    }
+    return this.query<FroshAgentRun>(
+      `SELECT ${columns} FROM frosh_agent_runs WHERE status=$1 ORDER BY created_at DESC LIMIT $2`,
+      [filter.status, limit],
+    );
+  }
+
   async touch(id: string) {
     const rows = await this.query<FroshAgentRun>(
       'UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 RETURNING id, conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error',

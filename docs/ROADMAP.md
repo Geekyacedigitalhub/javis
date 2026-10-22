@@ -600,7 +600,8 @@ Next engineering priorities:
 5. ~~Complete the autonomous coding loop.~~ done — `CodingLoop` executes tools,
    derives its phase from recorded evidence, and refuses to report success
    until a validation has actually exited zero.
-6. ~~Build the FROSH web command center.~~ done (9 routes)
+6. ~~Build the FROSH web command center.~~ done (10 routes, including
+   `/approvals` and `/runs`)
 7. ~~Build the Android companion.~~ done — the Kotlin modules compile and the
    workflow publishes a debug APK.
 8. ~~Add the Windows device agent.~~ done — `apps/agent` enrolls, holds an

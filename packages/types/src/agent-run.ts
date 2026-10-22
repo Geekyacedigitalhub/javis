@@ -24,8 +24,15 @@ export interface FroshAgentRun {
   error?: string;
 }
 
+export interface FroshAgentRunFilter {
+  status?: FroshRunStatus | "all";
+  limit?: number;
+}
+
 export interface FroshAgentRunStore {
   create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt">): Promise<FroshAgentRun>;
+  /** Most recent runs first. Never cached: a run's evidence changes as it works. */
+  list(filter?: FroshAgentRunFilter): Promise<FroshAgentRun[]>;
   get(id: string): Promise<FroshAgentRun | null>;
   update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>): Promise<FroshAgentRun>;
   touch(id: string): Promise<FroshAgentRun>;
