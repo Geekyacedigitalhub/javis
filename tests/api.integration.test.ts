@@ -325,6 +325,17 @@ describe("chat", () => {
   });
 });
 
+describe("research", () => {
+  test("refuses private-network research targets before any fetch", async () => {
+    const { status, body } = await call("/v1/research/fetch", {
+      method: "POST",
+      body: JSON.stringify({ url: "https://127.0.0.1/private" }),
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("Private network");
+  });
+});
+
 describe("coding loop", () => {
   test("the offline provider cannot claim success, so the loop refuses to complete", async () => {
     const { status, body } = await call("/v1/agent-runs", {

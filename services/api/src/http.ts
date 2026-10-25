@@ -7,6 +7,7 @@ import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice,
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
+import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -428,6 +429,21 @@ const server = Bun.serve<RealtimeSocketData>({
       }
     }
 
+
+    if (request.method === "POST" && url.pathname === "/v1/research/fetch") {
+      try {
+        const body = await parseBoundedJson(request, 8 * 1024);
+        const researchUrl = typeof body?.url === "string" ? body.url.trim() : "";
+        if (!researchUrl) return Response.json({ error: "url is required" }, { status: 400 });
+        if (researchUrl.length > 2_000) return Response.json({ error: "url is too long" }, { status: 400 });
+        return Response.json({ source: await fetchResearchSource(researchUrl) });
+      } catch (error) {
+        const message = error instanceof ResearchRequestError
+          ? error.message
+          : "FROSH could not retrieve that research page.";
+        return Response.json({ error: message }, { status: error instanceof ResearchRequestError ? 400 : 502 });
+      }
+    }
 
     const conversationUsersMatch = url.pathname.match(/^\/v1\/conversations\/users\/([^/]+)$/);
     if (conversationUsersMatch && request.method === "GET") {

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
+import { VoiceControls } from "./voice-controls";
 
 type ChatMessage = {
   role: "user" | "assistant" | "system" | "tool";
@@ -170,6 +171,8 @@ export default function Home() {
     }
   }
 
+  const latestAssistantReply = [...messages].reverse().find((message) => message.role === "assistant")?.content;
+
   return (
     <main className="frosh-shell">
       <aside className="sidebar">
@@ -181,6 +184,7 @@ export default function Home() {
         <nav>
           <Link className="nav-active" href="/">Chat</Link>
           <Link href="/memory">Memory</Link>
+          <Link href="/research">Research</Link>
           <Link href="/devices">Devices</Link>
           <Link href="/messages">Messages</Link>
           <Link href="/automations">Automations</Link>
@@ -256,6 +260,12 @@ export default function Home() {
         </div>
 
         {error && <div className="error">{error}</div>}
+
+        <VoiceControls
+          disabled={busy || loadingConversation}
+          speechText={latestAssistantReply}
+          onTranscript={(transcript) => setInput((current) => current ? `${current} ${transcript}` : transcript)}
+        />
 
         <form className="composer" onSubmit={send}>
           <textarea

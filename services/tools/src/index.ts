@@ -8,6 +8,7 @@ import "./developer-tools";
 import "./command-tools";
 import "./github-tools";
 import "./repo-intelligence";
+import "./web-research";
 import "./validation-tools";
 import "./mobile-tools";
 import "./desktop-tools";
