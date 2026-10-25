@@ -8,6 +8,7 @@ import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, 
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
+import { closeTaskStore, getTaskStore } from "../../productivity/src";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -94,6 +95,11 @@ export async function closeApi() {
     await closeDeviceStore();
   } catch (error) {
     logOperationalError("FROSH device store shutdown failed", error);
+  }
+  try {
+    await closeTaskStore();
+  } catch (error) {
+    logOperationalError("FROSH task store shutdown failed", error);
   }
 }
 
@@ -443,6 +449,82 @@ const server = Bun.serve<RealtimeSocketData>({
           : "FROSH could not retrieve that research page.";
         return Response.json({ error: message }, { status: error instanceof ResearchRequestError ? 400 : 502 });
       }
+    }
+
+    const taskUsersMatch = url.pathname.match(/^\/v1\/tasks\/users\/([^/]+)$/);
+    if (taskUsersMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(taskUsersMatch[1]);
+      const status = url.searchParams.get("status");
+      if (status && !["open", "in_progress", "completed", "cancelled"].includes(status)) {
+        return Response.json({ error: "Invalid task status" }, { status: 400 });
+      }
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return Response.json({ error: "limit must be an integer between 1 and 200" }, { status: 400 });
+      }
+      return Response.json({ tasks: await getTaskStore().list(userId, { status: status as "open" | "in_progress" | "completed" | "cancelled" | undefined, limit }) });
+    }
+
+    if (taskUsersMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(taskUsersMatch[1]);
+        const body = await parseBoundedJson(request);
+        const task = await getTaskStore().create({
+          userId,
+          title: body?.title,
+          notes: body?.notes,
+          dueAt: body?.dueAt,
+          status: body?.status ?? "open",
+          priority: body?.priority ?? "normal",
+        });
+        return Response.json({ task }, { status: 201 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Task creation failed" }, { status: 400 });
+      }
+    }
+
+    const taskMatch = url.pathname.match(/^\/v1\/tasks\/users\/([^/]+)\/([^/]+)$/);
+    if (taskMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeBoundedUserId(taskMatch[1]);
+        const taskId = decodeBoundedResourceId(taskMatch[2]);
+        const body = await parseBoundedJson(request);
+        const patch = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+        const task = await getTaskStore().update(taskId, userId, patch);
+        return task ? Response.json({ task }) : Response.json({ error: "Task not found" }, { status: 404 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Task update failed" }, { status: 400 });
+      }
+    }
+
+    if (taskMatch && request.method === "DELETE") {
+      const userId = decodeBoundedUserId(taskMatch[1]);
+      const taskId = decodeBoundedResourceId(taskMatch[2]);
+      const deleted = await getTaskStore().delete(taskId, userId);
+      return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const briefingMatch = url.pathname.match(/^\/v1\/briefing\/users\/([^/]+)$/);
+    if (briefingMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(briefingMatch[1]);
+      const tasks = await getTaskStore().list(userId, { limit: 200 });
+      const now = new Date();
+      const endOfToday = new Date(now);
+      endOfToday.setHours(23, 59, 59, 999);
+      const activeTasks = tasks.filter((task) => task.status === "open" || task.status === "in_progress");
+      const overdue = activeTasks.filter((task) => task.dueAt && Date.parse(task.dueAt) < now.getTime());
+      const dueToday = activeTasks.filter((task) => task.dueAt && Date.parse(task.dueAt) >= now.getTime() && Date.parse(task.dueAt) <= endOfToday.getTime());
+      const { getMissionStore } = await import("../../missions/src");
+      const missions = await getMissionStore().list(userId);
+      const activeMissions = missions.filter((mission) => !["completed", "failed", "cancelled"].includes(mission.status));
+      const approvals = await approvalStore.list({ status: "pending", limit: 50 });
+      return Response.json({
+        generatedAt: now.toISOString(),
+        headline: overdue.length ? `${overdue.length} task${overdue.length === 1 ? " is" : "s are"} overdue.` : dueToday.length ? `${dueToday.length} task${dueToday.length === 1 ? " is" : "s are"} due today.` : "Your task list is clear for today.",
+        tasks: { open: activeTasks.length, overdue, dueToday, completedToday: tasks.filter((task) => task.completedAt && Date.parse(task.completedAt) >= new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) },
+        missions: activeMissions,
+        approvals,
+      });
     }
 
     const conversationUsersMatch = url.pathname.match(/^\/v1\/conversations\/users\/([^/]+)$/);

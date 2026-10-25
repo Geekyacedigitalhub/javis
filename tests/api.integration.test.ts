@@ -255,6 +255,33 @@ describe("automation API", () => {
   });
 });
 
+describe("personal productivity", () => {
+  test("task and daily briefing lifecycle", async () => {
+    const created = await call(`/v1/tasks/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Review FROSH briefing", priority: "high" }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.task.status).toBe("open");
+
+    const listed = await call(`/v1/tasks/users/${USER}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body.tasks.some((task: { id: string }) => task.id === created.body.task.id)).toBe(true);
+
+    const completed = await call(`/v1/tasks/users/${USER}/${created.body.task.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "completed" }),
+    });
+    expect(completed.status).toBe(200);
+    expect(typeof completed.body.task.completedAt).toBe("string");
+
+    const briefing = await call(`/v1/briefing/users/${USER}`);
+    expect(briefing.status).toBe(200);
+    expect(typeof briefing.body.headline).toBe("string");
+    expect(briefing.body.tasks.completedToday.some((task: { id: string }) => task.id === created.body.task.id)).toBe(true);
+  });
+});
+
 describe("chat", () => {
   test("the offline provider answers without any model credentials", async () => {
     const { status, body } = await call("/v1/chat", {
