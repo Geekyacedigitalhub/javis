@@ -15,6 +15,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - `services/ai` — model orchestration and agent loop
 - `services/memory` — persistent memory layer
 - `services/productivity` — durable personal tasks and daily briefing layer
+- `services/preferences` — persistent modes, personality, autonomy, and response settings
 - `services/tools` — permissioned tools/actions
 - `packages/types` — shared TypeScript contracts
 - `packages/config` — shared configuration

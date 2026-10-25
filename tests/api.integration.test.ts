@@ -255,6 +255,23 @@ describe("automation API", () => {
   });
 });
 
+describe("personalization", () => {
+  test("preference defaults can be read and updated", async () => {
+    const initial = await call(`/v1/preferences/users/${USER}`);
+    expect(initial.status).toBe(200);
+    expect(initial.body.preferences.mode).toBe("normal");
+
+    const updated = await call(`/v1/preferences/users/${USER}`, {
+      method: "PATCH",
+      body: JSON.stringify({ mode: "research", responseLength: "detailed", autonomyLevel: "safe" }),
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.preferences.mode).toBe("research");
+    expect(updated.body.preferences.responseLength).toBe("detailed");
+    expect(updated.body.preferences.autonomyLevel).toBe("safe");
+  });
+});
+
 describe("personal productivity", () => {
   test("task and daily briefing lifecycle", async () => {
     const created = await call(`/v1/tasks/users/${USER}`, {

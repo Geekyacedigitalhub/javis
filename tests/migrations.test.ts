@@ -14,7 +14,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = join(import.meta.dir, "..");
-const SERVICES = ["api", "automation", "memory", "missions", "productivity"];
+const SERVICES = ["api", "automation", "memory", "missions", "preferences", "productivity"];
 
 function migrationsFor(service: string) {
   const dir = join(ROOT, "services", service, "migrations");
@@ -92,6 +92,6 @@ describe("migrations", () => {
 
   test("the runner discovers all migrations", async () => {
     const total = SERVICES.reduce((count, service) => count + migrationsFor(service).length, 0);
-    expect(total).toBe(19);
+    expect(total).toBe(20);
   });
 });

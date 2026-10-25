@@ -9,6 +9,7 @@ import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
 import { closeTaskStore, getTaskStore } from "../../productivity/src";
+import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -100,6 +101,11 @@ export async function closeApi() {
     await closeTaskStore();
   } catch (error) {
     logOperationalError("FROSH task store shutdown failed", error);
+  }
+  try {
+    await closeUserPreferenceStore();
+  } catch (error) {
+    logOperationalError("FROSH preference store shutdown failed", error);
   }
 }
 
@@ -448,6 +454,25 @@ const server = Bun.serve<RealtimeSocketData>({
           ? error.message
           : "FROSH could not retrieve that research page.";
         return Response.json({ error: message }, { status: error instanceof ResearchRequestError ? 400 : 502 });
+      }
+    }
+
+    const preferenceMatch = url.pathname.match(/^\/v1\/preferences\/users\/([^/]+)$/);
+    if (preferenceMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(preferenceMatch[1]);
+      return Response.json({ preferences: await getUserPreferenceStore().get(userId) });
+    }
+
+    if (preferenceMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeBoundedUserId(preferenceMatch[1]);
+        const body = await parseBoundedJson(request, 16 * 1024);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return Response.json({ error: "Preference update must be an object" }, { status: 400 });
+        }
+        return Response.json({ preferences: await getUserPreferenceStore().update(userId, body) });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Preference update failed" }, { status: 400 });
       }
     }
 

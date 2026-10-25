@@ -12,6 +12,7 @@ import {
 } from "../../memory/src";
 import type { FroshMessage, FroshResponse } from "../../../packages/types/src/javis";
 import type { ConversationRecord, MemoryStore } from "../../memory/src";
+import { getUserPreferenceStore } from "../../preferences/src";
 
 const provider = createProvider();
 const orchestrator = new FroshOrchestrator(new ConfiguredModelAdapter(provider));
@@ -92,6 +93,23 @@ async function prepareConversation(
       content: [
         "Approved long-term context for this conversation:",
         ...conversationMemory.keyFacts.map((fact) => "- " + fact),
+      ].join("\n"),
+    });
+  }
+
+  if (input.userId) {
+    const preferences = await getUserPreferenceStore().get(input.userId);
+    context.unshift({
+      role: "system",
+      content: [
+        "User-selected FROSH operating preferences:",
+        `- Mode: ${preferences.mode}`,
+        `- Personality: ${preferences.personality}`,
+        `- Response length: ${preferences.responseLength}`,
+        `- Technical depth: ${preferences.technicalDepth}`,
+        `- Autonomy: ${preferences.autonomyLevel}`,
+        `- Notification style: ${preferences.notificationStyle}`,
+        "Apply these preferences when they are relevant, but never weaken tool permissions, approvals, or safety rules.",
       ].join("\n"),
     });
   }

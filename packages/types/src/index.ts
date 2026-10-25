@@ -11,3 +11,4 @@ export * from "./contacts";
 export * from "./messaging";
 export * from "./conversation-memory";
 export * from "./productivity";
+export * from "./preferences";
