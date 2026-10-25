@@ -1,4 +1,5 @@
 import { postChat } from "./routes";
+import { getFroshConversation, listFroshConversations, streamFroshRequest } from "./server";
 import { approvalStore, resolveApproval } from "../../tools/src";
 import { CodingLoop, CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
@@ -362,96 +363,31 @@ const server = Bun.serve<RealtimeSocketData>({
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
 
+        const requestedUserId = typeof body?.userId === "string" ? body.userId : undefined;
+        if (!webAuthenticated && requestedUserId && requestedUserId !== configuredUserId) {
+          return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
+        }
+
+        const userId = webAuthenticated ? requestedUserId : configuredUserId;
+        const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           async start(controller) {
             const send = (event: unknown) => {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\\n\\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             };
 
             try {
-              const { buildConversationContext, getUserMemoryStore, getConversationMemoryStore, createMemoryStore, extractConversationMemories, createMemoryCandidate } = await import("../../memory/src");
-              const { buildModelInput } = await import("../../ai/src/provider");
-              const { OpenAIProvider } = await import("../../ai/src/openai-provider");
-
-              const requestedUserId = typeof body?.userId === "string" ? body.userId : undefined;
-              const userId = webAuthenticated ? requestedUserId : configuredUserId;
-              if (!webAuthenticated && requestedUserId && requestedUserId !== configuredUserId) {
-                send({ type: "error", message: "Device credential cannot access another configured user." });
-                controller.close();
-                return;
-              }
-              const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
-              const memory = createMemoryStore();
-              const conversation = conversationId ? await memory.getConversation(conversationId) : null;
-              if (conversation?.userId && userId && conversation.userId !== userId) {
-                send({ type: "error", message: "Conversation belongs to another user." });
-                controller.close();
-                return;
-              }
-              if (conversation?.userId && !userId) {
-                send({ type: "error", message: "Conversation owner is required." });
-                controller.close();
-                return;
-              }
-              const currentConversation = conversation ?? await memory.createConversation({ id: conversationId, userId });
-              await memory.appendMessage({ conversationId: currentConversation.id, role: "user", content: message });
-
-              const context = await buildConversationContext(memory, currentConversation.id, userId);
-              if (userId) {
-                const memories = await getUserMemoryStore().list(userId, 30);
-                if (memories.length) {
-                  context.unshift({
-                    role: "system",
-                    content: ["Approved long-term user memory:", ...memories.map((item) => "- [" + item.kind + "] " + item.statement)].join("\\n")
-                  });
-                }
-              }
-
-              const conversationMemory = await getConversationMemoryStore().get(currentConversation.id);
-              if (conversationMemory && (conversationMemory.summary || conversationMemory.keyFacts.length)) {
-                context.unshift({
-                  role: "system",
-                  content: ["Approved long-term context for this conversation:", ...conversationMemory.keyFacts.map((fact) => "- " + fact)].join("\\n")
-                });
-              }
-
-              const provider = new OpenAIProvider();
-              let finalMessage = "";
-              let finalTools: any[] = [];
-
-              for await (const event of provider.stream(
-                buildModelInput(context),
-                {}
-              )) {
-                if (event.type === "delta") {
-                  finalMessage += event.text;
-                  send(event);
-                } else {
-                  if (event.type === "tool") send(event);
-                  if (event.type === "approval") send(event);
-                  if (event.type === "done") {
-                    finalMessage = event.message;
-                    finalTools = event.toolCalls;
-                    send({ type: "done", conversationId: currentConversation.id, message: event.message, toolCalls: event.toolCalls });
-                  }
-                }
-              }
-
-              await memory.appendMessage({ conversationId: currentConversation.id, role: "assistant", content: finalMessage });
-
-              if (userId) {
-                const extraction = extractConversationMemories([{ id: crypto.randomUUID(), text: message, conversationId: currentConversation.id }]);
-                for (const candidate of extraction.candidates) {
-                  await createMemoryCandidate({ ...candidate, userId });
-                }
+              for await (const event of streamFroshRequest({ message, conversationId, userId })) {
+                send(event);
               }
             } catch (error) {
+              logOperationalError("FROSH chat stream failed", error);
               send({ type: "error", message: "Streaming request failed" });
             } finally {
               controller.close();
             }
-          }
+          },
         });
 
         return new Response(stream, {
@@ -459,7 +395,7 @@ const server = Bun.serve<RealtimeSocketData>({
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache, no-transform",
             "connection": "keep-alive",
-          }
+          },
         });
       } catch (error) {
         return Response.json({ error: "Streaming request failed" }, { status: 500 });
@@ -492,6 +428,30 @@ const server = Bun.serve<RealtimeSocketData>({
       }
     }
 
+
+    const conversationUsersMatch = url.pathname.match(/^\/v1\/conversations\/users\/([^/]+)$/);
+    if (conversationUsersMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(conversationUsersMatch[1]);
+      const requestedLimit = Number(url.searchParams.get("limit") ?? "50");
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
+        return Response.json({ error: "limit must be an integer between 1 and 100" }, { status: 400 });
+      }
+      return Response.json({ conversations: await listFroshConversations(userId, requestedLimit) });
+    }
+
+    const conversationMessagesMatch = url.pathname.match(/^\/v1\/conversations\/users\/([^/]+)\/([^/]+)$/);
+    if (conversationMessagesMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(conversationMessagesMatch[1]);
+      const conversationId = decodeBoundedResourceId(conversationMessagesMatch[2]);
+      const requestedLimit = Number(url.searchParams.get("limit") ?? "100");
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
+        return Response.json({ error: "limit must be an integer between 1 and 200" }, { status: 400 });
+      }
+      const record = await getFroshConversation(userId, conversationId, requestedLimit);
+      return record
+        ? Response.json(record)
+        : Response.json({ error: "Conversation not found" }, { status: 404 });
+    }
 
     const memoryUserMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)$/);
     if (memoryUserMatch && request.method === "GET") {

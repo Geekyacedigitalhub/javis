@@ -1,5 +1,5 @@
 import postgres from "postgres";
-import type { ConversationRecord, MemoryRecord, MemoryStore, MessageRecord } from "./types";
+import type { ConversationRecord, ConversationSummary, MemoryRecord, MemoryStore, MessageRecord } from "./types";
 
 type Sql = ReturnType<typeof postgres>;
 
@@ -16,6 +16,19 @@ export class PostgresMemoryStore implements MemoryStore {
       [id],
     );
     return rows[0] ?? null;
+  }
+
+  async listConversations(userId: string, limit = 50): Promise<ConversationSummary[]> {
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    return this.query<ConversationSummary>(
+      `SELECT c.id, c.user_id AS "userId", c.created_at AS "createdAt", c.updated_at AS "updatedAt",
+        (SELECT m.content FROM javis_messages m WHERE m.conversation_id = c.id ORDER BY m.created_at DESC LIMIT 1) AS preview
+       FROM javis_conversations c
+       WHERE c.user_id = $1
+       ORDER BY c.updated_at DESC
+       LIMIT $2`,
+      [userId, safeLimit],
+    );
   }
 
   async createConversation(input: { id?: string; userId?: string } = {}) {

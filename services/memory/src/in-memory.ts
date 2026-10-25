@@ -1,5 +1,6 @@
 import type {
   ConversationRecord,
+  ConversationSummary,
   MemoryRecord,
   MemoryStore,
   MessageRecord,
@@ -12,6 +13,20 @@ export class InMemoryStore implements MemoryStore {
 
   async getConversation(id: string) {
     return this.conversations.get(id) ?? null;
+  }
+
+  async listConversations(userId: string, limit = 50): Promise<ConversationSummary[]> {
+    const safeLimit = Math.max(1, Math.min(limit, 100));
+    return [...this.conversations.values()]
+      .filter((conversation) => conversation.userId === userId)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .slice(0, safeLimit)
+      .map((conversation) => {
+        const lastMessage = this.messages
+          .filter((message) => message.conversationId === conversation.id)
+          .at(-1);
+        return { ...conversation, preview: lastMessage?.content };
+      });
   }
 
   async createConversation(input: { id?: string; userId?: string } = {}) {
@@ -41,6 +56,13 @@ export class InMemoryStore implements MemoryStore {
     };
 
     this.messages.push(record);
+    const conversation = this.conversations.get(input.conversationId);
+    if (conversation) {
+      this.conversations.set(input.conversationId, {
+        ...conversation,
+        updatedAt: record.createdAt,
+      });
+    }
     return record;
   }
 

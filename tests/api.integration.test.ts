@@ -265,6 +265,64 @@ describe("chat", () => {
     expect(typeof body.message).toBe("string");
     expect(body.message.length).toBeGreaterThan(0);
   });
+
+  test("the streaming command-center route works offline and emits valid SSE", async () => {
+    const response = await fetch(`${BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ message: "Hello streaming FROSH", userId: USER }),
+    });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    // This is intentionally a real newline delimiter, not the two literal
+    // characters backslash and n. The browser reader splits on this boundary.
+    const events = text.trim().split("\n\n").map((frame) => {
+      expect(frame.startsWith("data: ")).toBe(true);
+      return JSON.parse(frame.slice(6));
+    });
+    const delta = events.find((event) => event.type === "delta");
+    const done = events.find((event) => event.type === "done");
+
+    expect(delta.text).toContain("Hello streaming FROSH");
+    expect(typeof done.conversationId).toBe("string");
+    expect(done.conversationId.length).toBeGreaterThan(0);
+    expect(done.message).toContain("Hello streaming FROSH");
+    expect(done.toolCalls).toEqual([]);
+
+    const continued = await fetch(`${BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        message: "Continue this chat",
+        userId: USER,
+        conversationId: done.conversationId,
+      }),
+    });
+    const continuedText = await continued.text();
+    const continuedDone = JSON.parse(
+      continuedText.trim().split("\n\n").find((frame) => frame.includes('"type":"done"'))!.slice(6),
+    );
+
+    expect(continued.status).toBe(200);
+    expect(continuedDone.conversationId).toBe(done.conversationId);
+
+    const conversationList = await call(`/v1/conversations/users/${USER}`);
+    expect(conversationList.status).toBe(200);
+    const summary = conversationList.body.conversations.find((item: { id: string }) => item.id === done.conversationId);
+    expect(summary.preview).toContain("Continue this chat");
+
+    const savedConversation = await call(`/v1/conversations/users/${USER}/${done.conversationId}`);
+    expect(savedConversation.status).toBe(200);
+    expect(savedConversation.body.messages).toHaveLength(4);
+    expect(savedConversation.body.messages.map((item: { role: string }) => item.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+  });
 });
 
 describe("coding loop", () => {
