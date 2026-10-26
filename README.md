@@ -16,6 +16,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - `services/memory` — persistent memory layer
 - `services/productivity` — durable personal tasks and daily briefing layer
 - `services/preferences` — persistent modes, personality, autonomy, and response settings
+- `services/google` — encrypted Gmail and Google Calendar OAuth integration
 - `services/tools` — permissioned tools/actions
 - `packages/types` — shared TypeScript contracts
 - `packages/config` — shared configuration
@@ -159,6 +160,60 @@ OpenAI provider when `OPENAI_API_KEY` is set and the offline `DevelopmentProvide
 otherwise, so the API, missions, automations, and tools can be exercised locally.
 Mission evaluation is advisory: if the evaluator is unavailable the mission
 continues conservatively instead of failing completed work.
+
+### Google Gmail and Calendar
+
+The Google integration is intentionally server-side. The browser only starts the
+connection and receives a success/failure redirect; it never receives a Google
+client secret, refresh token, or access token. FROSH stores its token set only
+after AES-256-GCM encryption using `FROSH_GOOGLE_TOKEN_ENCRYPTION_KEY`.
+
+After enabling Gmail API and Google Calendar API, configuring an **External**
+OAuth app in **Testing**, adding yourself as a test user, and saving these two
+scopes:
+
+```text
+https://www.googleapis.com/auth/calendar.events
+https://www.googleapis.com/auth/gmail.readonly
+```
+
+create a **Web application** OAuth client. Its authorized redirect URI must be
+exactly one stable FROSH control-center URL followed by:
+
+```text
+/api/google/callback
+```
+
+For local development, use this exact URI:
+
+```text
+http://localhost:3000/api/google/callback
+```
+
+For deployment, use the actual HTTPS application domain, for example
+`https://frosh.example.com/api/google/callback`. Then set these *server-only*
+values through your host's secret manager (not in source control and never in a
+`NEXT_PUBLIC_` variable):
+
+```bash
+FROSH_PUBLIC_APP_URL=https://frosh.example.com
+FROSH_GOOGLE_REDIRECT_URI=https://frosh.example.com/api/google/callback
+GOOGLE_CLIENT_ID=...apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=...
+FROSH_GOOGLE_TOKEN_ENCRYPTION_KEY=... # generate with: openssl rand -base64 32
+```
+
+Open **Integrations** in FROSH and choose **Connect Google**. Authorization uses
+a short-lived one-time state value, PKCE S256, and an exact redirect URI. The
+callback consumes the state before exchanging the code, so a callback cannot be
+replayed. Disconnecting deletes the encrypted local token even if Google's
+optional remote-revocation request is unavailable.
+
+FROSH can list unread Gmail metadata and upcoming calendar events. It never
+requests mail sending access. Calendar event creation is a `confirm` tool, so it
+appears in Approval Center and is not sent to Google until you explicitly
+approve it. An External app in Testing may require periodic reconnection; that
+is expected for private testing and does not require publishing or verification.
 
 ### Approval center
 

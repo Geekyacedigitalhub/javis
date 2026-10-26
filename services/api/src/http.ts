@@ -10,6 +10,7 @@ import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memo
 import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
 import { closeTaskStore, getTaskStore } from "../../productivity/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
+import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -19,6 +20,7 @@ import type {
 } from "../../../packages/types/src/mission";
 
 const codingSessions = new CodingSessionManager(createProvider());
+const googleIntegration = new GoogleIntegrationService(getGoogleIntegrationStore());
 // The autonomous loop executes tools itself and verifies with real output, so it
 // is a separate driver from the single-shot session manager above.
 const codingLoop = new CodingLoop(createProvider());
@@ -107,6 +109,11 @@ export async function closeApi() {
   } catch (error) {
     logOperationalError("FROSH preference store shutdown failed", error);
   }
+  try {
+    await closeGoogleIntegrationStore();
+  } catch (error) {
+    logOperationalError("FROSH Google integration store shutdown failed", error);
+  }
 }
 
 async function shutdownApi() {
@@ -146,6 +153,17 @@ function logOperationalError(context: string, error: unknown): void {
   const name = error instanceof Error && error.name ? error.name : "UnknownError";
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   console.error(context, name, message || "(no message)", error instanceof Error ? (error.stack ?? "") : "");
+}
+
+function googleIntegrationErrorResponse(error: unknown): Response {
+  if (error instanceof InvalidIdentifierError) {
+    return Response.json({ error: "Invalid identifier" }, { status: 400 });
+  }
+  if (error instanceof GoogleIntegrationError) {
+    return Response.json({ error: error.message, code: error.code }, { status: error.httpStatus });
+  }
+  logOperationalError("FROSH Google integration request failed", error);
+  return Response.json({ error: "Google integration request failed. Please try again." }, { status: 500 });
 }
 
 const MAX_USER_ID_LENGTH = 200;
@@ -454,6 +472,72 @@ const server = Bun.serve<RealtimeSocketData>({
           ? error.message
           : "FROSH could not retrieve that research page.";
         return Response.json({ error: message }, { status: error instanceof ResearchRequestError ? 400 : 502 });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/integrations/google/callback") {
+      try {
+        const body = await parseBoundedJson(request, 16 * 1024);
+        return Response.json({ connection: await googleIntegration.completeAuthorization({ code: body?.code, state: body?.state }) });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const googleIntegrationMatch = url.pathname.match(/^\/v1\/integrations\/google\/users\/([^/]+)$/);
+    if (googleIntegrationMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(googleIntegrationMatch[1]);
+        return Response.json(await googleIntegration.connectionStatus(userId));
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    if (googleIntegrationMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(googleIntegrationMatch[1]);
+        return Response.json(await googleIntegration.beginAuthorization(userId));
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    if (googleIntegrationMatch && request.method === "DELETE") {
+      try {
+        const userId = decodeBoundedUserId(googleIntegrationMatch[1]);
+        const disconnected = await googleIntegration.disconnect(userId);
+        return Response.json({ disconnected });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const googleUnreadMatch = url.pathname.match(/^\/v1\/integrations\/google\/users\/([^/]+)\/gmail\/unread$/);
+    if (googleUnreadMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(googleUnreadMatch[1]);
+        const limit = Number(url.searchParams.get("limit") ?? "10");
+        if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+          return Response.json({ error: "limit must be an integer between 1 and 25" }, { status: 400 });
+        }
+        return Response.json({ messages: await googleIntegration.listUnreadGmail(userId, limit) });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const googleCalendarMatch = url.pathname.match(/^\/v1\/integrations\/google\/users\/([^/]+)\/calendar\/events$/);
+    if (googleCalendarMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(googleCalendarMatch[1]);
+        return Response.json({ events: await googleIntegration.listCalendarEvents(userId, {
+          from: url.searchParams.get("from") ?? undefined,
+          to: url.searchParams.get("to") ?? undefined,
+          limit: url.searchParams.get("limit") ?? undefined,
+        }) });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
       }
     }
 

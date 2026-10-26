@@ -103,6 +103,20 @@ describe("health and auth", () => {
     expect(response.status).toBe(401);
   });
 
+  test("Google connection status is authenticated and safely reports missing server configuration", async () => {
+    const anonymous = await fetch(`${BASE}/v1/integrations/google/users/${USER}`);
+    expect(anonymous.status).toBe(401);
+
+    const status = await call(`/v1/integrations/google/users/${USER}`);
+    expect(status.status).toBe(200);
+    expect(status.body.configured).toBe(false);
+    expect(status.body.connection).toBeNull();
+
+    const connect = await call(`/v1/integrations/google/users/${USER}`, { method: "POST", body: "{}" });
+    expect(connect.status).toBe(503);
+    expect(connect.body.code).toBe("not_configured");
+  });
+
   test("unknown routes fall through to a JSON 404", async () => {
     const { status, body } = await call("/v1/definitely-not-a-route");
     expect(status).toBe(404);

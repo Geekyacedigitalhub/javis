@@ -193,6 +193,7 @@ export default function Home() {
           <Link href="/runs">Runs</Link>
           <Link href="/approvals">Approvals</Link>
           <Link href="/settings">Settings</Link>
+          <Link href="/integrations">Integrations</Link>
         </nav>
         <section className="conversation-list" aria-label="Recent conversations">
           <div className="conversation-list-title">Recent chats</div>
