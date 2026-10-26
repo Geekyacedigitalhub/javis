@@ -46,26 +46,39 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
   // The Google connection UI needs a bounded failure rather than a gateway's
   // generic HTML error. Keep long-running assistant and mission requests
   // unbounded here; they have their own lifecycle and status mechanisms.
-  const timeout = relativePath.startsWith("v1/integrations/google/")
-    ? setTimeout(() => controller.abort(), GOOGLE_UPSTREAM_TIMEOUT_MS)
-    : undefined;
+  const isGoogleIntegrationRequest = relativePath.startsWith("v1/integrations/google/");
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
   let upstream: Response;
   try {
-    upstream = await fetch(target, {
+    const upstreamRequest = fetch(target, {
       method: request.method,
       headers,
       body,
       cache: "no-store",
       signal: controller.signal,
     });
-  } catch (error) {
-    const timedOut = controller.signal.aborted;
+    upstream = isGoogleIntegrationRequest
+      ? await Promise.race([
+        upstreamRequest,
+        new Promise<Response>((resolve) => {
+          timeout = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+            // Some runtime fetch implementations do not settle promptly after
+            // aborting an upstream socket. Resolve the route ourselves so the
+            // browser always receives JSON instead of a Cloudflare 502 page.
+            resolve(Response.json(
+              { error: "FROSH API did not respond in time. Please retry shortly." },
+              { status: 504, headers: { "cache-control": "no-store" } },
+            ));
+          }, GOOGLE_UPSTREAM_TIMEOUT_MS);
+        }),
+      ])
+      : await upstreamRequest;
+  } catch {
     return Response.json(
-      {
-        error: timedOut
-          ? "FROSH API did not respond in time. Please retry shortly."
-          : "FROSH API could not be reached. Please retry shortly.",
-      },
+      { error: timedOut ? "FROSH API did not respond in time. Please retry shortly." : "FROSH API could not be reached. Please retry shortly." },
       { status: timedOut ? 504 : 502, headers: { "cache-control": "no-store" } },
     );
   } finally {

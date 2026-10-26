@@ -118,15 +118,53 @@ export class InMemoryGoogleIntegrationStore implements FroshGoogleIntegrationSto
   }
 }
 
+const GOOGLE_STORE_QUERY_TIMEOUT_MS = 8_000;
+
 export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationStore {
-  constructor(private readonly sql: Sql) {}
+  constructor(
+    private readonly sql: Sql,
+    private readonly queryTimeoutMs = GOOGLE_STORE_QUERY_TIMEOUT_MS,
+  ) {}
 
   async close() {
     await this.sql.end({ timeout: 5 });
   }
 
+  /**
+   * postgres.js queues a request while its pool is busy. Cancel it as well as
+   * racing it at the HTTP layer: otherwise a timed-out Google request can keep
+   * holding a queued connection and make every later status request hang.
+   */
+  private async query<T extends object = Record<string, never>>(
+    statement: string,
+    parameters: unknown[] = [],
+  ): Promise<T[] & { count: number }> {
+    const pending = this.sql.unsafe<T[]>(statement, parameters as never[]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        pending,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            // Reject first: cancellation may synchronously reject its own
+            // promise, but the caller needs one stable timeout error.
+            reject(new Error("Google integration storage query timed out."));
+            try {
+              pending.cancel();
+            } catch {
+              // A queued client may not be cancellable yet. The rejection above
+              // still releases the HTTP caller rather than leaving it hanging.
+            }
+          }, this.queryTimeoutMs);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
   async getConnection(userId: string) {
-    const rows = await this.sql.unsafe<ConnectionRow[]>(
+    const rows = await this.query<ConnectionRow>(
       `SELECT user_id AS "userId", encrypted_token_set AS "encryptedTokenSet", scopes, status,
               access_token_expires_at AS "accessTokenExpiresAt", connected_at AS "connectedAt", updated_at AS "updatedAt"
        FROM frosh_google_connections WHERE user_id=$1 LIMIT 1`,
@@ -143,7 +181,7 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
     const expiresAt = asIsoDate(connection.accessTokenExpiresAt);
     const connectedAt = asIsoDate(connection.connectedAt);
     const scopes = asScopes(connection.scopes);
-    await this.sql.unsafe(
+    await this.query(
       `INSERT INTO frosh_google_connections
         (user_id, encrypted_token_set, scopes, status, access_token_expires_at, connected_at, updated_at)
        VALUES ($1,$2,$3::jsonb,$4,$5,$6,NOW())
@@ -154,14 +192,14 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
   }
 
   async markReconnectRequired(userId: string) {
-    await this.sql.unsafe(
+    await this.query(
       `UPDATE frosh_google_connections SET status='reconnect_required', updated_at=NOW() WHERE user_id=$1`,
       [validUserId(userId)],
     );
   }
 
   async deleteConnection(userId: string) {
-    const result = await this.sql.unsafe(`DELETE FROM frosh_google_connections WHERE user_id=$1`, [validUserId(userId)]);
+    const result = await this.query(`DELETE FROM frosh_google_connections WHERE user_id=$1`, [validUserId(userId)]);
     return result.count > 0;
   }
 
@@ -169,7 +207,7 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(state.stateHash)) throw new Error("OAuth state is invalid.");
     if (!state.encryptedCodeVerifier || state.encryptedCodeVerifier.length > 8_000) throw new Error("OAuth verifier is invalid.");
     const expiresAt = asIsoDate(state.expiresAt);
-    await this.sql.unsafe(
+    await this.query(
       `INSERT INTO frosh_google_oauth_states(state_hash,user_id,encrypted_code_verifier,expires_at)
        VALUES($1,$2,$3,$4)
        ON CONFLICT (state_hash) DO NOTHING`,
@@ -179,7 +217,7 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
 
   async consumeOAuthState(stateHash: string) {
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(stateHash)) return null;
-    const rows = await this.sql.unsafe<StateRow[]>(
+    const rows = await this.query<StateRow>(
       `DELETE FROM frosh_google_oauth_states WHERE state_hash=$1
        RETURNING state_hash AS "stateHash", user_id AS "userId", encrypted_code_verifier AS "encryptedCodeVerifier", expires_at AS "expiresAt"`,
       [stateHash],
