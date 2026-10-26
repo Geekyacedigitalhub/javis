@@ -23,6 +23,7 @@ const OAUTH_STATE_TTL_MS = 10 * 60_000;
 const TOKEN_REFRESH_SKEW_MS = 90_000;
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";
+const CONNECTION_STATUS_TIMEOUT_MS = 12_000;
 
 type GoogleTokenSet = {
   accessToken: string;
@@ -195,10 +196,29 @@ export class GoogleIntegrationService {
   }
 
   async connectionStatus(userId: string) {
-    return {
-      configured: this.isConfigured(),
-      connection: publicConnection(await this.store.getConnection(userId)),
-    };
+    const configured = this.isConfigured();
+    // Status should still be useful when a deployment is missing or has an
+    // invalid Google secret. In that case there cannot be a usable connection,
+    // and consulting the token store only makes a configuration issue harder to
+    // diagnose.
+    if (!configured) return { configured, connection: null };
+
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const connection = await Promise.race([
+        this.store.getConnection(userId),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new GoogleIntegrationError(
+            "FROSH could not reach the secure Google connection store in time. Please retry shortly.",
+            503,
+            "upstream_failed",
+          )), CONNECTION_STATUS_TIMEOUT_MS);
+        }),
+      ]);
+      return { configured, connection: publicConnection(connection) };
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   async beginAuthorization(userId: string): Promise<{ authorizationUrl: string; expiresAt: string }> {

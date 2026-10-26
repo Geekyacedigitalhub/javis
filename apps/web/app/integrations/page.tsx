@@ -30,6 +30,21 @@ function connectionMessage(): string {
   return "";
 }
 
+async function apiPayload(response: Response): Promise<Record<string, unknown>> {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    const value: unknown = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  } catch {
+    return {
+      error: response.ok
+        ? "FROSH returned an unexpected response. Please retry shortly."
+        : `FROSH service returned ${response.status}. Please retry shortly.`,
+    };
+  }
+}
+
 export default function IntegrationsPage() {
   const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [status, setStatus] = useState("");
@@ -38,9 +53,12 @@ export default function IntegrationsPage() {
   const load = useCallback(async () => {
     try {
       const response = await fetch(`${API}/v1/integrations/google/users/${encodeURIComponent(USER_ID)}`, { cache: "no-store" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not load Google connection status.");
-      setGoogle(data);
+      const data = await apiPayload(response);
+      if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not load Google connection status.");
+      if (typeof data.configured !== "boolean" || !("connection" in data)) {
+        throw new Error("FROSH returned an invalid Google connection status. Please retry shortly.");
+      }
+      setGoogle(data as GoogleStatus);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not load Google connection status.");
     }
@@ -61,8 +79,10 @@ export default function IntegrationsPage() {
         headers: { "content-type": "application/json" },
         body: "{}",
       });
-      const data = await response.json();
-      if (!response.ok || typeof data.authorizationUrl !== "string") throw new Error(data.error ?? "Could not begin Google connection.");
+      const data = await apiPayload(response);
+      if (!response.ok || typeof data.authorizationUrl !== "string") {
+        throw new Error(typeof data.error === "string" ? data.error : "Could not begin Google connection.");
+      }
       window.location.assign(data.authorizationUrl);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not begin Google connection.");
@@ -76,8 +96,8 @@ export default function IntegrationsPage() {
     setStatus("");
     try {
       const response = await fetch(`${API}/v1/integrations/google/users/${encodeURIComponent(USER_ID)}`, { method: "DELETE" });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error ?? "Could not disconnect Google.");
+      const data = await apiPayload(response);
+      if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not disconnect Google.");
       setStatus(data.disconnected ? "Google disconnected. FROSH no longer has a stored Google credential." : "Google was already disconnected.");
       await load();
     } catch (error) {
