@@ -11,6 +11,7 @@ import { fetchResearchSource, ResearchRequestError } from "../../research/src/fe
 import { closeTaskStore, getTaskStore } from "../../productivity/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
+import { closeFroshDatabaseClient } from "../../database/src";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -113,6 +114,11 @@ export async function closeApi() {
     await closeGoogleIntegrationStore();
   } catch (error) {
     logOperationalError("FROSH Google integration store shutdown failed", error);
+  }
+  try {
+    await closeFroshDatabaseClient();
+  } catch (error) {
+    logOperationalError("FROSH database pool shutdown failed", error);
   }
 }
 
