@@ -109,8 +109,10 @@ starting. If migration fails, correct the database URL rather than bypassing it.
    any `NEXT_PUBLIC_` variable for a token, client secret, or encryption key.
 
    On Render's free instances, an inactive service can take 50 seconds or more
-   to wake. FROSH retries transient public-edge Google errors for a bounded
-   period, but the private API URL above is still preferred.
+   to wake. FROSH retries transient Google-status failures as separate bounded
+   browser requests, so Render's public edge does not replace a long request
+   with an HTML gateway error. The private API URL above is still preferred
+   whenever it is reachable in the selected workspace and region.
 
 5. Deploy it and confirm the Render-provided URL opens. The initial browser
    Basic Auth prompt accepts any username and the `FROSH_WEB_TOKEN` as the

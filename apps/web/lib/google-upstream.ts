@@ -1,8 +1,9 @@
-// Render free instances can take more than 50 seconds to wake after inactivity.
-// Keep this finite so an unavailable API does not leave the Control Center
-// waiting forever, but allow the first Google-status request to wake it.
-export const GOOGLE_UPSTREAM_TIMEOUT_MS = 75_000;
-export const GOOGLE_COLD_START_RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 24_000] as const;
+// A single Render request must finish before the public edge gives up and
+// substitutes its own HTML 502. The browser retries independent, short status
+// requests while a free API instance wakes, rather than holding one proxy
+// request open through the whole cold-start window.
+export const GOOGLE_UPSTREAM_TIMEOUT_MS = 15_000;
+export const GOOGLE_COLD_START_RETRY_DELAYS_MS = [1_000] as const;
 
 type FetchLike = (input: URL, init?: RequestInit) => Promise<Response>;
 
@@ -29,8 +30,9 @@ async function waitForRetry(delayMs: number, signal: AbortSignal): Promise<void>
 
 /**
  * Render's public edge can return a short HTML 502 while a free API instance
- * wakes. Retrying only that response lets the page recover without concealing
- * an API JSON error (such as authentication or configuration failures).
+ * wakes. Make one quick retry here; the integrations page performs the longer
+ * cold-start retry sequence as separate requests, so this route stays below
+ * the edge timeout and can always return JSON.
  */
 export async function fetchGoogleUpstream(
   target: URL,
