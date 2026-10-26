@@ -14,4 +14,7 @@ RUN bun run build
 
 ENV PORT=3000
 EXPOSE 3000
-CMD ["bun", "run", "start", "--", "--hostname", "0.0.0.0"]
+# Start Next directly so Docker tracks the HTTP server itself. Running it through
+# `bun run` adds a script wrapper that can receive Render's lifecycle SIGTERM
+# while the child server is still healthy, resulting in intermittent 502s.
+CMD ["bun", "./node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0"]
