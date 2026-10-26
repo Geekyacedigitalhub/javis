@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 const API_URL = process.env.FROSH_API_URL ?? "http://localhost:3001";
 const WEB_TOKEN = process.env.FROSH_WEB_TOKEN ?? "";
 const USER_ID = process.env.FROSH_USER_ID ?? "default-user";
+const GOOGLE_UPSTREAM_TIMEOUT_MS = 20_000;
 
 async function handler(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
@@ -41,12 +42,35 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
     }
   }
 
-  const upstream = await fetch(target, {
-    method: request.method,
-    headers,
-    body,
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  // The Google connection UI needs a bounded failure rather than a gateway's
+  // generic HTML error. Keep long-running assistant and mission requests
+  // unbounded here; they have their own lifecycle and status mechanisms.
+  const timeout = relativePath.startsWith("v1/integrations/google/")
+    ? setTimeout(() => controller.abort(), GOOGLE_UPSTREAM_TIMEOUT_MS)
+    : undefined;
+  let upstream: Response;
+  try {
+    upstream = await fetch(target, {
+      method: request.method,
+      headers,
+      body,
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const timedOut = controller.signal.aborted;
+    return Response.json(
+      {
+        error: timedOut
+          ? "FROSH API did not respond in time. Please retry shortly."
+          : "FROSH API could not be reached. Please retry shortly.",
+      },
+      { status: timedOut ? 504 : 502, headers: { "cache-control": "no-store" } },
+    );
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 
   const responseHeaders = new Headers(upstream.headers);
   responseHeaders.set("cache-control", "no-store");
