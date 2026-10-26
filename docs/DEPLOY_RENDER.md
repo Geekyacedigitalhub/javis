@@ -76,9 +76,11 @@ WebSocket support, server-side OAuth exchange, and persistent storage.
    Google accounts; changing it makes previously encrypted credentials
    intentionally unreadable and requires reconnection.
 
-7. Deploy the service. Confirm its `/health` endpoint returns JSON with
-   `"ok": true` and copy the Render HTTPS service URL. It will be used only as
-   the control center's server-side `FROSH_API_URL`.
+7. Deploy the service and confirm its `/health` endpoint returns JSON with
+   `"ok": true`. Keep its Render HTTPS URL for direct health checks, but when
+   the Control Center is in the same Render workspace and region, configure its
+   server-side `FROSH_API_URL` as `http://frosh-api:10000`. The private URL
+   avoids routing service-to-service requests through the public edge.
 
 The API image automatically runs the checksum-protected migration runner before
 starting. If migration fails, correct the database URL rather than bypassing it.
@@ -98,13 +100,17 @@ starting. If migration fails, correct the database URL rather than bypassing it.
 
    | Key | Value |
    | --- | --- |
-   | `FROSH_API_URL` | the HTTPS URL of the deployed FROSH API service |
+   | `FROSH_API_URL` | `http://frosh-api:10000` when both services are in this Render workspace and region (preferred private-network URL); otherwise the API's HTTPS public URL |
    | `FROSH_WEB_TOKEN` | the exact same value configured on the API service |
    | `FROSH_USER_ID` | `default-user` initially |
    | `FROSH_PUBLIC_APP_URL` | `https://frosh.geekyacedigitalhub.com` |
 
    Do **not** set `FROSH_WEB_AUTH_DISABLED` in a production service. Do not use
    any `NEXT_PUBLIC_` variable for a token, client secret, or encryption key.
+
+   On Render's free instances, an inactive service can take 50 seconds or more
+   to wake. FROSH retries transient public-edge Google errors for a bounded
+   period, but the private API URL above is still preferred.
 
 5. Deploy it and confirm the Render-provided URL opens. The initial browser
    Basic Auth prompt accepts any username and the `FROSH_WEB_TOKEN` as the
