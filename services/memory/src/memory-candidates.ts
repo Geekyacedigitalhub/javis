@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { getFroshDatabaseClient, type FroshDatabaseClient } from "../../database/src";
 import type {
   FroshMemoryCandidate,
   FroshMemoryCandidateRecord,
@@ -8,13 +8,12 @@ import { getConversationMemoryStore } from "./conversation-memory-factory";
 import { mergeConversationMemory } from "./conversation-memory";
 import { getUserMemoryStore } from "./user-memory-factory";
 
-type Sql = ReturnType<typeof postgres>;
+type Sql = FroshDatabaseClient;
 
 const memoryStore = new Map<string, FroshMemoryCandidateRecord>();
 
 function sqlClient(): Sql | null {
-  const url = process.env.DATABASE_URL?.trim();
-  return url ? postgres(url, { max: 5, idle_timeout: 20 }) : null;
+  return getFroshDatabaseClient();
 }
 
 function normalize(row: any): FroshMemoryCandidateRecord {
@@ -57,7 +56,6 @@ export async function createMemoryCandidate(candidate: FroshMemoryCandidate): Pr
        status, created_at AS "createdAt", resolved_at AS "resolvedAt"`,
     [id, candidate.kind, candidate.statement, candidate.confidence, candidate.sourceConversationId ?? null, candidate.sourceMessageId ?? null, candidate.userId ?? null]
   );
-  await sql.end({ timeout: 1 });
   return normalize(rows[0]);
 }
 
@@ -76,7 +74,6 @@ export async function listUserMemoryCandidates(userId: string, status: FroshMemo
      ORDER BY created_at DESC LIMIT 200`,
     [normalized, status]
   );
-  await sql.end({ timeout: 1 });
   return rows.map(normalize);
 }
 
@@ -94,7 +91,6 @@ export async function listMemoryCandidates(status?: FroshMemoryCandidateStatus):
      ORDER BY created_at DESC LIMIT 200`,
     status ? [status] : []
   );
-  await sql.end({ timeout: 1 });
   return rows.map(normalize);
 }
 
@@ -119,7 +115,6 @@ export async function resolveMemoryCandidate(id: string, status: "approved" | "r
          status, created_at AS "createdAt", resolved_at AS "resolvedAt"`,
       [id, status]
     );
-    await sql.end({ timeout: 1 });
     candidate = rows[0] ? normalize(rows[0]) : undefined;
   } else {
     candidate = memoryStore.get(id);

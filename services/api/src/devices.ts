@@ -1,4 +1,4 @@
-import postgres from "postgres";
+import { getFroshDatabaseClient, type FroshDatabaseClient } from "../../database/src";
 import type { FroshDevice, FroshDeviceRegistration } from "../../../packages/types/src/device";
 import type { FroshCapabilityStatus } from "../../../packages/types/src/capabilities";
 import { isImplementedFroshCapability, isFroshCapability } from "../../../packages/types/src/capabilities";
@@ -8,14 +8,13 @@ type DeviceRow = FroshDevice & { createdAt?: string };
 
 const devices = new Map<string, FroshDevice>();
 const credentials = new Map<string, DeviceCredential>();
-let sql: ReturnType<typeof postgres> | null | undefined;
+let sql: FroshDatabaseClient | null | undefined;
 let schemaPromise: Promise<void> | undefined;
 let schemaReady = false;
 
 function db() {
   if (sql !== undefined) return sql;
-  const url = process.env.DATABASE_URL?.trim();
-  sql = url ? postgres(url, { max: 5, idle_timeout: 20 }) : null;
+  sql = getFroshDatabaseClient();
   return sql;
 }
 
@@ -92,13 +91,12 @@ export async function initializeDeviceStore() {
 }
 
 export async function closeDeviceStore() {
-  const client = sql;
   sql = undefined;
   schemaPromise = undefined;
   schemaReady = false;
   memoryCommandLedger.clear();
-  if (!client) return;
-  await client.end({ timeout: 5 });
+  // The shared client is closed once by the API process after all stores have
+  // reset their local references.
 }
 
 export async function registerDevice(input: FroshDeviceRegistration, options: { allowExisting?: boolean } = {}) {

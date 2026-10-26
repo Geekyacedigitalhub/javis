@@ -1,20 +1,18 @@
-import postgres from "postgres";
 import type { FroshAutomationSchedule, FroshAutomationStore } from "../../../packages/types/src/automation";
+import { getFroshDatabaseClient } from "../../database/src";
 import { InMemoryAutomationStore, PostgresAutomationStore } from "./store";
 
 let store: FroshAutomationStore | undefined;
 
 export function getAutomationStore() {
   if (store) return store;
-  const url = process.env.DATABASE_URL?.trim();
-  store = url ? new PostgresAutomationStore(postgres(url, { max: 5, idle_timeout: 20 })) : new InMemoryAutomationStore();
+  const database = getFroshDatabaseClient();
+  store = database ? new PostgresAutomationStore(database) : new InMemoryAutomationStore();
   return store;
 }
 
 export async function closeAutomationStore(): Promise<void> {
-  const current = store;
   store = undefined;
-  if (current instanceof PostgresAutomationStore) await current.close();
 }
 
 export const MAX_AUTOMATION_INTERVAL_MINUTES = 30 * 24 * 60;
