@@ -161,6 +161,13 @@ otherwise, so the API, missions, automations, and tools can be exercised locally
 Mission evaluation is advisory: if the evaluator is unavailable the mission
 continues conservatively instead of failing completed work.
 
+### Deployment
+
+Production container definitions are provided in `Dockerfile.api` and
+`Dockerfile.web`. For a two-service Render deployment with managed PostgreSQL,
+custom-domain DNS, secret variables, migration behavior, and the final Google
+connection checklist, see [docs/DEPLOY_RENDER.md](docs/DEPLOY_RENDER.md).
+
 ### Google Gmail and Calendar
 
 The Google integration is intentionally server-side. The browser only starts the
