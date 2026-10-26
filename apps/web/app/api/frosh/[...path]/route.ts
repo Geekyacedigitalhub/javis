@@ -1,9 +1,13 @@
 import { NextRequest } from "next/server";
+import {
+  fetchGoogleUpstream,
+  GOOGLE_UPSTREAM_TIMEOUT_MS,
+  isJsonResponse,
+} from "../../../../lib/google-upstream";
 
 const API_URL = process.env.FROSH_API_URL ?? "http://localhost:3001";
 const WEB_TOKEN = process.env.FROSH_WEB_TOKEN ?? "";
 const USER_ID = process.env.FROSH_USER_ID ?? "default-user";
-const GOOGLE_UPSTREAM_TIMEOUT_MS = 20_000;
 
 async function handler(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
@@ -51,13 +55,16 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
   let timedOut = false;
   let upstream: Response;
   try {
-    const upstreamRequest = fetch(target, {
+    const upstreamInit: RequestInit = {
       method: request.method,
       headers,
       body,
       cache: "no-store",
       signal: controller.signal,
-    });
+    };
+    const upstreamRequest = isGoogleIntegrationRequest
+      ? fetchGoogleUpstream(target, upstreamInit, controller.signal)
+      : fetch(target, upstreamInit);
     upstream = isGoogleIntegrationRequest
       ? await Promise.race([
         upstreamRequest,
@@ -88,8 +95,7 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
   // The Render edge can turn an upstream API failure into an HTML Cloudflare
   // page. Never forward that page to the control center for Google requests:
   // callers need a machine-readable response they can retry or display safely.
-  const contentType = upstream.headers.get("content-type") ?? "";
-  if (isGoogleIntegrationRequest && !contentType.toLowerCase().includes("application/json")) {
+  if (isGoogleIntegrationRequest && !isJsonResponse(upstream)) {
     return Response.json(
       { error: "FROSH Google integration is temporarily unavailable. Please retry shortly." },
       { status: upstream.status >= 500 ? 502 : upstream.status || 502, headers: { "cache-control": "no-store" } },
