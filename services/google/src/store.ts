@@ -123,6 +123,21 @@ const GOOGLE_STORE_QUERY_TIMEOUT_MS = 8_000;
 type PreferenceConnectionRow = { connection: unknown };
 type PreferenceStateRow = { state: unknown };
 
+type CancellableQuery = { cancel: () => void; state?: unknown };
+
+/**
+ * postgres.js exposes an active query's backend state at runtime. Its public
+ * cancel() method deliberately returns void, even though cancelling an active
+ * backend command starts another asynchronous connection. On a constrained
+ * deployment, that secondary connection can fail after our response timeout
+ * and become an unhandled rejection. Queued queries are safe to cancel (and
+ * must be removed from the pool queue); active ones are already bounded by the
+ * database statement timeout configured on the shared client.
+ */
+function isActivePostgresQuery(query: CancellableQuery): boolean {
+  return Boolean(query.state);
+}
+
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -193,7 +208,11 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
           timer = setTimeout(() => {
             reject(new Error("Google integration storage query timed out."));
             try {
-              pending.cancel();
+              // Remove a queued operation so it cannot monopolize a later
+              // request. Let active commands finish at PostgreSQL's configured
+              // statement timeout instead of opening postgres.js's separate
+              // cancellation connection after this HTTP response has ended.
+              if (!isActivePostgresQuery(pending as CancellableQuery)) pending.cancel();
             } catch {
               // A queued client may not be cancellable yet; the caller still
               // receives the timeout instead of waiting forever.

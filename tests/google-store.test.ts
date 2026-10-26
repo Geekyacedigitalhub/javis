@@ -21,6 +21,30 @@ test("Google PostgreSQL store cancels a queued query instead of hanging", async 
   expect(cancelled).toBe(true);
 });
 
+test("Google PostgreSQL store leaves an active query to the database statement timeout", async () => {
+  let rejectQuery: (error: unknown) => void = () => undefined;
+  let cancelled = false;
+  const pending = new Promise<unknown[]>((_, reject) => {
+    rejectQuery = reject;
+  }) as Promise<unknown[]> & { cancel: () => void; state?: unknown };
+  pending.state = { pid: 42 };
+  pending.cancel = () => {
+    cancelled = true;
+    rejectQuery(new Error("cancelled"));
+  };
+
+  const sql = {
+    unsafe: () => pending,
+  };
+  const store = new PostgresGoogleIntegrationStore(sql as never, 1);
+
+  await expect(store.getConnection("default-user")).rejects.toThrow("storage query timed out");
+  expect(cancelled).toBe(false);
+  // Finish the simulated database-side timeout after the application response
+  // has already been bounded, avoiding a dangling rejection in the test.
+  rejectQuery(new Error("statement timeout"));
+});
+
 test("Google PostgreSQL store uses the established per-user preference record", async () => {
   const statements: string[] = [];
   const sql = {
