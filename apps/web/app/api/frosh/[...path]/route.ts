@@ -85,6 +85,17 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
     if (timeout) clearTimeout(timeout);
   }
 
+  // The Render edge can turn an upstream API failure into an HTML Cloudflare
+  // page. Never forward that page to the control center for Google requests:
+  // callers need a machine-readable response they can retry or display safely.
+  const contentType = upstream.headers.get("content-type") ?? "";
+  if (isGoogleIntegrationRequest && !contentType.toLowerCase().includes("application/json")) {
+    return Response.json(
+      { error: "FROSH Google integration is temporarily unavailable. Please retry shortly." },
+      { status: upstream.status >= 500 ? 502 : upstream.status || 502, headers: { "cache-control": "no-store" } },
+    );
+  }
+
   const responseHeaders = new Headers(upstream.headers);
   responseHeaders.set("cache-control", "no-store");
 

@@ -120,6 +120,51 @@ export class InMemoryGoogleIntegrationStore implements FroshGoogleIntegrationSto
 
 const GOOGLE_STORE_QUERY_TIMEOUT_MS = 8_000;
 
+type PreferenceConnectionRow = { connection: unknown };
+type PreferenceStateRow = { state: unknown };
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function connectionFromPreference(value: unknown, expectedUserId: string): FroshStoredGoogleConnection | null {
+  const item = record(value);
+  if (!item || item.userId !== expectedUserId || item.provider !== "google") return null;
+  if (typeof item.encryptedTokenSet !== "string" || typeof item.status !== "string") return null;
+  try {
+    return toConnection({
+      userId: item.userId,
+      encryptedTokenSet: item.encryptedTokenSet,
+      scopes: item.scopes,
+      status: item.status === "reconnect_required" ? "reconnect_required" : "connected",
+      accessTokenExpiresAt: typeof item.accessTokenExpiresAt === "string" ? item.accessTokenExpiresAt : "",
+      connectedAt: typeof item.connectedAt === "string" ? item.connectedAt : "",
+      updatedAt: typeof item.updatedAt === "string" ? item.updatedAt : "",
+    });
+  } catch {
+    return null;
+  }
+}
+
+function stateFromPreference(value: unknown, stateHash: string): FroshGoogleOAuthState | null {
+  const item = record(value);
+  if (!item || typeof item.userId !== "string" || typeof item.encryptedCodeVerifier !== "string" || typeof item.expiresAt !== "string") {
+    return null;
+  }
+  try {
+    return toState({
+      stateHash,
+      userId: item.userId,
+      encryptedCodeVerifier: item.encryptedCodeVerifier,
+      expiresAt: item.expiresAt,
+    });
+  } catch {
+    return null;
+  }
+}
+
 export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationStore {
   constructor(
     private readonly sql: Sql,
@@ -131,9 +176,9 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
   }
 
   /**
-   * postgres.js queues a request while its pool is busy. Cancel it as well as
-   * racing it at the HTTP layer: otherwise a timed-out Google request can keep
-   * holding a queued connection and make every later status request hang.
+   * Google credentials are kept in the durable preferences record, which is
+   * already the API's proven user-scoped storage path. This avoids a separate
+   * pool/table becoming a single point of failure on a constrained deployment.
    */
   private async query<T extends object = Record<string, never>>(
     statement: string,
@@ -146,14 +191,12 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
         pending,
         new Promise<never>((_, reject) => {
           timer = setTimeout(() => {
-            // Reject first: cancellation may synchronously reject its own
-            // promise, but the caller needs one stable timeout error.
             reject(new Error("Google integration storage query timed out."));
             try {
               pending.cancel();
             } catch {
-              // A queued client may not be cancellable yet. The rejection above
-              // still releases the HTTP caller rather than leaving it hanging.
+              // A queued client may not be cancellable yet; the caller still
+              // receives the timeout instead of waiting forever.
             }
           }, this.queryTimeoutMs);
         }),
@@ -164,13 +207,13 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
   }
 
   async getConnection(userId: string) {
-    const rows = await this.query<ConnectionRow>(
-      `SELECT user_id AS "userId", encrypted_token_set AS "encryptedTokenSet", scopes, status,
-              access_token_expires_at AS "accessTokenExpiresAt", connected_at AS "connectedAt", updated_at AS "updatedAt"
-       FROM frosh_google_connections WHERE user_id=$1 LIMIT 1`,
-      [validUserId(userId)],
+    const id = validUserId(userId);
+    const rows = await this.query<PreferenceConnectionRow>(
+      `SELECT google_connection AS "connection"
+       FROM frosh_user_preferences WHERE user_id=$1 LIMIT 1`,
+      [id],
     );
-    return rows[0] ? toConnection(rows[0]) : null;
+    return rows[0] ? connectionFromPreference(rows[0].connection, id) : null;
   }
 
   async saveConnection(connection: FroshStoredGoogleConnection) {
@@ -178,28 +221,41 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
     if (!connection.encryptedTokenSet || connection.encryptedTokenSet.length > 32_000) {
       throw new Error("Google credentials are invalid.");
     }
-    const expiresAt = asIsoDate(connection.accessTokenExpiresAt);
-    const connectedAt = asIsoDate(connection.connectedAt);
-    const scopes = asScopes(connection.scopes);
+    const stored: FroshStoredGoogleConnection = {
+      ...connection,
+      userId,
+      provider: "google",
+      status: connection.status === "reconnect_required" ? "reconnect_required" : "connected",
+      scopes: asScopes(connection.scopes),
+      accessTokenExpiresAt: asIsoDate(connection.accessTokenExpiresAt),
+      connectedAt: asIsoDate(connection.connectedAt),
+      updatedAt: asIsoDate(connection.updatedAt),
+    };
     await this.query(
-      `INSERT INTO frosh_google_connections
-        (user_id, encrypted_token_set, scopes, status, access_token_expires_at, connected_at, updated_at)
-       VALUES ($1,$2,$3::jsonb,$4,$5,$6,NOW())
-       ON CONFLICT (user_id) DO UPDATE SET encrypted_token_set=EXCLUDED.encrypted_token_set, scopes=EXCLUDED.scopes,
-         status=EXCLUDED.status, access_token_expires_at=EXCLUDED.access_token_expires_at, updated_at=NOW()`,
-      [userId, connection.encryptedTokenSet, JSON.stringify(scopes), connection.status, expiresAt, connectedAt],
+      `INSERT INTO frosh_user_preferences(user_id,google_connection)
+       VALUES($1,$2::jsonb)
+       ON CONFLICT (user_id) DO UPDATE SET google_connection=EXCLUDED.google_connection, updated_at=NOW()`,
+      [userId, JSON.stringify(stored)],
     );
   }
 
   async markReconnectRequired(userId: string) {
-    await this.query(
-      `UPDATE frosh_google_connections SET status='reconnect_required', updated_at=NOW() WHERE user_id=$1`,
-      [validUserId(userId)],
-    );
+    const current = await this.getConnection(userId);
+    if (!current) return;
+    await this.saveConnection({
+      ...current,
+      status: "reconnect_required",
+      updatedAt: new Date().toISOString(),
+    });
   }
 
   async deleteConnection(userId: string) {
-    const result = await this.query(`DELETE FROM frosh_google_connections WHERE user_id=$1`, [validUserId(userId)]);
+    const result = await this.query(
+      `UPDATE frosh_user_preferences
+       SET google_connection=NULL, updated_at=NOW()
+       WHERE user_id=$1 AND google_connection IS NOT NULL`,
+      [validUserId(userId)],
+    );
     return result.count > 0;
   }
 
@@ -207,21 +263,35 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(state.stateHash)) throw new Error("OAuth state is invalid.");
     if (!state.encryptedCodeVerifier || state.encryptedCodeVerifier.length > 8_000) throw new Error("OAuth verifier is invalid.");
     const expiresAt = asIsoDate(state.expiresAt);
+    const userId = validUserId(state.userId);
+    const payload = JSON.stringify({ userId, encryptedCodeVerifier: state.encryptedCodeVerifier, expiresAt });
     await this.query(
-      `INSERT INTO frosh_google_oauth_states(state_hash,user_id,encrypted_code_verifier,expires_at)
-       VALUES($1,$2,$3,$4)
-       ON CONFLICT (state_hash) DO NOTHING`,
-      [state.stateHash, validUserId(state.userId), state.encryptedCodeVerifier, expiresAt],
+      `INSERT INTO frosh_user_preferences(user_id,google_oauth_states)
+       VALUES($1,jsonb_build_object($2::text,$3::jsonb))
+       ON CONFLICT (user_id) DO UPDATE SET
+         google_oauth_states=COALESCE(frosh_user_preferences.google_oauth_states,'{}'::jsonb)
+           || jsonb_build_object($2::text,$3::jsonb),
+         updated_at=NOW()`,
+      [userId, state.stateHash, payload],
     );
   }
 
   async consumeOAuthState(stateHash: string) {
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(stateHash)) return null;
-    const rows = await this.query<StateRow>(
-      `DELETE FROM frosh_google_oauth_states WHERE state_hash=$1
-       RETURNING state_hash AS "stateHash", user_id AS "userId", encrypted_code_verifier AS "encryptedCodeVerifier", expires_at AS "expiresAt"`,
+    const rows = await this.query<PreferenceStateRow>(
+      `WITH matched AS (
+         SELECT user_id, google_oauth_states -> $1::text AS state
+         FROM frosh_user_preferences
+         WHERE google_oauth_states ? $1::text
+         FOR UPDATE
+       )
+       UPDATE frosh_user_preferences preferences
+       SET google_oauth_states=preferences.google_oauth_states - $1::text, updated_at=NOW()
+       FROM matched
+       WHERE preferences.user_id=matched.user_id
+       RETURNING matched.state AS "state"`,
       [stateHash],
     );
-    return rows[0] ? toState(rows[0]) : null;
+    return rows[0] ? stateFromPreference(rows[0].state, stateHash) : null;
   }
 }
