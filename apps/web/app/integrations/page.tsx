@@ -20,6 +20,11 @@ type GoogleStatus = {
 
 const API = "/api/frosh";
 const USER_ID = process.env.NEXT_PUBLIC_FROSH_USER_ID ?? "default-user";
+const GOOGLE_STATUS_RETRY_DELAYS_MS = [2_000, 5_000, 10_000, 15_000] as const;
+
+function wait(delayMs: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, delayMs));
+}
 
 function connectionMessage(): string {
   if (typeof window === "undefined") return "";
@@ -49,18 +54,45 @@ export default function IntegrationsPage() {
   const [google, setGoogle] = useState<GoogleStatus | null>(null);
   const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    setLoading(true);
     try {
-      const response = await fetch(`${API}/v1/integrations/google/users/${encodeURIComponent(USER_ID)}`, { cache: "no-store" });
-      const data = await apiPayload(response);
-      if (!response.ok) throw new Error(typeof data.error === "string" ? data.error : "Could not load Google connection status.");
-      if (typeof data.configured !== "boolean" || !("connection" in data)) {
-        throw new Error("FROSH returned an invalid Google connection status. Please retry shortly.");
+      for (let attempt = 0; ; attempt += 1) {
+        // Network exceptions are retryable; a valid non-5xx API response is
+        // not. Keep that distinction when deciding whether to wait again.
+        let retryable = true;
+        try {
+          const response = await fetch(`${API}/v1/integrations/google/users/${encodeURIComponent(USER_ID)}`, { cache: "no-store" });
+          const data = await apiPayload(response);
+          if (response.ok) {
+            if (typeof data.configured !== "boolean" || !("connection" in data)) {
+              retryable = false;
+              throw new Error("FROSH returned an invalid Google connection status. Please retry shortly.");
+            }
+            setGoogle(data as GoogleStatus);
+            setStatus("");
+            return;
+          }
+
+          const message = typeof data.error === "string" ? data.error : "Could not load Google connection status.";
+          // A missing Google setup is a useful, final response. Only retry
+          // transient gateway/API failures while Render wakes a free instance.
+          retryable = response.status >= 500 && data.code !== "not_configured";
+          throw new Error(message);
+        } catch (error) {
+          if (!retryable || attempt === GOOGLE_STATUS_RETRY_DELAYS_MS.length) throw error;
+        }
+
+        const delay = GOOGLE_STATUS_RETRY_DELAYS_MS[attempt];
+        setStatus(`Waking FROSH API — retrying in ${Math.ceil(delay / 1000)} seconds…`);
+        await wait(delay);
       }
-      setGoogle(data as GoogleStatus);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not load Google connection status.");
+    } finally {
+      setLoading(false);
     }
   }, []);
 
@@ -109,6 +141,7 @@ export default function IntegrationsPage() {
 
   const connection = google?.connection;
   const reconnect = connection?.status === "reconnect_required";
+  const unavailable = !loading && !google && Boolean(status);
 
   return (
     <main className="integrations-page">
@@ -128,8 +161,18 @@ export default function IntegrationsPage() {
             <h2>Google</h2>
             <p>Gmail and Google Calendar</p>
           </div>
-          <span className={connection && !reconnect ? "integration-pill connected" : reconnect ? "integration-pill warning" : "integration-pill"}>
-            {connection && !reconnect ? "Connected" : reconnect ? "Reconnect needed" : google?.configured ? "Not connected" : "Setup needed"}
+          <span className={connection && !reconnect ? "integration-pill connected" : reconnect || unavailable ? "integration-pill warning" : "integration-pill"}>
+            {connection && !reconnect
+              ? "Connected"
+              : reconnect
+                ? "Reconnect needed"
+                : loading
+                  ? "Checking…"
+                  : unavailable
+                    ? "Unavailable"
+                    : google?.configured
+                      ? "Not connected"
+                      : "Setup needed"}
           </span>
         </div>
 
@@ -146,7 +189,9 @@ export default function IntegrationsPage() {
           </div>
         )}
 
-        {!google ? <p className="loading">Loading connection status…</p> : !google.configured ? (
+        {!google ? (
+          <p className="loading">{loading ? "Checking connection status…" : "Connection status is unavailable. Retry shortly."}</p>
+        ) : !google.configured ? (
           <p className="setup-note">Add the Google client ID, client secret, callback URL, and token-encryption key to your deployment’s secret manager before connecting.</p>
         ) : connection && !reconnect ? (
           <button className="disconnect" disabled={busy} onClick={() => void disconnect()}>{busy ? "Disconnecting…" : "Disconnect Google"}</button>

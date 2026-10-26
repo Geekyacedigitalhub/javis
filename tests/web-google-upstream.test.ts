@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { fetchGoogleUpstream } from "../apps/web/lib/google-upstream";
+import {
+  fetchGoogleUpstream,
+  GOOGLE_COLD_START_RETRY_DELAYS_MS,
+  GOOGLE_UPSTREAM_TIMEOUT_MS,
+} from "../apps/web/lib/google-upstream";
+
+test("keeps every Google proxy request below the Render edge window", () => {
+  expect(GOOGLE_UPSTREAM_TIMEOUT_MS).toBe(15_000);
+  expect(GOOGLE_COLD_START_RETRY_DELAYS_MS).toEqual([1_000]);
+});
 
 test("retries a transient Render HTML gateway response while the API wakes", async () => {
   const controller = new AbortController();
