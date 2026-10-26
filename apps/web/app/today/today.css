@@ -1,0 +1,31 @@
+.today-page { max-width: 1120px; min-height: 100vh; margin: 0 auto; padding: 36px 22px 72px; }
+.today-header { display: flex; justify-content: space-between; gap: 24px; align-items: end; }
+.today-header h1 { margin: 12px 0 8px; font-size: clamp(36px, 6vw, 52px); }
+.today-header p { color: #a7c7b1; font-size: 17px; margin: 0; }
+.today-header > button, .task-create button { border: 0; border-radius: 10px; background: #16a34a; color: white; font-weight: 800; padding: 11px 16px; }
+.today-status { margin: 24px 0; border: 1px solid #1d6b42; border-radius: 10px; background: #0c2116; color: #b7d9c5; padding: 11px 14px; }
+.briefing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 28px 0; }
+.briefing-grid article { display: grid; gap: 4px; background: #0b1b14; border: 1px solid #164e32; border-radius: 14px; padding: 17px; }
+.briefing-grid strong { color: #6ee7b7; font-size: 28px; }
+.briefing-grid span { color: #87a995; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+.task-create { display: grid; grid-template-columns: minmax(180px, 1fr) 190px 150px auto; gap: 10px; background: #0b1b14; border: 1px solid #164e32; border-radius: 14px; padding: 14px; }
+.task-create input, .task-create select { min-width: 0; border: 1px solid #1b4d32; border-radius: 9px; background: #07170f; color: #ecfdf5; padding: 10px 12px; }
+.today-columns { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(280px, .8fr); gap: 18px; margin-top: 20px; }
+.task-panel, .briefing-panel { border: 1px solid #164e32; border-radius: 16px; background: #0b1b14; padding: 20px; }
+.panel-heading { display: flex; align-items: baseline; justify-content: space-between; border-bottom: 1px solid #164e32; margin-bottom: 6px; }
+.panel-heading h2, .briefing-panel h2 { font-size: 18px; margin: 0 0 14px; }
+.panel-heading span { color: #70917d; font-size: 12px; }
+.task-card { display: flex; align-items: start; gap: 12px; border-bottom: 1px solid #143d29; padding: 14px 0; }
+.task-card:last-child { border-bottom: 0; }
+.task-check, .task-delete { border: 0; background: transparent; color: #86efac; font-size: 23px; line-height: 1; }
+.task-check:hover { color: #fff; }
+.task-card > div { display: grid; flex: 1; gap: 5px; }
+.task-card strong { color: #e5f7eb; line-height: 1.45; }
+.task-card small { color: #86a995; font-size: 12px; }
+.task-card.high { border-left: 2px solid #fbbf24; padding-left: 10px; }
+.task-delete { color: #fca5a5; font-size: 20px; }
+.briefing-panel p { border-bottom: 1px solid #143d29; color: #bad5c3; font-size: 14px; line-height: 1.5; margin: 0; padding: 11px 0; }
+.briefing-panel p:last-child { border-bottom: 0; }
+.briefing-panel a { color: #6ee7b7; }
+.empty { color: #789886 !important; font-size: 14px; line-height: 1.5; }
+@media (max-width: 760px) { .today-page { padding: 24px 16px 56px; } .today-header { align-items: start; flex-direction: column; } .briefing-grid { grid-template-columns: 1fr 1fr; } .task-create { grid-template-columns: 1fr 1fr; } .task-create input:first-child { grid-column: 1 / -1; } .today-columns { grid-template-columns: 1fr; } }

@@ -1,0 +1,16 @@
+.git
+.github
+.arena
+.cache
+.next
+**/.next
+node_modules
+**/node_modules
+.env
+.env.*
+!.env.example
+coverage
+dist
+build
+out
+*.log

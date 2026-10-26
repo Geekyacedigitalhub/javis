@@ -7,7 +7,7 @@ const USER_ID = process.env.FROSH_USER_ID ?? "default-user";
 async function handler(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const { path } = await context.params;
   const relativePath = path.join("/");
-  const userScopedMatch = relativePath.match(/^(v1\/(?:memory|automations|missions|approvals|agent-runs)\/users\/)([^/]+)(.*)$/);
+  const userScopedMatch = relativePath.match(/^(v1\/(?:memory|conversations|preferences|tasks|briefing|automations|missions|approvals|agent-runs|integrations\/google)\/users\/)([^/]+)(.*)$/);
   const effectivePath = userScopedMatch
     ? userScopedMatch[1] + encodeURIComponent(USER_ID) + userScopedMatch[3]
     : relativePath;
@@ -15,14 +15,13 @@ async function handler(request: NextRequest, context: { params: Promise<{ path: 
   target.pathname = "/" + effectivePath.replace(/^\/+/, "");
   target.search = request.nextUrl.search;
 
-  const headers = new Headers(request.headers);
-  headers.delete("host");
-  headers.delete("authorization");
-  headers.delete("cookie");
-  headers.delete("x-frosh-web-token");
-  headers.delete("x-frosh-device-id");
-  headers.delete("x-frosh-device-token");
-  headers.delete("x-frosh-device-enrollment-token");
+  // This is a server-side boundary, not a transparent HTTP tunnel. Forwarding
+  // connection-specific headers (especially content-length and connection)
+  // after Next has consumed the request body can make an upstream server close
+  // the socket. Only pass the representation headers this API actually needs.
+  const headers = new Headers();
+  const accept = request.headers.get("accept");
+  if (accept) headers.set("accept", accept);
   headers.set("x-frosh-web-token", WEB_TOKEN);
 
   let body: string | undefined;

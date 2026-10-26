@@ -13,6 +13,10 @@ export interface MessageRecord {
   createdAt: string;
 }
 
+export interface ConversationSummary extends ConversationRecord {
+  preview?: string;
+}
+
 export interface MemoryRecord {
   id: string;
   userId: string;
@@ -25,6 +29,7 @@ export interface MemoryRecord {
 
 export interface MemoryStore {
   getConversation(id: string): Promise<ConversationRecord | null>;
+  listConversations(userId: string, limit?: number): Promise<ConversationSummary[]>;
   createConversation(input?: { id?: string; userId?: string }): Promise<ConversationRecord>;
   listMessages(conversationId: string, limit?: number): Promise<MessageRecord[]>;
   appendMessage(input: Omit<MessageRecord, "id" | "createdAt">): Promise<MessageRecord>;

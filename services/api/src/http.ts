@@ -1,4 +1,5 @@
 import { postChat } from "./routes";
+import { getFroshConversation, listFroshConversations, streamFroshRequest } from "./server";
 import { approvalStore, resolveApproval } from "../../tools/src";
 import { CodingLoop, CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
 import { OpenAIProvider } from "../../ai/src/openai-provider";
@@ -6,6 +7,10 @@ import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice,
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
+import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
+import { closeTaskStore, getTaskStore } from "../../productivity/src";
+import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
+import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -15,6 +20,7 @@ import type {
 } from "../../../packages/types/src/mission";
 
 const codingSessions = new CodingSessionManager(createProvider());
+const googleIntegration = new GoogleIntegrationService(getGoogleIntegrationStore());
 // The autonomous loop executes tools itself and verifies with real output, so it
 // is a separate driver from the single-shot session manager above.
 const codingLoop = new CodingLoop(createProvider());
@@ -93,6 +99,21 @@ export async function closeApi() {
   } catch (error) {
     logOperationalError("FROSH device store shutdown failed", error);
   }
+  try {
+    await closeTaskStore();
+  } catch (error) {
+    logOperationalError("FROSH task store shutdown failed", error);
+  }
+  try {
+    await closeUserPreferenceStore();
+  } catch (error) {
+    logOperationalError("FROSH preference store shutdown failed", error);
+  }
+  try {
+    await closeGoogleIntegrationStore();
+  } catch (error) {
+    logOperationalError("FROSH Google integration store shutdown failed", error);
+  }
 }
 
 async function shutdownApi() {
@@ -132,6 +153,17 @@ function logOperationalError(context: string, error: unknown): void {
   const name = error instanceof Error && error.name ? error.name : "UnknownError";
   const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   console.error(context, name, message || "(no message)", error instanceof Error ? (error.stack ?? "") : "");
+}
+
+function googleIntegrationErrorResponse(error: unknown): Response {
+  if (error instanceof InvalidIdentifierError) {
+    return Response.json({ error: "Invalid identifier" }, { status: 400 });
+  }
+  if (error instanceof GoogleIntegrationError) {
+    return Response.json({ error: error.message, code: error.code }, { status: error.httpStatus });
+  }
+  logOperationalError("FROSH Google integration request failed", error);
+  return Response.json({ error: "Google integration request failed. Please try again." }, { status: 500 });
 }
 
 const MAX_USER_ID_LENGTH = 200;
@@ -362,96 +394,31 @@ const server = Bun.serve<RealtimeSocketData>({
         const message = typeof body?.message === "string" ? body.message.trim() : "";
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
 
+        const requestedUserId = typeof body?.userId === "string" ? body.userId : undefined;
+        if (!webAuthenticated && requestedUserId && requestedUserId !== configuredUserId) {
+          return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
+        }
+
+        const userId = webAuthenticated ? requestedUserId : configuredUserId;
+        const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
           async start(controller) {
             const send = (event: unknown) => {
-              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\\n\\n`));
+              controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             };
 
             try {
-              const { buildConversationContext, getUserMemoryStore, getConversationMemoryStore, createMemoryStore, extractConversationMemories, createMemoryCandidate } = await import("../../memory/src");
-              const { buildModelInput } = await import("../../ai/src/provider");
-              const { OpenAIProvider } = await import("../../ai/src/openai-provider");
-
-              const requestedUserId = typeof body?.userId === "string" ? body.userId : undefined;
-              const userId = webAuthenticated ? requestedUserId : configuredUserId;
-              if (!webAuthenticated && requestedUserId && requestedUserId !== configuredUserId) {
-                send({ type: "error", message: "Device credential cannot access another configured user." });
-                controller.close();
-                return;
-              }
-              const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
-              const memory = createMemoryStore();
-              const conversation = conversationId ? await memory.getConversation(conversationId) : null;
-              if (conversation?.userId && userId && conversation.userId !== userId) {
-                send({ type: "error", message: "Conversation belongs to another user." });
-                controller.close();
-                return;
-              }
-              if (conversation?.userId && !userId) {
-                send({ type: "error", message: "Conversation owner is required." });
-                controller.close();
-                return;
-              }
-              const currentConversation = conversation ?? await memory.createConversation({ id: conversationId, userId });
-              await memory.appendMessage({ conversationId: currentConversation.id, role: "user", content: message });
-
-              const context = await buildConversationContext(memory, currentConversation.id, userId);
-              if (userId) {
-                const memories = await getUserMemoryStore().list(userId, 30);
-                if (memories.length) {
-                  context.unshift({
-                    role: "system",
-                    content: ["Approved long-term user memory:", ...memories.map((item) => "- [" + item.kind + "] " + item.statement)].join("\\n")
-                  });
-                }
-              }
-
-              const conversationMemory = await getConversationMemoryStore().get(currentConversation.id);
-              if (conversationMemory && (conversationMemory.summary || conversationMemory.keyFacts.length)) {
-                context.unshift({
-                  role: "system",
-                  content: ["Approved long-term context for this conversation:", ...conversationMemory.keyFacts.map((fact) => "- " + fact)].join("\\n")
-                });
-              }
-
-              const provider = new OpenAIProvider();
-              let finalMessage = "";
-              let finalTools: any[] = [];
-
-              for await (const event of provider.stream(
-                buildModelInput(context),
-                {}
-              )) {
-                if (event.type === "delta") {
-                  finalMessage += event.text;
-                  send(event);
-                } else {
-                  if (event.type === "tool") send(event);
-                  if (event.type === "approval") send(event);
-                  if (event.type === "done") {
-                    finalMessage = event.message;
-                    finalTools = event.toolCalls;
-                    send({ type: "done", conversationId: currentConversation.id, message: event.message, toolCalls: event.toolCalls });
-                  }
-                }
-              }
-
-              await memory.appendMessage({ conversationId: currentConversation.id, role: "assistant", content: finalMessage });
-
-              if (userId) {
-                const extraction = extractConversationMemories([{ id: crypto.randomUUID(), text: message, conversationId: currentConversation.id }]);
-                for (const candidate of extraction.candidates) {
-                  await createMemoryCandidate({ ...candidate, userId });
-                }
+              for await (const event of streamFroshRequest({ message, conversationId, userId })) {
+                send(event);
               }
             } catch (error) {
+              logOperationalError("FROSH chat stream failed", error);
               send({ type: "error", message: "Streaming request failed" });
             } finally {
               controller.close();
             }
-          }
+          },
         });
 
         return new Response(stream, {
@@ -459,7 +426,7 @@ const server = Bun.serve<RealtimeSocketData>({
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache, no-transform",
             "connection": "keep-alive",
-          }
+          },
         });
       } catch (error) {
         return Response.json({ error: "Streaming request failed" }, { status: 500 });
@@ -492,6 +459,206 @@ const server = Bun.serve<RealtimeSocketData>({
       }
     }
 
+
+    if (request.method === "POST" && url.pathname === "/v1/research/fetch") {
+      try {
+        const body = await parseBoundedJson(request, 8 * 1024);
+        const researchUrl = typeof body?.url === "string" ? body.url.trim() : "";
+        if (!researchUrl) return Response.json({ error: "url is required" }, { status: 400 });
+        if (researchUrl.length > 2_000) return Response.json({ error: "url is too long" }, { status: 400 });
+        return Response.json({ source: await fetchResearchSource(researchUrl) });
+      } catch (error) {
+        const message = error instanceof ResearchRequestError
+          ? error.message
+          : "FROSH could not retrieve that research page.";
+        return Response.json({ error: message }, { status: error instanceof ResearchRequestError ? 400 : 502 });
+      }
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/integrations/google/callback") {
+      try {
+        const body = await parseBoundedJson(request, 16 * 1024);
+        return Response.json({ connection: await googleIntegration.completeAuthorization({ code: body?.code, state: body?.state }) });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const googleIntegrationMatch = url.pathname.match(/^\/v1\/integrations\/google\/users\/([^/]+)$/);
+    if (googleIntegrationMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(googleIntegrationMatch[1]);
+        return Response.json(await googleIntegration.connectionStatus(userId));
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    if (googleIntegrationMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(googleIntegrationMatch[1]);
+        return Response.json(await googleIntegration.beginAuthorization(userId));
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    if (googleIntegrationMatch && request.method === "DELETE") {
+      try {
+        const userId = decodeBoundedUserId(googleIntegrationMatch[1]);
+        const disconnected = await googleIntegration.disconnect(userId);
+        return Response.json({ disconnected });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const googleUnreadMatch = url.pathname.match(/^\/v1\/integrations\/google\/users\/([^/]+)\/gmail\/unread$/);
+    if (googleUnreadMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(googleUnreadMatch[1]);
+        const limit = Number(url.searchParams.get("limit") ?? "10");
+        if (!Number.isInteger(limit) || limit < 1 || limit > 25) {
+          return Response.json({ error: "limit must be an integer between 1 and 25" }, { status: 400 });
+        }
+        return Response.json({ messages: await googleIntegration.listUnreadGmail(userId, limit) });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const googleCalendarMatch = url.pathname.match(/^\/v1\/integrations\/google\/users\/([^/]+)\/calendar\/events$/);
+    if (googleCalendarMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(googleCalendarMatch[1]);
+        return Response.json({ events: await googleIntegration.listCalendarEvents(userId, {
+          from: url.searchParams.get("from") ?? undefined,
+          to: url.searchParams.get("to") ?? undefined,
+          limit: url.searchParams.get("limit") ?? undefined,
+        }) });
+      } catch (error) {
+        return googleIntegrationErrorResponse(error);
+      }
+    }
+
+    const preferenceMatch = url.pathname.match(/^\/v1\/preferences\/users\/([^/]+)$/);
+    if (preferenceMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(preferenceMatch[1]);
+      return Response.json({ preferences: await getUserPreferenceStore().get(userId) });
+    }
+
+    if (preferenceMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeBoundedUserId(preferenceMatch[1]);
+        const body = await parseBoundedJson(request, 16 * 1024);
+        if (!body || typeof body !== "object" || Array.isArray(body)) {
+          return Response.json({ error: "Preference update must be an object" }, { status: 400 });
+        }
+        return Response.json({ preferences: await getUserPreferenceStore().update(userId, body) });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Preference update failed" }, { status: 400 });
+      }
+    }
+
+    const taskUsersMatch = url.pathname.match(/^\/v1\/tasks\/users\/([^/]+)$/);
+    if (taskUsersMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(taskUsersMatch[1]);
+      const status = url.searchParams.get("status");
+      if (status && !["open", "in_progress", "completed", "cancelled"].includes(status)) {
+        return Response.json({ error: "Invalid task status" }, { status: 400 });
+      }
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+        return Response.json({ error: "limit must be an integer between 1 and 200" }, { status: 400 });
+      }
+      return Response.json({ tasks: await getTaskStore().list(userId, { status: status as "open" | "in_progress" | "completed" | "cancelled" | undefined, limit }) });
+    }
+
+    if (taskUsersMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(taskUsersMatch[1]);
+        const body = await parseBoundedJson(request);
+        const task = await getTaskStore().create({
+          userId,
+          title: body?.title,
+          notes: body?.notes,
+          dueAt: body?.dueAt,
+          status: body?.status ?? "open",
+          priority: body?.priority ?? "normal",
+        });
+        return Response.json({ task }, { status: 201 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Task creation failed" }, { status: 400 });
+      }
+    }
+
+    const taskMatch = url.pathname.match(/^\/v1\/tasks\/users\/([^/]+)\/([^/]+)$/);
+    if (taskMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeBoundedUserId(taskMatch[1]);
+        const taskId = decodeBoundedResourceId(taskMatch[2]);
+        const body = await parseBoundedJson(request);
+        const patch = body && typeof body === "object" && !Array.isArray(body) ? body : {};
+        const task = await getTaskStore().update(taskId, userId, patch);
+        return task ? Response.json({ task }) : Response.json({ error: "Task not found" }, { status: 404 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Task update failed" }, { status: 400 });
+      }
+    }
+
+    if (taskMatch && request.method === "DELETE") {
+      const userId = decodeBoundedUserId(taskMatch[1]);
+      const taskId = decodeBoundedResourceId(taskMatch[2]);
+      const deleted = await getTaskStore().delete(taskId, userId);
+      return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Task not found" }, { status: 404 });
+    }
+
+    const briefingMatch = url.pathname.match(/^\/v1\/briefing\/users\/([^/]+)$/);
+    if (briefingMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(briefingMatch[1]);
+      const tasks = await getTaskStore().list(userId, { limit: 200 });
+      const now = new Date();
+      const endOfToday = new Date(now);
+      endOfToday.setHours(23, 59, 59, 999);
+      const activeTasks = tasks.filter((task) => task.status === "open" || task.status === "in_progress");
+      const overdue = activeTasks.filter((task) => task.dueAt && Date.parse(task.dueAt) < now.getTime());
+      const dueToday = activeTasks.filter((task) => task.dueAt && Date.parse(task.dueAt) >= now.getTime() && Date.parse(task.dueAt) <= endOfToday.getTime());
+      const { getMissionStore } = await import("../../missions/src");
+      const missions = await getMissionStore().list(userId);
+      const activeMissions = missions.filter((mission) => !["completed", "failed", "cancelled"].includes(mission.status));
+      const approvals = await approvalStore.list({ status: "pending", limit: 50 });
+      return Response.json({
+        generatedAt: now.toISOString(),
+        headline: overdue.length ? `${overdue.length} task${overdue.length === 1 ? " is" : "s are"} overdue.` : dueToday.length ? `${dueToday.length} task${dueToday.length === 1 ? " is" : "s are"} due today.` : "Your task list is clear for today.",
+        tasks: { open: activeTasks.length, overdue, dueToday, completedToday: tasks.filter((task) => task.completedAt && Date.parse(task.completedAt) >= new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) },
+        missions: activeMissions,
+        approvals,
+      });
+    }
+
+    const conversationUsersMatch = url.pathname.match(/^\/v1\/conversations\/users\/([^/]+)$/);
+    if (conversationUsersMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(conversationUsersMatch[1]);
+      const requestedLimit = Number(url.searchParams.get("limit") ?? "50");
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 100) {
+        return Response.json({ error: "limit must be an integer between 1 and 100" }, { status: 400 });
+      }
+      return Response.json({ conversations: await listFroshConversations(userId, requestedLimit) });
+    }
+
+    const conversationMessagesMatch = url.pathname.match(/^\/v1\/conversations\/users\/([^/]+)\/([^/]+)$/);
+    if (conversationMessagesMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(conversationMessagesMatch[1]);
+      const conversationId = decodeBoundedResourceId(conversationMessagesMatch[2]);
+      const requestedLimit = Number(url.searchParams.get("limit") ?? "100");
+      if (!Number.isInteger(requestedLimit) || requestedLimit < 1 || requestedLimit > 200) {
+        return Response.json({ error: "limit must be an integer between 1 and 200" }, { status: 400 });
+      }
+      const record = await getFroshConversation(userId, conversationId, requestedLimit);
+      return record
+        ? Response.json(record)
+        : Response.json({ error: "Conversation not found" }, { status: 404 });
+    }
 
     const memoryUserMatch = url.pathname.match(/^\/v1\/memory\/users\/([^/]+)$/);
     if (memoryUserMatch && request.method === "GET") {

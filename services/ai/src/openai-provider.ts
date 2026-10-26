@@ -35,7 +35,7 @@ export type FroshStreamEvent =
   | { type: "delta"; text: string }
   | { type: "tool"; name: string; status: "planned" | "completed" | "failed"; toolCallId?: string }
   | { type: "approval"; approvalId?: string }
-  | { type: "done"; message: string; toolCalls: FroshToolCall[] };
+  | { type: "done"; message: string; toolCalls: FroshToolCall[]; conversationId?: string };
 
 type StreamOptions = GenerateOptions;
 

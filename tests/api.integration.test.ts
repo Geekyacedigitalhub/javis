@@ -103,6 +103,20 @@ describe("health and auth", () => {
     expect(response.status).toBe(401);
   });
 
+  test("Google connection status is authenticated and safely reports missing server configuration", async () => {
+    const anonymous = await fetch(`${BASE}/v1/integrations/google/users/${USER}`);
+    expect(anonymous.status).toBe(401);
+
+    const status = await call(`/v1/integrations/google/users/${USER}`);
+    expect(status.status).toBe(200);
+    expect(status.body.configured).toBe(false);
+    expect(status.body.connection).toBeNull();
+
+    const connect = await call(`/v1/integrations/google/users/${USER}`, { method: "POST", body: "{}" });
+    expect(connect.status).toBe(503);
+    expect(connect.body.code).toBe("not_configured");
+  });
+
   test("unknown routes fall through to a JSON 404", async () => {
     const { status, body } = await call("/v1/definitely-not-a-route");
     expect(status).toBe(404);
@@ -255,6 +269,50 @@ describe("automation API", () => {
   });
 });
 
+describe("personalization", () => {
+  test("preference defaults can be read and updated", async () => {
+    const initial = await call(`/v1/preferences/users/${USER}`);
+    expect(initial.status).toBe(200);
+    expect(initial.body.preferences.mode).toBe("normal");
+
+    const updated = await call(`/v1/preferences/users/${USER}`, {
+      method: "PATCH",
+      body: JSON.stringify({ mode: "research", responseLength: "detailed", autonomyLevel: "safe" }),
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body.preferences.mode).toBe("research");
+    expect(updated.body.preferences.responseLength).toBe("detailed");
+    expect(updated.body.preferences.autonomyLevel).toBe("safe");
+  });
+});
+
+describe("personal productivity", () => {
+  test("task and daily briefing lifecycle", async () => {
+    const created = await call(`/v1/tasks/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Review FROSH briefing", priority: "high" }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.task.status).toBe("open");
+
+    const listed = await call(`/v1/tasks/users/${USER}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body.tasks.some((task: { id: string }) => task.id === created.body.task.id)).toBe(true);
+
+    const completed = await call(`/v1/tasks/users/${USER}/${created.body.task.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "completed" }),
+    });
+    expect(completed.status).toBe(200);
+    expect(typeof completed.body.task.completedAt).toBe("string");
+
+    const briefing = await call(`/v1/briefing/users/${USER}`);
+    expect(briefing.status).toBe(200);
+    expect(typeof briefing.body.headline).toBe("string");
+    expect(briefing.body.tasks.completedToday.some((task: { id: string }) => task.id === created.body.task.id)).toBe(true);
+  });
+});
+
 describe("chat", () => {
   test("the offline provider answers without any model credentials", async () => {
     const { status, body } = await call("/v1/chat", {
@@ -264,6 +322,75 @@ describe("chat", () => {
     expect(status).toBe(200);
     expect(typeof body.message).toBe("string");
     expect(body.message.length).toBeGreaterThan(0);
+  });
+
+  test("the streaming command-center route works offline and emits valid SSE", async () => {
+    const response = await fetch(`${BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ message: "Hello streaming FROSH", userId: USER }),
+    });
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    // This is intentionally a real newline delimiter, not the two literal
+    // characters backslash and n. The browser reader splits on this boundary.
+    const events = text.trim().split("\n\n").map((frame) => {
+      expect(frame.startsWith("data: ")).toBe(true);
+      return JSON.parse(frame.slice(6));
+    });
+    const delta = events.find((event) => event.type === "delta");
+    const done = events.find((event) => event.type === "done");
+
+    expect(delta.text).toContain("Hello streaming FROSH");
+    expect(typeof done.conversationId).toBe("string");
+    expect(done.conversationId.length).toBeGreaterThan(0);
+    expect(done.message).toContain("Hello streaming FROSH");
+    expect(done.toolCalls).toEqual([]);
+
+    const continued = await fetch(`${BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({
+        message: "Continue this chat",
+        userId: USER,
+        conversationId: done.conversationId,
+      }),
+    });
+    const continuedText = await continued.text();
+    const continuedDone = JSON.parse(
+      continuedText.trim().split("\n\n").find((frame) => frame.includes('"type":"done"'))!.slice(6),
+    );
+
+    expect(continued.status).toBe(200);
+    expect(continuedDone.conversationId).toBe(done.conversationId);
+
+    const conversationList = await call(`/v1/conversations/users/${USER}`);
+    expect(conversationList.status).toBe(200);
+    const summary = conversationList.body.conversations.find((item: { id: string }) => item.id === done.conversationId);
+    expect(summary.preview).toContain("Continue this chat");
+
+    const savedConversation = await call(`/v1/conversations/users/${USER}/${done.conversationId}`);
+    expect(savedConversation.status).toBe(200);
+    expect(savedConversation.body.messages).toHaveLength(4);
+    expect(savedConversation.body.messages.map((item: { role: string }) => item.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+    ]);
+  });
+});
+
+describe("research", () => {
+  test("refuses private-network research targets before any fetch", async () => {
+    const { status, body } = await call("/v1/research/fetch", {
+      method: "POST",
+      body: JSON.stringify({ url: "https://127.0.0.1/private" }),
+    });
+    expect(status).toBe(400);
+    expect(body.error).toContain("Private network");
   });
 });
 
