@@ -20,3 +20,28 @@ test("Google PostgreSQL store cancels a queued query instead of hanging", async 
   await expect(store.getConnection("default-user")).rejects.toThrow("storage query timed out");
   expect(cancelled).toBe(true);
 });
+
+test("Google PostgreSQL store uses the established per-user preference record", async () => {
+  const statements: string[] = [];
+  const sql = {
+    unsafe: (statement: string) => {
+      statements.push(statement);
+      const rows = Object.assign([], { count: 0 });
+      return Object.assign(Promise.resolve(rows), { cancel: () => undefined });
+    },
+  };
+  const store = new PostgresGoogleIntegrationStore(sql as never, 20);
+
+  await expect(store.getConnection("default-user")).resolves.toBeNull();
+  await store.createOAuthState({
+    stateHash: "a".repeat(43),
+    userId: "default-user",
+    encryptedCodeVerifier: "encrypted-verifier",
+    expiresAt: "2030-01-02T03:04:05.000Z",
+  });
+
+  expect(statements).toHaveLength(2);
+  expect(statements.every((statement) => statement.includes("frosh_user_preferences"))).toBe(true);
+  expect(statements.join(" ")).not.toContain("frosh_google_connections");
+  expect(statements.join(" ")).not.toContain("frosh_google_oauth_states");
+});
