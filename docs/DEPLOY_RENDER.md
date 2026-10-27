@@ -77,10 +77,13 @@ WebSocket support, server-side OAuth exchange, and persistent storage.
    intentionally unreadable and requires reconnection.
 
 7. Deploy the service and confirm its `/health` endpoint returns JSON with
-   `"ok": true`. Keep its Render HTTPS URL for direct health checks, but when
-   the Control Center is in the same Render workspace and region, configure its
-   server-side `FROSH_API_URL` as `http://frosh-api:10000`. The private URL
-   avoids routing service-to-service requests through the public edge.
+   `"ok": true`. Keep its Render HTTPS URL for direct health checks. When the
+   Control Center is in the same Render workspace and region, open this API
+   service's **Connect → Internal** tab and copy the exact internal HTTP URL it
+   displays into the Control Center's `FROSH_API_URL`. Do not guess the
+   hostname from the service name: Render assigns each service a unique private
+   hostname. The internal URL avoids routing service-to-service requests
+   through the public edge.
 
 The API image automatically runs the checksum-protected migration runner before
 starting. If migration fails, correct the database URL rather than bypassing it.
@@ -100,7 +103,7 @@ starting. If migration fails, correct the database URL rather than bypassing it.
 
    | Key | Value |
    | --- | --- |
-   | `FROSH_API_URL` | `http://frosh-api:10000` when both services are in this Render workspace and region (preferred private-network URL); otherwise the API's HTTPS public URL |
+   | `FROSH_API_URL` | the exact HTTP URL from **`frosh-api` → Connect → Internal** when both services are in this Render workspace and region (preferred); otherwise the API's HTTPS public URL |
    | `FROSH_WEB_TOKEN` | the exact same value configured on the API service |
    | `FROSH_USER_ID` | `default-user` initially |
    | `FROSH_PUBLIC_APP_URL` | `https://frosh.geekyacedigitalhub.com` |
