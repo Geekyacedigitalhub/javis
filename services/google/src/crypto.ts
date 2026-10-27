@@ -5,9 +5,9 @@ function base64Url(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString("base64url");
 }
 
-function fromBase64(value: string): Uint8Array {
-  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(value) || value.length > 256) {
-    throw new Error("Google integration encryption key is not valid base64.");
+function fromBase64(value: string, maxLength = 256, error = "Google integration encryption key is not valid base64."): Uint8Array {
+  if (!/^[A-Za-z0-9+/_-]+={0,2}$/.test(value) || value.length > maxLength) {
+    throw new Error(error);
   }
   return new Uint8Array(Buffer.from(value, "base64"));
 }
@@ -68,9 +68,9 @@ export async function decryptGoogleSecret(payload: string, key: Uint8Array): Pro
 
   try {
     const clear = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv: arrayBufferCopy(fromBase64(parsed.iv)), additionalData: AAD },
+      { name: "AES-GCM", iv: arrayBufferCopy(fromBase64(parsed.iv, 64, "Stored Google credentials are unreadable.")), additionalData: AAD },
       await importKey(key),
-      arrayBufferCopy(fromBase64(parsed.data)),
+      arrayBufferCopy(fromBase64(parsed.data, 32_000, "Stored Google credentials are unreadable.")),
     );
     return new TextDecoder().decode(clear);
   } catch {

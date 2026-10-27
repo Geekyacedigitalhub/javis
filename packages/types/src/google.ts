@@ -27,6 +27,15 @@ export interface FroshGoogleOAuthState {
   expiresAt: string;
 }
 
+/**
+ * `found` distinguishes a state that was already consumed/expired from one
+ * that disappeared because a host lost transient state during OAuth consent.
+ */
+export interface FroshGoogleOAuthStateConsumption {
+  state: FroshGoogleOAuthState | null;
+  found: boolean;
+}
+
 export interface FroshGoogleIntegrationStore {
   getConnection(userId: string): Promise<FroshStoredGoogleConnection | null>;
   saveConnection(connection: FroshStoredGoogleConnection): Promise<void>;
@@ -34,7 +43,7 @@ export interface FroshGoogleIntegrationStore {
   deleteConnection(userId: string): Promise<boolean>;
   createOAuthState(state: FroshGoogleOAuthState): Promise<void>;
   /** Atomically consumes a state so an OAuth callback cannot be replayed. */
-  consumeOAuthState(stateHash: string): Promise<FroshGoogleOAuthState | null>;
+  consumeOAuthState(stateHash: string): Promise<FroshGoogleOAuthStateConsumption>;
 }
 
 export interface FroshGoogleCalendarEvent {

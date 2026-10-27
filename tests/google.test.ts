@@ -58,6 +58,39 @@ describe("Google OAuth integration", () => {
     })).rejects.toThrow("already used");
   });
 
+  test("recovers a sealed PKCE verifier when temporary OAuth state disappears", async () => {
+    const started = new GoogleIntegrationService(new InMemoryGoogleIntegrationStore(), {
+      environment,
+      now: () => NOW,
+    });
+    const start = await started.beginAuthorization("alex");
+    const state = new URL(start.authorizationUrl).searchParams.get("state")!;
+
+    let verifier = "";
+    const recovered = new GoogleIntegrationService(new InMemoryGoogleIntegrationStore(), {
+      environment,
+      now: () => NOW,
+      fetcher: async (_input, init) => {
+        verifier = new URLSearchParams(String(init?.body)).get("code_verifier") ?? "";
+        return new Response(JSON.stringify({
+          access_token: "access-token-for-test",
+          refresh_token: "refresh-token-for-test",
+          expires_in: 3600,
+          scope: "https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/gmail.readonly",
+        }));
+      },
+    });
+
+    const connection = await recovered.completeAuthorization({ code: "one-time-google-code", state });
+    expect(connection.userId).toBe("alex");
+    expect(verifier).toMatch(/^[A-Za-z0-9_-]{43,128}$/);
+
+    await expect(recovered.completeAuthorization({
+      code: "tampered-code",
+      state: state.slice(0, -1) + (state.endsWith("A") ? "B" : "A"),
+    })).rejects.toThrow("expired or was already used");
+  });
+
   test("keeps the integration unavailable until all server-side secrets exist", async () => {
     const service = new GoogleIntegrationService(new InMemoryGoogleIntegrationStore(), {
       environment: { FROSH_GOOGLE_REDIRECT_URI: "http://localhost:3000/api/google/callback" },
