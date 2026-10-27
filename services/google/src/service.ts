@@ -53,6 +53,76 @@ type GoogleOAuthConfig = {
   encryptionKey: Uint8Array;
 };
 
+type OAuthStateRecovery = {
+  nonce: string;
+  userId: string;
+  verifier: string;
+  expiresAt: string;
+};
+
+const OAUTH_STATE_PREFIX = "frosh1";
+const OAUTH_STATE_NONCE_BYTES = 32;
+
+function base64UrlEncode(value: string): string {
+  return Buffer.from(value, "utf8").toString("base64url");
+}
+
+function base64UrlDecode(value: string): string | null {
+  if (!/^[A-Za-z0-9_-]{20,900}$/.test(value)) return null;
+  try {
+    return Buffer.from(value, "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+function validOAuthUserId(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 && !/[\u0000-\u001f\u007f]/.test(value);
+}
+
+async function createOAuthStateRecovery(input: OAuthStateRecovery, key: Uint8Array): Promise<string> {
+  return base64UrlEncode(await encryptGoogleSecret(JSON.stringify({
+    v: 1,
+    nonce: input.nonce,
+    userId: input.userId,
+    verifier: input.verifier,
+    expiresAt: input.expiresAt,
+  }), key));
+}
+
+async function recoverOAuthState(state: string, key: Uint8Array, now: number): Promise<OAuthStateRecovery | null> {
+  const parts = state.split(".");
+  if (
+    parts.length !== 3 ||
+    parts[0] !== OAUTH_STATE_PREFIX ||
+    !/^[A-Za-z0-9_-]{43}$/.test(parts[1]) ||
+    !parts[2]
+  ) return null;
+
+  const sealed = base64UrlDecode(parts[2]);
+  if (!sealed) return null;
+
+  try {
+    const payload: unknown = JSON.parse(await decryptGoogleSecret(sealed, key));
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+    const record = payload as Record<string, unknown>;
+    const nonce = record.nonce;
+    const userId = record.userId;
+    const verifier = record.verifier;
+    const expiresAt = record.expiresAt;
+    if (
+      record.v !== 1 ||
+      nonce !== parts[1] ||
+      !validOAuthUserId(userId) ||
+      typeof verifier !== "string" || !/^[A-Za-z0-9_-]{43,128}$/.test(verifier) ||
+      typeof expiresAt !== "string" || !Number.isFinite(Date.parse(expiresAt)) || Date.parse(expiresAt) <= now
+    ) return null;
+    return { nonce, userId, verifier, expiresAt: new Date(expiresAt).toISOString() };
+  } catch {
+    return null;
+  }
+}
+
 function requiredEnvironment(env: Environment, name: string): string {
   const value = env[name]?.trim() ?? "";
   if (!value) throw new GoogleIntegrationError(`Google integration is not configured: ${name} is required.`, 503, "not_configured");
@@ -223,9 +293,15 @@ export class GoogleIntegrationService {
 
   async beginAuthorization(userId: string): Promise<{ authorizationUrl: string; expiresAt: string }> {
     const config = this.config();
-    const state = randomOpaqueToken(32);
+    const nonce = randomOpaqueToken(OAUTH_STATE_NONCE_BYTES);
     const verifier = randomOpaqueToken(64);
     const expiresAt = new Date(this.now() + OAUTH_STATE_TTL_MS).toISOString();
+    // The durable record is the normal, one-time replay defence. The sealed
+    // portion is a short-lived, confidential recovery copy of the PKCE
+    // verifier. It lets a callback finish if a free host recycles the process
+    // or a database connection loses only this temporary state mid-consent;
+    // Google still accepts each authorization code only once.
+    const state = `${OAUTH_STATE_PREFIX}.${nonce}.${await createOAuthStateRecovery({ nonce, userId, verifier, expiresAt }, config.encryptionKey)}`;
     await this.store.createOAuthState({
       stateHash: await sha256Base64Url(state),
       userId,
@@ -304,19 +380,35 @@ export class GoogleIntegrationService {
       throw new GoogleIntegrationError("Google returned an incomplete authorization callback.", 400, "authorization_failed");
     }
     const config = this.config();
-    const stateRecord = await this.store.consumeOAuthState(await sha256Base64Url(state));
-    if (!stateRecord) {
-      throw new GoogleIntegrationError("This Google connection link has expired or was already used. Start the connection again.", 400, "authorization_failed");
-    }
+    const consumedState = await this.store.consumeOAuthState(await sha256Base64Url(state));
+    const stateRecord = consumedState.state;
 
+    let userId: string;
     let verifier: string;
-    try {
-      verifier = await decryptGoogleSecret(stateRecord.encryptedCodeVerifier, config.encryptionKey);
-    } catch {
-      throw new GoogleIntegrationError("Google connection verification failed. Start the connection again.", 400, "authorization_failed");
+    if (stateRecord) {
+      userId = stateRecord.userId;
+      try {
+        verifier = await decryptGoogleSecret(stateRecord.encryptedCodeVerifier, config.encryptionKey);
+      } catch {
+        throw new GoogleIntegrationError("Google connection verification failed. Start the connection again.", 400, "authorization_failed");
+      }
+    } else {
+      // Never use the sealed recovery copy for a state this store recognizes:
+      // it was already consumed or expired, so a callback replay must fail.
+      const recovered = consumedState.found
+        ? null
+        : await recoverOAuthState(state, config.encryptionKey, this.now());
+      if (!recovered) {
+        throw new GoogleIntegrationError("This Google connection link has expired or was already used. Start the connection again.", 400, "authorization_failed");
+      }
+      // A sealed recovery state is only used when the temporary store entry
+      // vanished between redirect and callback. Its PKCE verifier remains
+      // confidential, and Google's authorization code is itself single-use.
+      userId = recovered.userId;
+      verifier = recovered.verifier;
     }
 
-    const current = await this.store.getConnection(stateRecord.userId);
+    const current = await this.store.getConnection(userId);
     const currentTokens = current ? await this.encryptedTokens(current, config).catch(() => null) : null;
     const response = await this.postToken(new URLSearchParams({
       code,
@@ -336,7 +428,7 @@ export class GoogleIntegrationService {
 
     const now = new Date(this.now()).toISOString();
     const saved: FroshStoredGoogleConnection = {
-      userId: stateRecord.userId,
+      userId,
       provider: "google",
       status: "connected",
       scopes: reportedScopes.length ? reportedScopes : [...GOOGLE_REQUIRED_SCOPES],

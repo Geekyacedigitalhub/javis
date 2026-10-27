@@ -3,6 +3,7 @@ import type {
   FroshGoogleConnectionStatus,
   FroshGoogleIntegrationStore,
   FroshGoogleOAuthState,
+  FroshGoogleOAuthStateConsumption,
   FroshStoredGoogleConnection,
 } from "../../../packages/types/src/google";
 
@@ -77,6 +78,7 @@ function toState(row: StateRow): FroshGoogleOAuthState | null {
 export class InMemoryGoogleIntegrationStore implements FroshGoogleIntegrationStore {
   private readonly connections = new Map<string, FroshStoredGoogleConnection>();
   private readonly states = new Map<string, FroshGoogleOAuthState>();
+  private readonly consumedStates = new Map<string, string>();
 
   async getConnection(userId: string) {
     const current = this.connections.get(validUserId(userId));
@@ -105,16 +107,25 @@ export class InMemoryGoogleIntegrationStore implements FroshGoogleIntegrationSto
     if (!/^[A-Za-z0-9_-]{32,128}$/.test(state.stateHash)) throw new Error("OAuth state is invalid.");
     if (!state.encryptedCodeVerifier || state.encryptedCodeVerifier.length > 8_000) throw new Error("OAuth verifier is invalid.");
     if (!Number.isFinite(Date.parse(state.expiresAt))) throw new Error("OAuth state expiry is invalid.");
+    this.consumedStates.delete(state.stateHash);
     this.states.set(state.stateHash, cloneState({ ...state, userId: validUserId(state.userId) }));
   }
 
-  async consumeOAuthState(stateHash: string) {
+  async consumeOAuthState(stateHash: string): Promise<FroshGoogleOAuthStateConsumption> {
     const state = this.states.get(stateHash);
-    // Delete before inspecting expiry so malformed or expired callbacks cannot
-    // be retried forever.
+    // Mark a state as used before inspecting expiry, so a replay remains
+    // distinguishable from state that vanished in a recycled host process.
     this.states.delete(stateHash);
-    if (!state || Date.parse(state.expiresAt) <= Date.now()) return null;
-    return cloneState(state);
+    if (state) {
+      this.consumedStates.set(stateHash, state.expiresAt);
+      return { state: Date.parse(state.expiresAt) > Date.now() ? cloneState(state) : null, found: true };
+    }
+    const consumedExpiry = this.consumedStates.get(stateHash);
+    if (consumedExpiry) {
+      if (Date.parse(consumedExpiry) <= Date.now()) this.consumedStates.delete(stateHash);
+      else return { state: null, found: true };
+    }
+    return { state: null, found: false };
   }
 }
 
@@ -295,8 +306,8 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
     );
   }
 
-  async consumeOAuthState(stateHash: string) {
-    if (!/^[A-Za-z0-9_-]{32,128}$/.test(stateHash)) return null;
+  async consumeOAuthState(stateHash: string): Promise<FroshGoogleOAuthStateConsumption> {
+    if (!/^[A-Za-z0-9_-]{32,128}$/.test(stateHash)) return { state: null, found: false };
     const rows = await this.query<PreferenceStateRow>(
       `WITH matched AS (
          SELECT user_id, google_oauth_states -> $1::text AS state
@@ -305,12 +316,20 @@ export class PostgresGoogleIntegrationStore implements FroshGoogleIntegrationSto
          FOR UPDATE
        )
        UPDATE frosh_user_preferences preferences
-       SET google_oauth_states=preferences.google_oauth_states - $1::text, updated_at=NOW()
+       SET google_oauth_states=jsonb_set(
+             preferences.google_oauth_states,
+             ARRAY[$1]::text[],
+             jsonb_build_object('used', true, 'expiresAt', matched.state -> 'expiresAt'),
+             true
+           ),
+           updated_at=NOW()
        FROM matched
        WHERE preferences.user_id=matched.user_id
        RETURNING matched.state AS "state"`,
       [stateHash],
     );
-    return rows[0] ? stateFromPreference(rows[0].state, stateHash) : null;
+    return rows[0]
+      ? { state: stateFromPreference(rows[0].state, stateHash), found: true }
+      : { state: null, found: false };
   }
 }
