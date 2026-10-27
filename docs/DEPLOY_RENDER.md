@@ -3,9 +3,15 @@
 This guide deploys the complete FROSH service as two Render web services plus a
 managed PostgreSQL database:
 
-- **FROSH API** — Bun API, device gateway, OAuth token store, migrations, and tools
-- **FROSH Control Center** — Next.js web UI and OAuth callback endpoint
+- **FROSH API** — Bun API, device gateway, external/mobile API, migrations, and tools
+- **FROSH Control Center** — Next.js web UI plus a loopback-only Bun API sidecar
+  for authenticated console requests and Google OAuth
 - **PostgreSQL** — durable conversations, tasks, preferences, approvals, and encrypted Google credentials
+
+The loopback API sidecar keeps Control Center requests inside one free Render
+container. This is important because free Render web services can send private
+network traffic but cannot receive it, and routing authenticated console traffic
+through a second service's public edge can produce intermittent gateway errors.
 
 A static-site host alone is not suitable: FROSH needs a long-running API,
 WebSocket support, server-side OAuth exchange, and persistent storage.
@@ -77,13 +83,9 @@ WebSocket support, server-side OAuth exchange, and persistent storage.
    intentionally unreadable and requires reconnection.
 
 7. Deploy the service and confirm its `/health` endpoint returns JSON with
-   `"ok": true`. Keep its Render HTTPS URL for direct health checks. When the
-   Control Center is in the same Render workspace and region, open this API
-   service's **Connect → Internal** tab and copy the exact internal HTTP URL it
-   displays into the Control Center's `FROSH_API_URL`. Do not guess the
-   hostname from the service name: Render assigns each service a unique private
-   hostname. The internal URL avoids routing service-to-service requests
-   through the public edge.
+   `"ok": true`. Keep its Render HTTPS URL for direct health checks and mobile
+   clients. The Control Center below runs its authenticated API sidecar locally,
+   so it does not use this public URL for server-to-server console requests.
 
 The API image automatically runs the checksum-protected migration runner before
 starting. If migration fails, correct the database URL rather than bypassing it.
@@ -99,23 +101,34 @@ starting. If migration fails, correct the database URL rather than bypassing it.
    ```
 
    Again, use repository root as its build context.
-4. Add these environment variables:
+4. Add these environment variables. The Control Center image starts a
+   loopback-only API sidecar on port 3001, so it needs the same **server-only**
+   API variables as `frosh-api` to run migrations, authenticate console calls,
+   and handle Google OAuth. Copy values privately in Render; never paste them
+   into chat or commit them to Git.
 
    | Key | Value |
    | --- | --- |
-   | `FROSH_API_URL` | the exact HTTP URL from **`frosh-api` → Connect → Internal** when both services are in this Render workspace and region (preferred); otherwise the API's HTTPS public URL |
+   | `FROSH_API_URL` | `http://127.0.0.1:3001` |
+   | `DATABASE_URL` | the same Render PostgreSQL internal connection string used by `frosh-api` |
    | `FROSH_WEB_TOKEN` | the exact same value configured on the API service |
+   | `FROSH_DEVICE_ENROLLMENT_TOKEN` | the same API value, if device enrollment is enabled |
    | `FROSH_USER_ID` | `default-user` initially |
+   | `GOOGLE_CLIENT_ID` | the same API Google OAuth client ID |
+   | `GOOGLE_CLIENT_SECRET` | the same API Google OAuth client secret |
+   | `FROSH_GOOGLE_REDIRECT_URI` | `https://frosh.geekyacedigitalhub.com/api/google/callback` |
+   | `FROSH_GOOGLE_TOKEN_ENCRYPTION_KEY` | the exact same API token-encryption key |
    | `FROSH_PUBLIC_APP_URL` | `https://frosh.geekyacedigitalhub.com` |
+   | `OPENAI_API_KEY` | optional; copy it only if configured on `frosh-api` and chat should use it |
 
-   Do **not** set `FROSH_WEB_AUTH_DISABLED` in a production service. Do not use
-   any `NEXT_PUBLIC_` variable for a token, client secret, or encryption key.
+   Also copy any other optional provider/tool variables that you deliberately
+   configured on `frosh-api`. Do **not** set `FROSH_WEB_AUTH_DISABLED` in a
+   production service. Do not use any `NEXT_PUBLIC_` variable for a token,
+   client secret, database URL, or encryption key.
 
    On Render's free instances, an inactive service can take 50 seconds or more
-   to wake. FROSH retries transient Google-status failures as separate bounded
-   browser requests, so Render's public edge does not replace a long request
-   with an HTML gateway error. The private API URL above is still preferred
-   whenever it is reachable in the selected workspace and region.
+   to wake. The colocated sidecar avoids a second free web service's public edge
+   for authenticated Control Center requests.
 
 5. Deploy it and confirm the Render-provided URL opens. The initial browser
    Basic Auth prompt accepts any username and the `FROSH_WEB_TOKEN` as the
