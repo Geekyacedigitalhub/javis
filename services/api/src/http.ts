@@ -25,19 +25,28 @@ const googleIntegration = new GoogleIntegrationService(getGoogleIntegrationStore
 // The autonomous loop executes tools itself and verifies with real output, so it
 // is a separate driver from the single-shot session manager above.
 const codingLoop = new CodingLoop(createProvider());
-const port = Number(process.env.PORT ?? 3001);
+// A Control Center container can run a colocated API sidecar on a private
+// loopback port. Render supplies PORT for the public Next server in that
+// deployment, so use an explicit API-port override when present.
+const port = Number(process.env.FROSH_API_PORT ?? process.env.PORT ?? 3001);
+const backgroundRunnersEnabled = process.env.FROSH_DISABLE_BACKGROUND_RUNNERS !== "1";
 await initializeDeviceStore();
 await markAllDevicesOffline();
-void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Initial device credential cleanup failed", error));
-void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Initial device command ledger cleanup failed", error));
-const credentialCleanupTimer = setInterval(() => {
-  void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Scheduled device credential cleanup failed", error));
-  void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Scheduled device command ledger cleanup failed", error));
-}, 60 * 60 * 1000);
+let credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
+if (backgroundRunnersEnabled) {
+  void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Initial device credential cleanup failed", error));
+  void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Initial device command ledger cleanup failed", error));
+  credentialCleanupTimer = setInterval(() => {
+    void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Scheduled device credential cleanup failed", error));
+    void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Scheduled device command ledger cleanup failed", error));
+  }, 60 * 60 * 1000);
+}
 import { startAutomationRunner } from "../../automation/src";
 import { startMissionRunner } from "../../missions/src";
-startAutomationRunner();
-startMissionRunner();
+if (backgroundRunnersEnabled) {
+  startAutomationRunner();
+  startMissionRunner();
+}
 
 async function recoverMissionsOnStartup(){
   const userId=process.env.FROSH_AUTOMATION_USER_ID?.trim();
@@ -78,7 +87,7 @@ async function recoverMissionsOnStartup(){
     logOperationalError("FROSH mission startup recovery failed", error);
   }
 }
-setTimeout(()=>void recoverMissionsOnStartup(),2000);
+if (backgroundRunnersEnabled) setTimeout(() => void recoverMissionsOnStartup(), 2000);
 
 let shuttingDown = false;
 
@@ -88,7 +97,7 @@ let shuttingDown = false;
  * state, and they need a way to put it down again.
  */
 export async function closeApi() {
-  clearInterval(credentialCleanupTimer);
+  if (credentialCleanupTimer) clearInterval(credentialCleanupTimer);
   try {
     shutdownRealtime();
     await server.stop(true);
@@ -252,6 +261,10 @@ type RealtimeSocketData = {
 
 const server = Bun.serve<RealtimeSocketData>({
   port,
+  // The public API uses Bun's all-interface default. A Control Center
+  // sidecar explicitly binds loopback so authenticated traffic never leaves
+  // its container.
+  hostname: process.env.FROSH_API_HOST?.trim() || undefined,
   websocket: {
     open(ws) {
       // Authentication is completed by the first realtime auth message.

@@ -1,20 +1,36 @@
 # Production image for the FROSH Next.js control center.
+#
+# Render's free web services can send private-network traffic but cannot receive
+# it. Run a loopback-only FROSH API sidecar in this same container so the
+# Control Center never needs to traverse Render's public edge for authenticated
+# control-plane requests such as Google OAuth status/callbacks.
 FROM oven/bun:1.4.4-alpine
 
 WORKDIR /app
 
-COPY apps/web/package.json apps/web/bun.lock ./
+COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 
-COPY apps/web ./
+COPY apps/web/package.json apps/web/bun.lock ./apps/web/
+RUN cd apps/web && bun install --frozen-lockfile
+
+COPY packages ./packages
+COPY scripts ./scripts
+COPY services ./services
+COPY apps/web ./apps/web
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN bun run build
+RUN cd apps/web && bun run build
 
-ENV PORT=3000
-EXPOSE 3000
-# Start Next directly so Docker tracks the HTTP server itself. Running it through
-# `bun run` adds a script wrapper that can receive Render's lifecycle SIGTERM
-# while the child server is still healthy, resulting in intermittent 502s.
-CMD ["bun", "./node_modules/next/dist/bin/next", "start", "--hostname", "0.0.0.0"]
+# Render supplies PORT for the public Next server. The colocated Bun API uses a
+# loopback-only sidecar port, configured independently from Render's PORT.
+ENV PORT=10000
+ENV FROSH_LOCAL_API_PORT=3001
+EXPOSE 10000
+
+# Keep Next as the public server while stopping both processes cleanly on a
+# Render lifecycle signal. The sidecar has background runners disabled: the
+# separately deployed frosh-api service remains the sole runner for schedules
+# and mission recovery.
+CMD ["sh", "-c", "set -eu; bun run migrate; FROSH_DISABLE_BACKGROUND_RUNNERS=1 FROSH_API_HOST=127.0.0.1 FROSH_API_PORT=${FROSH_LOCAL_API_PORT:-3001} bun run start & api_pid=$!; (cd apps/web && bun ./node_modules/next/dist/bin/next start --hostname 0.0.0.0) & web_pid=$!; trap 'kill -TERM \"$web_pid\" \"$api_pid\" 2>/dev/null || true; wait \"$web_pid\" \"$api_pid\" 2>/dev/null || true' TERM INT; wait \"$web_pid\"; status=$?; kill -TERM \"$api_pid\" 2>/dev/null || true; wait \"$api_pid\" 2>/dev/null || true; exit \"$status\""]
