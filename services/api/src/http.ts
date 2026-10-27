@@ -175,6 +175,10 @@ function googleIntegrationErrorResponse(error: unknown): Response {
     return Response.json({ error: "Invalid identifier" }, { status: 400 });
   }
   if (error instanceof GoogleIntegrationError) {
+    // These errors contain only user-safe integration diagnostics (never an
+    // OAuth code, token, client secret, or database value). Logging them makes
+    // callback failures observable from the Control Center sidecar on Render.
+    console.warn("FROSH Google integration request rejected", error.code, error.httpStatus, error.message);
     return Response.json({ error: error.message, code: error.code }, { status: error.httpStatus });
   }
   logOperationalError("FROSH Google integration request failed", error);

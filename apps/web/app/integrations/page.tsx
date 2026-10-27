@@ -28,10 +28,22 @@ function wait(delayMs: number): Promise<void> {
 
 function connectionMessage(): string {
   if (typeof window === "undefined") return "";
-  const outcome = new URLSearchParams(window.location.search).get("google");
+  const params = new URLSearchParams(window.location.search);
+  const outcome = params.get("google");
   if (outcome === "connected") return "Google connected. FROSH can now read unread Gmail metadata and calendar events; calendar changes still need your approval.";
   if (outcome === "cancelled") return "Google connection was cancelled. No access was granted.";
-  if (outcome === "error") return "FROSH could not complete the Google connection. Start again, and make sure the callback URL and server secrets are configured.";
+  if (outcome === "error") {
+    const message = (params.get("google_message") ?? "")
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 240);
+    if (message) return `FROSH could not complete the Google connection: ${message}`;
+    const code = params.get("google_code");
+    if (code === "upstream_failed") return "FROSH could not reach Google to complete the connection. Please retry shortly.";
+    if (code === "not_configured") return "FROSH Google configuration is incomplete. Check the server-only Google settings.";
+    return "FROSH could not complete the Google connection. Start again, and make sure the callback URL and server secrets are configured.";
+  }
   return "";
 }
 
