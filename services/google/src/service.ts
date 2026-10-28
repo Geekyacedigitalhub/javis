@@ -19,7 +19,11 @@ export const GOOGLE_REQUIRED_SCOPES = [
 ] as const;
 
 const MAX_REMOTE_JSON_BYTES = 1_000_000;
-const OAUTH_STATE_TTL_MS = 10 * 60_000;
+// OAuth consent can legitimately take several minutes when Google displays a
+// Testing warning, account chooser, and granular scope consent. Keep the
+// PKCE-bound state short-lived, but long enough that a real person is not
+// forced to restart halfway through the consent flow.
+const OAUTH_STATE_TTL_MS = 30 * 60_000;
 const TOKEN_REFRESH_SKEW_MS = 90_000;
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke";

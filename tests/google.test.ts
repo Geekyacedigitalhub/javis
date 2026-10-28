@@ -34,6 +34,7 @@ describe("Google OAuth integration", () => {
 
     const start = await service.beginAuthorization("alex");
     const authorization = new URL(start.authorizationUrl);
+    expect(Date.parse(start.expiresAt) - NOW).toBe(30 * 60_000);
     expect(authorization.origin).toBe("https://accounts.google.com");
     expect(authorization.searchParams.get("redirect_uri")).toBe(environment.FROSH_GOOGLE_REDIRECT_URI);
     expect(authorization.searchParams.get("code_challenge_method")).toBe("S256");
