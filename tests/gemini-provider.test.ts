@@ -87,6 +87,42 @@ test("Gemini stores a bounded provider continuation for approval-gated actions a
   expect(resumeContents.at(-1)?.parts[0].functionResponse).toBeDefined();
 });
 
+test("Gemini visual analysis sends one explicitly supplied bounded image and no tool declarations", async () => {
+  const requests: Array<Record<string, unknown>> = [];
+  const provider = new GeminiProvider({
+    apiKey: "test-key",
+    fetcher: async (_url, init) => {
+      requests.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({
+        candidates: [{ content: { role: "model", parts: [{ text: "I can see a green notebook on the desk." }] } }],
+      }), { headers: { "content-type": "application/json" } });
+    },
+  });
+
+  const result = await provider.analyzeImage({ data: "aGVsbG8=", mimeType: "image/jpeg", prompt: "What is on the desk?" });
+
+  expect(result.message).toContain("green notebook");
+  expect(requests).toHaveLength(1);
+  expect(requests[0].tools).toBeUndefined();
+  const parts = ((requests[0].contents as Array<{ parts: Array<Record<string, unknown>> }>)[0].parts);
+  expect(parts[1].inlineData).toEqual({ mimeType: "image/jpeg", data: "aGVsbG8=" });
+});
+
+test("Gemini visual analysis rejects invalid media before it reaches the provider", async () => {
+  let called = false;
+  const provider = new GeminiProvider({
+    apiKey: "test-key",
+    fetcher: async () => {
+      called = true;
+      return new Response("{}", { status: 500 });
+    },
+  });
+
+  await expect(provider.analyzeImage({ data: "not base64!", mimeType: "image/gif" })).rejects.toThrow("JPEG, PNG, or WebP");
+  await expect(provider.analyzeImage({ data: "AAAA=", mimeType: "image/jpeg" })).rejects.toThrow("JPEG, PNG, or WebP");
+  expect(called).toBe(false);
+});
+
 test("provider status is explicit when no live model is configured and selects the no-cost Gemini route", () => {
   expect(describeProvider({})).toMatchObject({ provider: "development", configured: false });
   expect(describeProvider({ GEMINI_API_KEY: "configured", FROSH_GEMINI_MODEL: "gemini-test" })).toMatchObject({

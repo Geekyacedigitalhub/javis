@@ -57,6 +57,13 @@ export function getAssistantStatus() {
   return request<{ assistant: FroshAssistantStatus }>("/v1/assistant/status");
 }
 
+export function analyzeVision(image: string, mimeType: "image/jpeg" | "image/png" | "image/webp", prompt?: string) {
+  return request<{ message: string }>("/v1/vision/analyze", {
+    method: "POST",
+    body: JSON.stringify({ image, mimeType, ...(prompt?.trim() ? { prompt: prompt.trim() } : {}) }),
+  });
+}
+
 export function sendMessage(message: string, conversationId?: string) {
   return request<FroshResponse>("/v1/chat", {
     method: "POST",

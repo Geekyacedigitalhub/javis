@@ -13,6 +13,8 @@ const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com/v1beta/mode
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const MAX_TOOL_ROUNDS = 8;
 const MAX_CONTINUATION_BYTES = 120_000;
+const MAX_VISION_IMAGE_BYTES = 3 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 type GeminiPart = Record<string, unknown>;
@@ -34,6 +36,26 @@ function safeText(value: unknown, max = 1_000): string | undefined {
   if (typeof value !== "string") return undefined;
   const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   return cleaned ? cleaned.slice(0, max) : undefined;
+}
+
+function imageByteLength(base64: string): number {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.floor(base64.length * 3 / 4) - padding;
+}
+
+function validBase64Shape(value: string): boolean {
+  // Accept ordinary unpadded Base64 too, but reject impossible 1-character
+  // tails and padded values that cannot occupy a complete Base64 quartet.
+  return /^[A-Za-z0-9+/]+={0,2}$/.test(value) &&
+    value.length % 4 !== 1 &&
+    (!value.includes("=") || value.length % 4 === 0);
+}
+
+function validImage(input: { data: string; mimeType: string }): boolean {
+  return ALLOWED_IMAGE_TYPES.has(input.mimeType) &&
+    validBase64Shape(input.data) &&
+    imageByteLength(input.data) > 0 &&
+    imageByteLength(input.data) <= MAX_VISION_IMAGE_BYTES;
 }
 
 function validModel(value: string | undefined): string {
@@ -335,6 +357,39 @@ export class GeminiProvider {
       message: "FROSH reached the maximum tool-execution rounds for this request.",
       toolCalls: executedCalls,
     };
+  }
+
+  /** Analyze an image only when the client explicitly uploads one. The API does
+   * not retain the base64 payload, and this method never enables device or
+   * external-action tools for visual analysis. */
+  async analyzeImage(input: { data: string; mimeType: string; prompt?: string }): Promise<{ message: string }> {
+    const mimeType = input.mimeType.trim().toLowerCase();
+    const data = input.data.trim();
+    if (!validImage({ data, mimeType })) {
+      throw new Error("The image must be a JPEG, PNG, or WebP file under 3 MB.");
+    }
+    const prompt = safeText(input.prompt, 2_000) ?? "Describe what is visible, identify useful details, and say clearly when something is uncertain.";
+    const content = await this.generateContent({
+      systemInstruction: {
+        parts: [{ text: [
+          "You are FROSH's visual assistant.",
+          "Analyze only the image the user explicitly provided.",
+          "Be helpful, concise, and honest about uncertainty.",
+          "Do not identify people, infer sensitive traits, or claim to have taken an external action.",
+        ].join(" ") }],
+      },
+      contents: [{
+        role: "user",
+        parts: [
+          { text: prompt },
+          { inlineData: { mimeType, data } },
+        ],
+      }],
+      generationConfig: { temperature: 0.2, maxOutputTokens: 1024 },
+    });
+    const message = textFromContent(content);
+    if (!message) throw new Error("Gemini returned no usable visual analysis.");
+    return { message };
   }
 
   async evaluateMission(input: { goal: string; step: string; result: string }): Promise<MissionEvaluation> {

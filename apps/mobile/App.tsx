@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { StatusBar } from "expo-status-bar";
+import { CameraView, useCameraPermissions } from "expo-camera";
+import * as Speech from "expo-speech";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { getAssistantStatus, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun, type FroshAssistantStatus } from "./src/api";
+import { analyzeVision, getAssistantStatus, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun, type FroshAssistantStatus } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import type { FroshNotification } from "../../packages/types/src/notifications";
@@ -37,6 +39,10 @@ export default function App() {
   const [replyText, setReplyText] = useState("");
   const [installedApps, setInstalledApps] = useState<Array<{ packageName: string; name: string }>>([]);
   const [assistantStatus, setAssistantStatus] = useState<FroshAssistantStatus | null>(null);
+  const [visionPrompt, setVisionPrompt] = useState("");
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const cameraRef = useRef<CameraView>(null);
 
   function refreshAssistantStatus() {
     return getAssistantStatus().then((result) => setAssistantStatus(result.assistant)).catch(() => setAssistantStatus(null));
@@ -110,6 +116,43 @@ export default function App() {
       setMessage("");
     } catch (error) {
       setReply(error instanceof Error ? error.message : "FROSH request failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function speakReply(text: string) {
+    Speech.stop();
+    Speech.speak(text.slice(0, 4_000), { language: "en-US", rate: 0.95 });
+  }
+
+  async function openCamera() {
+    if (!paired) {
+      setReply("Pair this phone before using protected visual analysis.");
+      return;
+    }
+    if (!cameraPermission?.granted) {
+      const permission = await requestCameraPermission();
+      if (!permission.granted) {
+        setReply("Camera permission is required to analyze a photo.");
+        return;
+      }
+    }
+    setCameraOpen(true);
+  }
+
+  async function captureAndAnalyze() {
+    if (busy || !cameraRef.current) return;
+    setBusy(true);
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.55, exif: false });
+      if (!photo?.base64) throw new Error("FROSH could not capture a usable photo.");
+      setCameraOpen(false);
+      const result = await analyzeVision(photo.base64, "image/jpeg", visionPrompt);
+      setReply(result.message);
+      speakReply(result.message);
+    } catch (error) {
+      setReply(error instanceof Error ? error.message : "FROSH could not analyze that photo.");
     } finally {
       setBusy(false);
     }
@@ -232,6 +275,28 @@ export default function App() {
         ) : null}
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>Visual Assist</Text>
+          <Text style={styles.reply}>Take a photo for a one-time Gemini analysis. The photo is sent only for this request and is not saved by FROSH.</Text>
+          {!assistantStatus?.configured ? <Text style={styles.warning}>A live Gemini model must be configured before visual analysis is available.</Text> : null}
+          {cameraOpen ? (
+            <>
+              <CameraView ref={cameraRef} style={styles.camera} facing="back" />
+              <View style={styles.actions}>
+                <Pressable style={styles.primary} onPress={captureAndAnalyze} disabled={busy}>
+                  {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>CAPTURE & ANALYZE</Text>}
+                </Pressable>
+                <Pressable style={styles.secondary} onPress={() => setCameraOpen(false)} disabled={busy}><Text style={styles.secondaryText}>CANCEL</Text></Pressable>
+              </View>
+            </>
+          ) : (
+            <>
+              <TextInput value={visionPrompt} onChangeText={setVisionPrompt} placeholder="Optional: what should FROSH look for?" placeholderTextColor="#6b7280" multiline style={styles.input} />
+              <Pressable style={styles.secondary} onPress={openCamera} disabled={busy}><Text style={styles.secondaryText}>OPEN CAMERA</Text></Pressable>
+            </>
+          )}
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Ask FROSH</Text>
           <Text style={styles.reply}>{reply}</Text>
           <TextInput
@@ -302,6 +367,7 @@ const styles = StyleSheet.create({
   replyRow: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 10 },
   inputSingle: { minHeight: 48, backgroundColor: "#07110b", borderRadius: 12, padding: 14, color: "#fff" },
   input: { minHeight: 90, backgroundColor: "#07110b", borderRadius: 12, padding: 14, color: "#fff", textAlignVertical: "top" },
+  camera: { height: 320, borderRadius: 12, overflow: "hidden", backgroundColor: "#07110b" },
   actions: { flexDirection: "row", gap: 10 },
   primary: { flex: 1, minHeight: 48, borderRadius: 12, backgroundColor: "#16a34a", alignItems: "center", justifyContent: "center" },
   primaryText: { color: "#fff", fontWeight: "900" },

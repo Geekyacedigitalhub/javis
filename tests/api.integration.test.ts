@@ -112,6 +112,21 @@ describe("health and auth", () => {
     expect(status.body.assistant).toMatchObject({ provider: "development", configured: false });
   });
 
+  test("visual analysis is authenticated and truthfully unavailable without a live vision provider", async () => {
+    const anonymous = await fetch(`${BASE}/v1/vision/analyze`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    expect(anonymous.status).toBe(401);
+
+    const response = await call("/v1/vision/analyze", {
+      method: "POST",
+      body: JSON.stringify({ image: "aGVsbG8=", mimeType: "image/jpeg" }),
+    });
+    expect(response.status).toBe(503);
+    expect(response.body.error).toContain("Gemini");
+
+    const invalid = await call("/v1/vision/analyze", { method: "POST", body: JSON.stringify({ image: "AAAA=", mimeType: "image/jpeg" }) });
+    expect(invalid.status).toBe(400);
+  });
+
   test("Google connection status is authenticated and safely reports missing server configuration", async () => {
     const anonymous = await fetch(`${BASE}/v1/integrations/google/users/${USER}`);
     expect(anonymous.status).toBe(401);
