@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   // Local development escape hatch. Explicit opt-in, and never available in a
   // production build, so the control center can be opened on a dev machine
   // without weakening deployed authentication.

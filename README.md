@@ -10,7 +10,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 
 - `apps/web` — FROSH control center
 - `apps/mobile` — Android client
-- `apps/desktop-agent` — authorized Windows device agent
+- `apps/agent` — authorized Windows device agent
 - `services/api` — backend API and realtime gateway
 - `services/ai` — model orchestration and agent loop
 - `services/memory` — persistent memory layer
@@ -69,8 +69,8 @@ bun run dev:web    # control center on http://localhost:3000
 ### Verification commands
 
 ```bash
-bun run check          # typecheck backend + web
-bun test               # full test suite (52 tests, no network required)
+bun run check          # typecheck backend, control center, and Android client
+bun test               # full local test suite (no production-network access required)
 bun run test:unit      # fast suite: syntax, stores, validation, schedules
 bun run test:api       # boots the real API and drives it over HTTP
 bun run migrate:dry    # list migrations without touching a database
