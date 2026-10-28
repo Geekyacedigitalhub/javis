@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Speech from "expo-speech";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { analyzeVision, getAssistantStatus, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun, type FroshAssistantStatus } from "./src/api";
+import { analyzeVision, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import type { FroshNotification } from "../../packages/types/src/notifications";
@@ -19,6 +19,12 @@ import { getCallPermissionStatus } from "./modules/frosh-calls/src";
 import { getContactsCapability } from "./modules/frosh-contacts/src";
 import { getMessagingPermissionStatus } from "./modules/frosh-messaging/src";
 import { addSpeechListener, cancelSpeechInput, getSpeechCapability, requestSpeechPermission, startSpeechInput, stopSpeechInput } from "./modules/frosh-speech/src";
+
+function conversationLabel(conversation: FroshConversationSummary) {
+  const preview = conversation.preview?.replace(/\s+/g, " ").trim();
+  if (!preview) return "New conversation";
+  return preview.length > 54 ? `${preview.slice(0, 54)}…` : preview;
+}
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -45,11 +51,52 @@ export default function App() {
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [listening, setListening] = useState(false);
   const [voiceInputStatus, setVoiceInputStatus] = useState("checking Android voice input");
+  const [conversationId, setConversationId] = useState<string | undefined>();
+  const [conversations, setConversations] = useState<FroshConversationSummary[]>([]);
+  const [conversationMessages, setConversationMessages] = useState<FroshConversationMessage[]>([]);
+  const [loadingConversation, setLoadingConversation] = useState(false);
+  const [conversationError, setConversationError] = useState("");
   const cameraRef = useRef<CameraView>(null);
   const busyRef = useRef(false);
 
   function refreshAssistantStatus() {
     return getAssistantStatus().then((result) => setAssistantStatus(result.assistant)).catch(() => setAssistantStatus(null));
+  }
+
+  async function refreshConversations() {
+    try {
+      const result = await listConversations();
+      setConversations(result.conversations);
+      setConversationError("");
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : "Could not load conversation history.");
+    }
+  }
+
+  async function openConversation(id: string) {
+    if (id === conversationId || loadingConversation || busyRef.current) return;
+    setLoadingConversation(true);
+    setConversationError("");
+    try {
+      const result = await getConversation(id);
+      setConversationId(id);
+      setConversationMessages(result.messages.filter((item) => item.role === "user" || item.role === "assistant"));
+      const latestReply = [...result.messages].reverse().find((item) => item.role === "assistant")?.content;
+      if (latestReply) setReply(latestReply);
+    } catch (error) {
+      setConversationError(error instanceof Error ? error.message : "Could not open this conversation.");
+    } finally {
+      setLoadingConversation(false);
+    }
+  }
+
+  function startNewConversation() {
+    if (busyRef.current || loadingConversation) return;
+    setConversationId(undefined);
+    setConversationMessages([]);
+    setMessage("");
+    setConversationError("");
+    setReply("New conversation ready.");
   }
 
   useEffect(() => {
@@ -68,6 +115,7 @@ export default function App() {
       setPaired(true);
       listDevices().then((result) => setDevices(result.devices)).catch(() => undefined);
       void refreshAssistantStatus();
+      void refreshConversations();
     });
   }, []);
 
@@ -125,6 +173,7 @@ export default function App() {
       setEnrollmentToken("");
       setDevices([device]);
       await refreshAssistantStatus();
+      await refreshConversations();
     } catch (error) {
       setReply(error instanceof Error ? error.message : "Pairing failed.");
     } finally {
@@ -133,15 +182,33 @@ export default function App() {
   }
 
   async function submitMessage(value: string) {
-    if (!value || busyRef.current) return;
+    if (!value || busyRef.current || loadingConversation) return;
     busyRef.current = true;
     setBusy(true);
+    const localId = `local-${Date.now()}`;
+    setConversationMessages((current) => [...current, {
+      id: localId,
+      role: "user",
+      content: value,
+      createdAt: new Date().toISOString(),
+    }]);
     try {
-      const result = await sendMessage(value);
+      const result = await sendMessage(value, conversationId);
+      setConversationId(result.conversationId);
+      setConversationMessages((current) => [...current, {
+        id: `local-${Date.now()}-assistant`,
+        role: "assistant",
+        content: result.message,
+        createdAt: new Date().toISOString(),
+      }]);
       setReply(result.message);
       setMessage("");
       speakReply(result.message);
+      void refreshConversations();
     } catch (error) {
+      // The compose field keeps the text for retry, but an unsaved request must
+      // not remain in a history that looks durable.
+      setConversationMessages((current) => current.filter((item) => item.id !== localId));
       setReply(error instanceof Error ? error.message : "FROSH request failed.");
     } finally {
       busyRef.current = false;
@@ -370,8 +437,34 @@ export default function App() {
         </View>
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>Conversations</Text>
+          <Text style={styles.reply}>{conversationId ? "Continuing a saved conversation with durable context." : "Start a new conversation or reopen a saved one."}</Text>
+          <View style={styles.actions}>
+            <Pressable style={styles.primary} onPress={startNewConversation} disabled={busy || loadingConversation}><Text style={styles.primaryText}>NEW CHAT</Text></Pressable>
+            <Pressable style={styles.secondary} onPress={() => void refreshConversations()} disabled={busy || loadingConversation}><Text style={styles.secondaryText}>{loadingConversation ? "LOADING" : "REFRESH"}</Text></Pressable>
+          </View>
+          {conversationError ? <Text style={styles.warning}>{conversationError}</Text> : null}
+          {conversations.length ? conversations.slice(0, 8).map((item) => (
+            <Pressable key={item.id} style={item.id === conversationId ? styles.activeConversation : styles.conversation} onPress={() => void openConversation(item.id)} disabled={busy || loadingConversation}>
+              <Text style={styles.device}>{conversationLabel(item)}</Text>
+              <Text style={styles.muted}>{item.id === conversationId ? "CURRENT CONVERSATION" : new Date(item.updatedAt).toLocaleString()}</Text>
+            </Pressable>
+          )) : <Text style={styles.muted}>Your saved chats will appear here after the first reply.</Text>}
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>Ask FROSH</Text>
           <Text style={styles.reply}>{reply}</Text>
+          {conversationMessages.length ? (
+            <View style={styles.chatHistory}>
+              {conversationMessages.slice(-30).map((item) => (
+                <View key={item.id} style={item.role === "user" ? styles.userTurn : styles.assistantTurn}>
+                  <Text style={styles.turnLabel}>{item.role === "user" ? "YOU" : "FROSH"}</Text>
+                  <Text style={styles.reply}>{item.content}</Text>
+                </View>
+              ))}
+            </View>
+          ) : null}
           <TextInput
             value={message}
             onChangeText={setMessage}
@@ -455,5 +548,11 @@ const styles = StyleSheet.create({
   warning: { color: "#fbbf24" },
   device: { color: "#d1d5db", paddingVertical: 4 },
   notification: { borderTopWidth: 1, borderTopColor: "#173524", paddingTop: 10, gap: 3 },
+  conversation: { borderTopWidth: 1, borderTopColor: "#173524", paddingTop: 10, gap: 3 },
+  activeConversation: { borderTopWidth: 1, borderTopColor: "#4ade80", paddingTop: 10, gap: 3 },
+  chatHistory: { gap: 8, maxHeight: 500 },
+  userTurn: { backgroundColor: "#123d27", borderRadius: 12, padding: 10, gap: 4 },
+  assistantTurn: { backgroundColor: "#07110b", borderRadius: 12, padding: 10, gap: 4 },
+  turnLabel: { color: "#86efac", fontSize: 11, fontWeight: "900", letterSpacing: 0.8 },
   muted: { color: "#6b7280" },
 });

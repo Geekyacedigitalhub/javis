@@ -101,8 +101,11 @@ TCP socket for it. Memory work belongs to the server; the phone talks to the API
 
 ### Android client
 
-The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. Its
-seven native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
+The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. It
+uses the same authenticated conversation endpoints as the web Control Center:
+users can start a new chat, reopen a saved chat, and continue it with the
+server's durable context rather than treating every mobile prompt as isolated.
+Its seven native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
 `frosh-messaging`, `frosh-notifications`, `frosh-speech`) are Kotlin sources.
 
 TypeScript cannot see those sources, and for a long time nothing compiled them.
