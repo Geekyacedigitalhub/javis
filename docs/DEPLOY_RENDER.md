@@ -18,7 +18,7 @@ WebSocket support, server-side OAuth exchange, and persistent storage.
 
 ## Before beginning
 
-- The `arena/4c8e3401-javis` branch is pushed to GitHub.
+- The latest `main` revision is available on GitHub. Both Render services should deploy from `main`; Arena working branches are not deployment targets.
 - You control DNS for `geekyacedigitalhub.com`.
 - Google Cloud has a Web OAuth client whose redirect URI is exactly:
 
@@ -40,7 +40,7 @@ WebSocket support, server-side OAuth exchange, and persistent storage.
 
 1. In Render, choose **New → Web Service** and connect
    `Geekyacedigitalhub/javis`.
-2. Select branch `arena/4c8e3401-javis`.
+2. Select branch `main`.
 3. Choose the **Docker** runtime.
 4. Set the Dockerfile path to:
 
@@ -177,7 +177,7 @@ requires explicit approval in FROSH Approval Center.
 - [ ] API `/health` returns `ok: true`
 - [ ] API uses a managed PostgreSQL `DATABASE_URL`, not in-memory storage
 - [ ] Web and API share the same strong `FROSH_WEB_TOKEN`
-- [ ] Google client secret and encryption key exist only in the API service's secret variables
+- [ ] Google client secret and encryption key exist only in server-side secret variables on `frosh-api` and `frosh-web` (never in browser-exposed `NEXT_PUBLIC_*` variables)
 - [ ] OAuth redirect URI exactly matches Google Cloud and the live domain
 - [ ] OAuth app stays in **Testing** with the intended Google account as test user
 - [ ] Exposed/replaced Google OAuth clients have been deleted or rotated
