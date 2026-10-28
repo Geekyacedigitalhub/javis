@@ -189,9 +189,12 @@ but that fallback is **not a live AI assistant**. The Control Center marks it as
 For a no-cost personal deployment, set `FROSH_AI_PROVIDER=gemini`,
 `GEMINI_API_KEY`, and optionally `FROSH_GEMINI_MODEL=gemini-2.5-flash` in each
 server runtime. Gemini requests are made server-side and use the same
-permissioned tool and approval path as OpenAI. `OPENAI_API_KEY` remains an
-optional alternative. Mission evaluation is advisory: if no live evaluator is
-available, missions continue conservatively rather than inventing verification.
+permissioned tool and approval path as OpenAI. Web chat uses Gemini's
+`streamGenerateContent` server-sent events for real response deltas; tool calls
+remain permissioned and approval-gated before a streamed follow-up is produced.
+`OPENAI_API_KEY` remains an optional alternative. Mission evaluation is
+advisory: if no live evaluator is available, missions continue conservatively
+rather than inventing verification.
 
 ### Deployment
 

@@ -28,6 +28,63 @@ test("Gemini provider produces a real model response through the provider bounda
   expect(requests[0].body.tools).toBeDefined();
 });
 
+test("Gemini provider relays real SSE text chunks instead of waiting for a completed response", async () => {
+  const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const provider = new GeminiProvider({
+    apiKey: "test-key",
+    model: "gemini-test",
+    fetcher: async (url, init) => {
+      requests.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+      const frames = [
+        { candidates: [{ content: { role: "model", parts: [{ text: "Start " }] } }] },
+        { candidates: [{ content: { role: "model", parts: [{ text: "with one step." }] } }] },
+      ];
+      return new Response(frames.map((frame) => `data: ${JSON.stringify(frame)}\n\n`).join(""), {
+        headers: { "content-type": "text/event-stream" },
+      });
+    },
+  });
+
+  const events = [];
+  for await (const event of provider.stream(buildModelInput(messages))) events.push(event);
+
+  expect(requests).toHaveLength(1);
+  expect(requests[0].url).toContain("models/gemini-test:streamGenerateContent?alt=sse");
+  expect(requests[0].body.tools).toBeDefined();
+  expect(events).toEqual([
+    { type: "delta", text: "Start " },
+    { type: "delta", text: "with one step." },
+    { type: "done", message: "Start with one step.", toolCalls: [] },
+  ]);
+});
+
+test("Gemini streaming preserves tool execution before streaming the follow-up answer", async () => {
+  const requestBodies: Array<Record<string, unknown>> = [];
+  const responses = [
+    { candidates: [{ content: { role: "model", parts: [{ functionCall: { name: "does_not_exist", args: { value: "x" } } }] } }] },
+    { candidates: [{ content: { role: "model", parts: [{ text: "That action is unavailable." }] } }] },
+  ];
+  const provider = new GeminiProvider({
+    apiKey: "test-key",
+    fetcher: async (_url, init) => {
+      requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      const response = responses.shift();
+      return new Response(`data: ${JSON.stringify(response)}\n\n`, { headers: { "content-type": "text/event-stream" } });
+    },
+  });
+
+  const events = [];
+  for await (const event of provider.stream(buildModelInput(messages))) events.push(event);
+
+  expect(events.some((event) => event.type === "tool" && event.status === "planned")).toBe(true);
+  expect(events.some((event) => event.type === "tool" && event.status === "failed")).toBe(true);
+  expect(events.at(-1)).toEqual({ type: "done", message: "That action is unavailable.", toolCalls: expect.any(Array) });
+  expect(requestBodies).toHaveLength(2);
+  const contents = requestBodies[1].contents as Array<{ role: string; parts: Array<Record<string, unknown>> }>;
+  expect(contents.at(-1)?.role).toBe("function");
+  expect(contents.at(-1)?.parts[0].functionResponse).toBeDefined();
+});
+
 test("Gemini provider returns tool output to the model and never invents a successful tool result", async () => {
   const requestBodies: Array<Record<string, unknown>> = [];
   const replies = [
