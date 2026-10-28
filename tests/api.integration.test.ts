@@ -103,6 +103,15 @@ describe("health and auth", () => {
     expect(response.status).toBe(401);
   });
 
+  test("assistant status is authenticated and never misrepresents the offline provider as a live model", async () => {
+    const anonymous = await fetch(`${BASE}/v1/assistant/status`);
+    expect(anonymous.status).toBe(401);
+
+    const status = await call("/v1/assistant/status");
+    expect(status.status).toBe(200);
+    expect(status.body.assistant).toMatchObject({ provider: "development", configured: false });
+  });
+
   test("Google connection status is authenticated and safely reports missing server configuration", async () => {
     const anonymous = await fetch(`${BASE}/v1/integrations/google/users/${USER}`);
     expect(anonymous.status).toBe(401);

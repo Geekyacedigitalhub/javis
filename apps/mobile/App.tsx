@@ -3,7 +3,7 @@ import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Tex
 import { StatusBar } from "expo-status-bar";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun } from "./src/api";
+import { getAssistantStatus, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun, type FroshAssistantStatus } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import type { FroshNotification } from "../../packages/types/src/notifications";
@@ -36,6 +36,11 @@ export default function App() {
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [installedApps, setInstalledApps] = useState<Array<{ packageName: string; name: string }>>([]);
+  const [assistantStatus, setAssistantStatus] = useState<FroshAssistantStatus | null>(null);
+
+  function refreshAssistantStatus() {
+    return getAssistantStatus().then((result) => setAssistantStatus(result.assistant)).catch(() => setAssistantStatus(null));
+  }
 
   useEffect(() => {
     try {
@@ -52,6 +57,7 @@ export default function App() {
       setDeviceCredential(saved);
       setPaired(true);
       listDevices().then((result) => setDevices(result.devices)).catch(() => undefined);
+      void refreshAssistantStatus();
     });
   }, []);
 
@@ -86,6 +92,7 @@ export default function App() {
       setPaired(true);
       setEnrollmentToken("");
       setDevices([device]);
+      await refreshAssistantStatus();
     } catch (error) {
       setReply(error instanceof Error ? error.message : "Pairing failed.");
     } finally {
@@ -143,6 +150,11 @@ export default function App() {
         <Text style={styles.eyebrow}>PERSONAL AI OPERATING SYSTEM</Text>
         <Text style={styles.title}>FROSH</Text>
         <Text style={styles.status}>● {realtimeStatus === "open" ? "LIVE" : realtimeStatus.toUpperCase()}</Text>
+        <Text style={assistantStatus?.configured ? styles.aiReady : styles.aiSetup}>
+          {assistantStatus?.configured
+            ? `AI READY · ${assistantStatus.provider.toUpperCase()}${assistantStatus.model ? ` · ${assistantStatus.model}` : ""}`
+            : "AI SETUP NEEDED · no live model is configured"}
+        </Text>
 
         {paired ? (
           <View style={styles.card}>
@@ -281,6 +293,8 @@ const styles = StyleSheet.create({
   eyebrow: { color: "#6ee7b7", fontSize: 11, fontWeight: "800", letterSpacing: 2 },
   title: { color: "#f0fdf4", fontSize: 48, fontWeight: "900", letterSpacing: 4 },
   status: { color: "#4ade80", fontWeight: "800" },
+  aiReady: { color: "#6ee7b7", fontSize: 12, fontWeight: "800", letterSpacing: 0.6 },
+  aiSetup: { color: "#fbbf24", fontSize: 12, fontWeight: "800", letterSpacing: 0.6 },
   approvalCard: { backgroundColor: "#211a08", borderWidth: 1, borderColor: "#854d0e", borderRadius: 18, padding: 18, gap: 12 },
   card: { backgroundColor: "#0d1b13", borderWidth: 1, borderColor: "#173524", borderRadius: 18, padding: 18, gap: 12 },
   cardTitle: { color: "#dcfce7", fontSize: 17, fontWeight: "800" },

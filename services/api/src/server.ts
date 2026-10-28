@@ -1,7 +1,6 @@
 import { FroshOrchestrator } from "../../ai/src";
-import { ConfiguredModelAdapter, buildModelInput } from "../../ai/src/provider";
+import { ConfiguredModelAdapter, buildModelInput, isStreamingProvider, type FroshStreamEvent } from "../../ai/src/provider";
 import { createProvider } from "../../ai/src/provider-factory";
-import { OpenAIProvider, type FroshStreamEvent } from "../../ai/src/openai-provider";
 import {
   buildConversationContext,
   createMemoryStore,
@@ -157,9 +156,9 @@ export async function handleFroshRequest(input: FroshHttpRequest): Promise<Frosh
 }
 
 /**
- * Stream the same conversation pipeline used by the JSON chat route. When a
- * model key is unavailable, the development provider still produces proper
- * delta and done events so the command center remains usable offline.
+ * Stream the same conversation pipeline used by the JSON chat route. A live
+ * provider may emit events directly; the explicit development fallback emits a
+ * truthful single response instead of impersonating an AI model.
  */
 export async function* streamFroshRequest(
   input: FroshHttpRequest,
@@ -167,7 +166,7 @@ export async function* streamFroshRequest(
   const prepared = await prepareConversation(input);
   let complete: Pick<FroshResponse, "message" | "toolCalls"> | undefined;
 
-  if (provider instanceof OpenAIProvider) {
+  if (isStreamingProvider(provider)) {
     for await (const event of provider.stream(buildModelInput(prepared.context))) {
       if (event.type === "done") {
         complete = { message: event.message, toolCalls: event.toolCalls };

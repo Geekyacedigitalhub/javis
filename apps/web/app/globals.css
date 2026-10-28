@@ -24,6 +24,12 @@ a { color: inherit; text-decoration: none; }
 .sidebar-status { margin-top: auto; border: 1px solid #17452d; background: #0a1b13; border-radius: 14px; padding: 14px; color: #d1fae5; font-size: 13px; }
 .sidebar-status small { display: block; margin-top: 7px; color: #6f927f; }
 .status-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; margin-right: 8px; }
+.assistant-setup { border-color: #7c4a10; color: #fde68a; }
+.assistant-setup .status-dot { background: #f59e0b; }
+.assistant-setup small { color: #d6a85b; }
+.connection-warning { color: #fbbf24; }
+.connection-ready { color: #6ee7b7; }
+.assistant-setup-note { margin: 0 max(22px, 7vw) 12px; padding: 11px 14px; border: 1px solid #7c4a10; color: #fde68a; background: rgba(120,74,16,.18); border-radius: 9px; line-height: 1.45; }
 
 .chat-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 100vh; }
 .topbar { padding: 32px 42px 24px; border-bottom: 1px solid #123521; display: flex; align-items: center; justify-content: space-between; }

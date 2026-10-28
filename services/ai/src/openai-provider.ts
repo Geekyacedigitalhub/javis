@@ -1,7 +1,6 @@
 import OpenAI from "openai";
 import type { FroshToolCall } from "../../../packages/types/src/javis";
-import type { FroshProviderContinuation } from "../../../packages/types/src/agent-run";
-import { buildModelInput } from "./provider";
+import { buildModelInput, type FroshStreamEvent, type ProviderGenerateOptions } from "./provider";
 import { executeToolCall } from "../../tools/src";
 
 let cachedClient: OpenAI | undefined;
@@ -18,24 +17,7 @@ function getClient(): OpenAI {
 const model = process.env.FROSH_MODEL || "gpt-6-luna";
 const MAX_TOOL_ROUNDS = 8;
 
-type GenerateOptions = {
-  runId?: string;
-  continuation?: {
-    continuation: FroshProviderContinuation;
-    toolOutput?: {
-      callId: string;
-      output: string;
-    };
-  };
-};
-
-
-
-export type FroshStreamEvent =
-  | { type: "delta"; text: string }
-  | { type: "tool"; name: string; status: "planned" | "completed" | "failed"; toolCallId?: string }
-  | { type: "approval"; approvalId?: string }
-  | { type: "done"; message: string; toolCalls: FroshToolCall[]; conversationId?: string };
+type GenerateOptions = ProviderGenerateOptions;
 
 type StreamOptions = GenerateOptions;
 
@@ -66,10 +48,14 @@ export class OpenAIProvider {
       strict: true,
     }));
 
-    let previousResponseId: string | undefined = options.continuation?.continuation.responseId;
-    let continuationInput: any[] = options.continuation
+    const priorContinuation = options.continuation?.continuation;
+    if (priorContinuation && priorContinuation.provider !== "openai") {
+      throw new Error("This run was started with a different AI provider and cannot be resumed here.");
+    }
+    let previousResponseId: string | undefined = priorContinuation?.responseId;
+    let continuationInput: any[] = priorContinuation
       ? [
-          ...(options.continuation.continuation.pendingToolOutputs ?? []).map((output) => ({
+          ...(priorContinuation.pendingToolOutputs ?? []).map((output) => ({
             type: "function_call_output",
             call_id: output.callId,
             output: output.output,
@@ -254,28 +240,33 @@ export class OpenAIProvider {
 
     const executedCalls: FroshToolCall[] = [];
     const continuationToolOutputs = new Map<string, string>();
+    const priorContinuation = options.continuation?.continuation;
+    if (priorContinuation && priorContinuation.provider !== "openai") {
+      throw new Error("This run was started with a different AI provider and cannot be resumed here.");
+    }
     let previousResponseId: string | undefined;
     let continuationInput: any[] | undefined;
 
-    if (options.continuation) {
-      previousResponseId = options.continuation.continuation.responseId;
+    if (priorContinuation) {
+      previousResponseId = priorContinuation.responseId;
       continuationInput = [
-        ...(options.continuation.continuation.pendingToolOutputs ?? []).map((output) => ({
+        ...(priorContinuation.pendingToolOutputs ?? []).map((output) => ({
           type: "function_call_output",
           call_id: output.callId,
           output: output.output,
         })),
       ];
-      for (const output of options.continuation.continuation.pendingToolOutputs ?? []) {
+      for (const output of priorContinuation.pendingToolOutputs ?? []) {
         continuationToolOutputs.set(output.callId, output.output);
       }
-      if (options.continuation.toolOutput) {
+      const resumedToolOutput = options.continuation?.toolOutput;
+      if (resumedToolOutput) {
         continuationInput.push({
           type: "function_call_output",
-          call_id: options.continuation.toolOutput.callId,
-          output: options.continuation.toolOutput.output,
+          call_id: resumedToolOutput.callId,
+          output: resumedToolOutput.output,
         });
-        continuationToolOutputs.set(options.continuation.toolOutput.callId, options.continuation.toolOutput.output);
+        continuationToolOutputs.set(resumedToolOutput.callId, resumedToolOutput.output);
       }
     } else {
       continuationInput = input.messages.map((message) => ({
