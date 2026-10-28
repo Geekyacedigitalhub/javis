@@ -8,9 +8,11 @@ export const FROSH_API_URL =
   process.env.EXPO_PUBLIC_FROSH_API_URL ?? "http://localhost:3001";
 
 let credential: FroshDeviceCredential | null = null;
+let authenticatedUserId: string | null = null;
 
 export function setDeviceCredential(value: FroshDeviceCredential | null) {
   credential = value;
+  authenticatedUserId = null;
 }
 
 export function hasDeviceCredential() {
@@ -20,6 +22,7 @@ export function hasDeviceCredential() {
 async function request<T>(path: string, init?: RequestInit, options: { includeCredential?: boolean } = {}): Promise<T> {
   if (credential && Date.parse(credential.expiresAt) <= Date.now()) {
     credential = null;
+    authenticatedUserId = null;
     await clearDeviceCredential().catch(() => undefined);
     throw new Error("Device credential has expired. Re-pair this phone.");
   }
@@ -39,6 +42,7 @@ async function request<T>(path: string, init?: RequestInit, options: { includeCr
   if (!response.ok) {
     if (response.status === 401 && requestCredential && credential && credential.deviceId === requestCredential.deviceId && credential.token === requestCredential.token && credential.expiresAt === requestCredential.expiresAt) {
       credential = null;
+      authenticatedUserId = null;
       await clearDeviceCredential().catch(() => undefined);
     }
     throw new Error(body?.error ?? `Request failed: ${response.status}`);
@@ -62,6 +66,49 @@ export function analyzeVision(image: string, mimeType: "image/jpeg" | "image/png
     method: "POST",
     body: JSON.stringify({ image, mimeType, ...(prompt?.trim() ? { prompt: prompt.trim() } : {}) }),
   });
+}
+
+export type FroshConversationSummary = {
+  id: string;
+  updatedAt: string;
+  preview?: string;
+};
+
+export type FroshConversationMessage = {
+  id: string;
+  role: "user" | "assistant" | "system" | "tool";
+  content: string;
+  createdAt: string;
+};
+
+async function currentUserId() {
+  if (authenticatedUserId) return authenticatedUserId;
+  const session = await request<{ userId: string }>("/v1/session");
+  if (!session.userId || session.userId.length > 200 || /[\u0000-\u001f\u007f]/.test(session.userId)) {
+    throw new Error("FROSH returned an invalid account session.");
+  }
+  authenticatedUserId = session.userId;
+  return authenticatedUserId;
+}
+
+function boundedLimit(value: number, maximum: number, fallback: number) {
+  return Number.isFinite(value) ? Math.max(1, Math.min(Math.floor(value), maximum)) : fallback;
+}
+
+export async function listConversations(limit = 30) {
+  const safeLimit = boundedLimit(limit, 100, 30);
+  const userId = await currentUserId();
+  return request<{ conversations: FroshConversationSummary[] }>(
+    `/v1/conversations/users/${encodeURIComponent(userId)}?limit=${safeLimit}`,
+  );
+}
+
+export async function getConversation(conversationId: string, limit = 100) {
+  const safeLimit = boundedLimit(limit, 200, 100);
+  const userId = await currentUserId();
+  return request<{ conversation: FroshConversationSummary; messages: FroshConversationMessage[] }>(
+    `/v1/conversations/users/${encodeURIComponent(userId)}/${encodeURIComponent(conversationId)}?limit=${safeLimit}`,
+  );
 }
 
 export function sendMessage(message: string, conversationId?: string) {

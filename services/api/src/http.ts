@@ -410,6 +410,12 @@ const server = Bun.serve<RealtimeSocketData>({
       return Response.json({ assistant: describeProvider() });
     }
 
+    // Mobile clients use the server-derived identity for scoped reads. This
+    // avoids trusting a client-provided user ID while exposing no credential.
+    if (request.method === "GET" && url.pathname === "/v1/session") {
+      return Response.json({ userId: configuredUserId });
+    }
+
     if (request.method === "GET" && url.pathname === "/v1/realtime") {
       if (
         server.upgrade(request, {

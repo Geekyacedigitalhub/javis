@@ -103,13 +103,18 @@ describe("health and auth", () => {
     expect(response.status).toBe(401);
   });
 
-  test("assistant status is authenticated and never misrepresents the offline provider as a live model", async () => {
+  test("assistant status and account session are authenticated and never misrepresent the offline provider", async () => {
     const anonymous = await fetch(`${BASE}/v1/assistant/status`);
     expect(anonymous.status).toBe(401);
+    const anonymousSession = await fetch(`${BASE}/v1/session`);
+    expect(anonymousSession.status).toBe(401);
 
     const status = await call("/v1/assistant/status");
     expect(status.status).toBe(200);
     expect(status.body.assistant).toMatchObject({ provider: "development", configured: false });
+    const session = await call("/v1/session");
+    expect(session.status).toBe(200);
+    expect(session.body.userId).toBe(USER);
   });
 
   test("visual analysis is authenticated and truthfully unavailable without a live vision provider", async () => {
@@ -404,6 +409,45 @@ describe("chat", () => {
       "user",
       "assistant",
     ]);
+  });
+
+  test("a paired Android credential can list and reopen only the configured user's conversations", async () => {
+    const enrolled = await fetch(`${BASE}/v1/devices`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-frosh-device-enrollment-token": "enroll-token" },
+      body: JSON.stringify({ name: "Conversation phone", platform: "android", capabilities: [] }),
+    });
+    const enrollment = await enrolled.json();
+    expect(enrolled.status).toBe(201);
+
+    const deviceHeaders = {
+      "x-frosh-device-id": enrollment.credential.deviceId,
+      "x-frosh-device-token": enrollment.credential.token,
+    };
+    const session = await fetch(`${BASE}/v1/session`, { headers: deviceHeaders });
+    expect(session.status).toBe(200);
+    expect((await session.json()).userId).toBe(USER);
+
+    const chat = await fetch(`${BASE}/v1/chat`, {
+      method: "POST",
+      headers: { ...deviceHeaders, "content-type": "application/json" },
+      body: JSON.stringify({ message: "Save this Android conversation." }),
+    });
+    const chatBody = await chat.json();
+    expect(chat.status).toBe(200);
+
+    const listed = await fetch(`${BASE}/v1/conversations/users/${USER}?limit=30`, { headers: deviceHeaders });
+    const listedBody = await listed.json();
+    expect(listed.status).toBe(200);
+    expect(listedBody.conversations.some((item: { id: string }) => item.id === chatBody.conversationId)).toBe(true);
+
+    const reopened = await fetch(`${BASE}/v1/conversations/users/${USER}/${chatBody.conversationId}`, { headers: deviceHeaders });
+    const reopenedBody = await reopened.json();
+    expect(reopened.status).toBe(200);
+    expect(reopenedBody.messages.map((item: { role: string }) => item.role)).toEqual(["user", "assistant"]);
+
+    const foreign = await fetch(`${BASE}/v1/conversations/users/not-the-configured-user`, { headers: deviceHeaders });
+    expect(foreign.status).toBe(403);
   });
 });
 
