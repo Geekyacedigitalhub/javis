@@ -102,8 +102,8 @@ TCP socket for it. Memory work belongs to the server; the phone talks to the API
 ### Android client
 
 The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. Its
-six native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
-`frosh-messaging`, `frosh-notifications`) are Kotlin sources.
+seven native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
+`frosh-messaging`, `frosh-notifications`, `frosh-speech`) are Kotlin sources.
 
 TypeScript cannot see those sources, and for a long time nothing compiled them.
 Four real defects had accumulated, all fatal:
@@ -148,6 +148,18 @@ Camera permission is requested by the Android runtime only when the user opens
 this feature. Gemini's answer is shown in the app and read aloud using
 `expo-speech`; no background recording or automatic camera capture is enabled.
 A newly built Android binary is required after pulling the camera dependency.
+
+#### Android voice input
+
+The Android app also has a native, foreground-only voice-input bridge. Tapping
+**Voice** requests Android's `RECORD_AUDIO` permission only when necessary and
+starts the device's `SpeechRecognizer`; partial text appears in the compose
+field and the final transcript is submitted once to the normal authenticated
+chat endpoint. FROSH receives transcript text, not an audio upload. Recognition
+is provided by the Android speech service selected on the device, which may use
+network processing under that service's own privacy policy. It can be stopped
+or cancelled from the UI, and unavailable recognizers are reported instead of
+being simulated.
 
 #### Building the APK
 

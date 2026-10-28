@@ -18,6 +18,7 @@ import { getNotificationCapability, getRecentNotifications, openNotificationSett
 import { getCallPermissionStatus } from "./modules/frosh-calls/src";
 import { getContactsCapability } from "./modules/frosh-contacts/src";
 import { getMessagingPermissionStatus } from "./modules/frosh-messaging/src";
+import { addSpeechListener, cancelSpeechInput, getSpeechCapability, requestSpeechPermission, startSpeechInput, stopSpeechInput } from "./modules/frosh-speech/src";
 
 export default function App() {
   const [message, setMessage] = useState("");
@@ -42,7 +43,10 @@ export default function App() {
   const [visionPrompt, setVisionPrompt] = useState("");
   const [cameraOpen, setCameraOpen] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const [listening, setListening] = useState(false);
+  const [voiceInputStatus, setVoiceInputStatus] = useState("checking Android voice input");
   const cameraRef = useRef<CameraView>(null);
+  const busyRef = useRef(false);
 
   function refreshAssistantStatus() {
     return getAssistantStatus().then((result) => setAssistantStatus(result.assistant)).catch(() => setAssistantStatus(null));
@@ -75,6 +79,28 @@ export default function App() {
     }, setRealtimeStatus);
   }, [paired]);
 
+  useEffect(() => {
+    try {
+      const capability = getSpeechCapability();
+      setVoiceInputStatus(capability.message);
+      setListening(capability.listening);
+      return addSpeechListener((event) => {
+        if (event.type === "partial") setMessage(event.transcript);
+        if (event.type === "result") {
+          setMessage(event.transcript);
+          void submitMessage(event.transcript);
+        }
+        if (event.type === "error") {
+          setListening(false);
+          setReply(event.message);
+        }
+        if (event.type === "state") setListening(event.listening);
+      });
+    } catch {
+      setVoiceInputStatus("Android voice input is unavailable in this app build.");
+    }
+  }, []);
+
   async function pairPhone() {
     setPairing(true);
     try {
@@ -106,24 +132,67 @@ export default function App() {
     }
   }
 
-  async function ask() {
-    const value = message.trim();
-    if (!value || busy) return;
+  async function submitMessage(value: string) {
+    if (!value || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const result = await sendMessage(value);
       setReply(result.message);
       setMessage("");
+      speakReply(result.message);
     } catch (error) {
       setReply(error instanceof Error ? error.message : "FROSH request failed.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
+  }
+
+  async function ask() {
+    await submitMessage(message.trim());
   }
 
   function speakReply(text: string) {
     Speech.stop();
     Speech.speak(text.slice(0, 4_000), { language: "en-US", rate: 0.95 });
+  }
+
+  function startVoiceInput() {
+    if (!paired) {
+      setReply("Pair this phone before submitting a voice command to FROSH.");
+      return;
+    }
+    try {
+      const capability = getSpeechCapability();
+      setVoiceInputStatus(capability.message);
+      if (!capability.available) {
+        setReply(capability.message);
+        return;
+      }
+      if (capability.permissionRequired) {
+        requestSpeechPermission();
+        setReply("Allow microphone access, then tap Voice again.");
+        return;
+      }
+      const result = startSpeechInput();
+      setReply(result.message);
+      setListening(result.accepted);
+    } catch {
+      setVoiceInputStatus("Android voice input is unavailable in this app build.");
+      setReply("Update to a FROSH build with Android voice input enabled.");
+    }
+  }
+
+  function stopVoiceInput(cancel = false) {
+    try {
+      const result = cancel ? cancelSpeechInput() : stopSpeechInput();
+      setReply(result.message);
+      if (cancel) setListening(false);
+    } catch {
+      setListening(false);
+      setReply("Android voice input is unavailable in this app build.");
+    }
   }
 
   async function openCamera() {
@@ -142,7 +211,8 @@ export default function App() {
   }
 
   async function captureAndAnalyze() {
-    if (busy || !cameraRef.current) return;
+    if (busyRef.current || !cameraRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const photo = await cameraRef.current.takePictureAsync({ base64: true, quality: 0.55, exif: false });
@@ -154,13 +224,15 @@ export default function App() {
     } catch (error) {
       setReply(error instanceof Error ? error.message : "FROSH could not analyze that photo.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function startTask() {
     const value = message.trim();
-    if (!value || busy) return;
+    if (!value || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const result = await startAgentRun(value);
@@ -170,6 +242,7 @@ export default function App() {
     } catch (error) {
       setReply(error instanceof Error ? error.message : "Could not start task.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -307,14 +380,20 @@ export default function App() {
             multiline
             style={styles.input}
           />
+          <Text style={listening ? styles.aiReady : styles.muted}>{listening ? "VOICE INPUT ACTIVE · speak your command" : `VOICE INPUT · ${voiceInputStatus}`}</Text>
+          <Text style={styles.muted}>Audio goes to the Android speech service for transcription. FROSH receives the resulting text only, then sends it as one command.</Text>
           <View style={styles.actions}>
-            <Pressable style={styles.primary} onPress={ask} disabled={busy}>
+            <Pressable style={styles.primary} onPress={ask} disabled={busy || listening}>
               {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>ASK</Text>}
             </Pressable>
-            <Pressable style={styles.secondary} onPress={startTask} disabled={busy}>
-              <Text style={styles.secondaryText}>START TASK</Text>
+            <Pressable style={styles.secondary} onPress={listening ? () => stopVoiceInput() : startVoiceInput} disabled={busy}>
+              <Text style={styles.secondaryText}>{listening ? "STOP VOICE" : "VOICE"}</Text>
             </Pressable>
           </View>
+          {listening ? <Pressable style={styles.secondary} onPress={() => stopVoiceInput(true)}><Text style={styles.secondaryText}>CANCEL VOICE</Text></Pressable> : null}
+          <Pressable style={styles.secondary} onPress={startTask} disabled={busy || listening}>
+            <Text style={styles.secondaryText}>START TASK</Text>
+          </Pressable>
         </View>
 
         {approval ? (

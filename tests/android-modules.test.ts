@@ -1,7 +1,7 @@
 /**
  * Android native-module integrity guard.
  *
- * The six Kotlin modules under `apps/mobile/modules/frosh-*` were never
+ * The Kotlin modules under `apps/mobile/modules/frosh-*` were never
  * compiled before the Android workflow existed. Two things were wrong that no
  * TypeScript check could see:
  *
@@ -30,6 +30,7 @@ const MODULES = [
   "frosh-media",
   "frosh-messaging",
   "frosh-notifications",
+  "frosh-speech",
 ] as const;
 
 /**
@@ -165,6 +166,18 @@ describe("Android native modules", () => {
     }
 
     expect(failures).toEqual([]);
+  });
+
+  test("the speech module is explicit about microphone permission and emits transcript events", () => {
+    const moduleDir = join(MODULES_DIR, "frosh-speech");
+    const manifest = readFileSync(join(moduleDir, "android", "src", "main", "AndroidManifest.xml"), "utf8");
+    const source = readFileSync(join(moduleDir, "android", "src", "main", "java", "com", "geekyacedigitalhub", "froshspeech", "FroshSpeechModule.kt"), "utf8");
+
+    expect(manifest).toContain("android.permission.RECORD_AUDIO");
+    expect(source).toContain("SpeechRecognizer");
+    expect(source).toContain("EXTRA_PARTIAL_RESULTS");
+    expect(source).toContain("Events(\"partial\", \"result\", \"error\", \"state\")");
+    expect(source).toContain("Function(\"cancel\")");
   });
 
   test("the app opts local modules into autolinking", () => {
