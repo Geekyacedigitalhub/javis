@@ -43,7 +43,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # Expo SDK 54 / React Native 0.81 require JDK 17. The ubuntu-latest
+      # Expo SDK 58 / React Native 0.88 require JDK 17. The ubuntu-latest
       # image already ships 17, but pinning it keeps the build reproducible.
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -77,8 +77,8 @@ jobs:
           echo "Using Android SDK at $SDK"
           ls "$SDK/platforms" "$SDK/build-tools" "$SDK/ndk" 2>/dev/null || true
 
-      # These are the versions ExpoRootProjectPlugin defaults to for SDK 54
-      # (compileSdk 35, build-tools 35.0.0, NDK 27.1.12297006) plus the CMake
+      # These are the versions ExpoRootProjectPlugin defaults to for SDK 58
+      # (compileSdk 36, build-tools 36.0.0, NDK 27.1.12297006) plus the CMake
       # that AGP expects. Whatever is already installed is left alone; a
       # failure here is a warning, not a stop, because AGP downloads missing
       # components itself during configuration.
@@ -94,7 +94,7 @@ jobs:
             exit 0
           fi
           yes | "$SDKM" --licenses > /dev/null 2>&1 || true
-          for pkg in "platform-tools" "platforms;android-35" "build-tools;35.0.0" \
+          for pkg in "platform-tools" "platforms;android-36" "build-tools;36.0.0" \
                      "ndk;27.1.12297006" "cmake;3.22.1"; do
             if "$SDKM" --list_installed 2>/dev/null | grep -qF "$pkg"; then
               echo "already installed: $pkg"
