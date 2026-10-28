@@ -1,7 +1,7 @@
 import { postChat } from "./routes";
 import { getFroshConversation, listFroshConversations, streamFroshRequest } from "./server";
 import { approvalStore, resolveApproval } from "../../tools/src";
-import { CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, isMissionEvaluatingProvider } from "../../ai/src";
+import { CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, isMissionEvaluatingProvider, isVisionProvider } from "../../ai/src";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
@@ -20,6 +20,7 @@ import type {
 } from "../../../packages/types/src/mission";
 
 const codingSessions = new CodingSessionManager(createProvider());
+const visionProvider = createProvider();
 const googleIntegration = new GoogleIntegrationService(getGoogleIntegrationStore());
 // The autonomous loop executes tools itself and verifies with real output, so it
 // is a separate driver from the single-shot session manager above.
@@ -158,6 +159,8 @@ function isSafetyPausedMission(mission:FroshMission){
 }
 
 const MAX_DEVICE_COMMAND_HTTP_BODY_BYTES = 64 * 1024;
+const MAX_VISION_REQUEST_BYTES = 5 * 1024 * 1024;
+const MAX_VISION_IMAGE_BYTES = 3 * 1024 * 1024;
 
 function safeErrorMessage(fallback: string): string {
   return fallback;
@@ -488,6 +491,37 @@ const server = Bun.serve<RealtimeSocketData>({
       }
     }
 
+
+    if (request.method === "POST" && url.pathname === "/v1/vision/analyze") {
+      try {
+        const body = await parseBoundedJson(request, MAX_VISION_REQUEST_BYTES);
+        const image = typeof body?.image === "string" ? body.image.trim() : "";
+        const mimeType = typeof body?.mimeType === "string" ? body.mimeType.trim().toLowerCase() : "";
+        const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : undefined;
+        const padding = image.endsWith("==") ? 2 : image.endsWith("=") ? 1 : 0;
+        const imageBytes = Math.floor(image.length * 3 / 4) - padding;
+        if (
+          !/^[A-Za-z0-9+/]+={0,2}$/.test(image) ||
+          image.length % 4 === 1 ||
+          (image.includes("=") && image.length % 4 !== 0) ||
+          imageBytes <= 0 || imageBytes > MAX_VISION_IMAGE_BYTES ||
+          !["image/jpeg", "image/png", "image/webp"].includes(mimeType) ||
+          (prompt !== undefined && (prompt.length > 2_000 || /[\u0000-\u001f\u007f]/.test(prompt)))
+        ) {
+          return Response.json({ error: "Provide a JPEG, PNG, or WebP image under 3 MB and an optional short prompt." }, { status: 400 });
+        }
+        if (!isVisionProvider(visionProvider)) {
+          return Response.json({ error: "FROSH visual analysis needs a live Gemini model. Configure GEMINI_API_KEY first." }, { status: 503 });
+        }
+        // The visual payload is intentionally transient: it is sent only to the
+        // selected provider for this explicit request and is never persisted.
+        return Response.json(await visionProvider.analyzeImage({ data: image, mimeType, prompt }));
+      } catch (error) {
+        const message = error instanceof Error && error.message ? error.message : "FROSH could not analyze that image.";
+        console.warn("FROSH vision analysis failed", message);
+        return Response.json({ error: message.slice(0, 500) }, { status: /too large|must be|Provide/i.test(message) ? 400 : 502 });
+      }
+    }
 
     if (request.method === "POST" && url.pathname === "/v1/research/fetch") {
       try {

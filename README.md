@@ -28,7 +28,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - Persistent conversation context, user preferences, and memory-candidate review
 - Permissioned tools, an approval center, agent runs, mission/automation records, and audit trails
 - Web Control Center, Android companion source, and an opt-in desktop-device agent
-- Browser speech controls and device/native capability bridges where the host grants permission
+- Browser speech controls, Android spoken replies, visual analysis of an explicitly captured Android photo, and device/native capability bridges where the host grants permission
 
 The remaining product scope is tracked honestly in [docs/ROADMAP.md](docs/ROADMAP.md). A feature is not considered ready merely because a screen or interface exists: it needs a configured provider/device/integration and an end-to-end verification.
 
@@ -132,6 +132,22 @@ that every class named in `expo-module.config.json` has a matching `.kt` file.
 
 `apps/mobile/package.json` carries `expo.autolinking.nativeModulesDir: "./modules"`
 so autolinking searches the local module directory at all.
+
+#### Camera, visual analysis, and spoken answers
+
+The paired Android app can open the device camera and submit **only a photo the
+user captures by pressing “Capture & Analyze”** to `POST /v1/vision/analyze`.
+FROSH sends that transient JPEG to the configured Gemini provider for the single
+request and does not store it in FROSH's database, memory, logs, or device
+state. The server accepts JPEG, PNG, and WebP input only, with a decoded-image
+limit of 3 MB and a 5 MB total JSON request limit. Visual analysis is disabled
+with an explicit `503` status unless a live Gemini model is configured; the
+offline development provider never pretends it can see an image.
+
+Camera permission is requested by the Android runtime only when the user opens
+this feature. Gemini's answer is shown in the app and read aloud using
+`expo-speech`; no background recording or automatic camera capture is enabled.
+A newly built Android binary is required after pulling the camera dependency.
 
 #### Building the APK
 

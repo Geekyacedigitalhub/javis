@@ -67,12 +67,20 @@ export interface MissionEvaluatingProvider extends ProviderClient {
   evaluateMission(input: { goal: string; step: string; result: string }): Promise<MissionEvaluation>;
 }
 
+export interface VisionProvider extends ProviderClient {
+  analyzeImage(input: { data: string; mimeType: string; prompt?: string }): Promise<{ message: string }>;
+}
+
 export function isStreamingProvider(provider: ProviderClient): provider is StreamingProviderClient {
   return typeof (provider as Partial<StreamingProviderClient>).stream === "function";
 }
 
 export function isMissionEvaluatingProvider(provider: ProviderClient): provider is MissionEvaluatingProvider {
   return typeof (provider as Partial<MissionEvaluatingProvider>).evaluateMission === "function";
+}
+
+export function isVisionProvider(provider: ProviderClient): provider is VisionProvider {
+  return typeof (provider as Partial<VisionProvider>).analyzeImage === "function";
 }
 
 export class ConfiguredModelAdapter {

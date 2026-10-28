@@ -14,9 +14,9 @@ Current capability contracts:
 - dialer and direct calls
 - message composition
 - notification access
-- camera
-- screen observation
-- location
+- user-initiated camera capture for visual analysis
+- screen observation (not yet implemented)
+- location (not yet implemented)
 
 High-risk capabilities remain behind explicit Android permissions and FROSH authorization.
 
@@ -30,17 +30,23 @@ High-risk capabilities remain behind explicit Android permissions and FROSH auth
 - realtime events
 - connected-device list
 - capability reporting
+- user-initiated camera capture for Gemini visual analysis
+- spoken model responses with `expo-speech`
+
+## Camera and voice privacy
+
+The Visual Assist card requests camera permission only when you tap **Open
+Camera**. It sends a photo only after **Capture & Analyze** is tapped; the
+transient image is not saved by FROSH. Visual analysis requires the paired
+server to have a live Gemini provider configured. The returned answer can be
+read aloud, but this app does not claim native speech-to-text support.
 
 ## Next native integrations
 
-1. Android device/app discovery
-2. media-session controls
-3. dialer and call permissions
-4. notification listener
-5. camera/vision
-6. screen/accessibility bridge
-7. location/maps
-8. phone-to-Windows control
+1. screen/accessibility bridge
+2. location/maps
+3. phone-to-Windows control
+4. verified native speech-to-text input
 
 ## Media architecture
 

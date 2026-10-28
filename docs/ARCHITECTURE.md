@@ -10,7 +10,7 @@ User input -> client -> API -> FROSH orchestrator -> planning/model -> permissio
 The FROSH control center will provide conversations, tool activity, memory controls, project status, jobs, security activity, device status, and settings.
 
 ### Android
-The mobile client will provide voice/text interaction, notifications, camera/vision, device status, and remote access to authorized FROSH capabilities.
+The mobile client provides text interaction, spoken model replies, notification/device controls, and explicit user-captured camera analysis. It does not claim native speech-to-text or unattended camera access; those require separately verified native integrations. Camera photos are submitted only after a user capture action and are not persisted by FROSH.
 
 ### Desktop agent
 The Windows agent will run locally and expose only explicitly approved capabilities. High-risk operations require confirmation.

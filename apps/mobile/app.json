@@ -8,6 +8,14 @@
     "scheme": "frosh",
     "android": {
       "package": "com.geekyacedigitalhub.frosh"
-    }
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow FROSH to use your camera for photos you choose to analyze."
+        }
+      ]
+    ]
   }
 }
