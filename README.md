@@ -1,10 +1,10 @@
 # FROSH
 
-Personal AI operating system for intelligence, memory, tools, automation, development, cybersecurity, business, career assistance, voice, vision, and secure device control.
+Personal AI operating system foundation for a Jarvis-style assistant: a real model brain, persistent context, permissioned tools, automation, and secure device control.
 
-## Vision
+## Vision and current truth
 
-FROSH is designed as a multi-device personal agent with a central AI orchestration layer and permissioned tools. It will grow from a working text assistant into a secure operating system for development, research, cybersecurity, GeekyAce Digital Hub operations, job discovery, automation, and authorized computer actions.
+FROSH is designed as a multi-device personal agent with a central AI orchestration layer and permissioned tools. It is **not** presented as a completed Jarvis product while a live model, paired devices, or an integration have not been configured and verified. The Control Center exposes its model status explicitly: a development fallback is for local/test wiring only and never represents itself as a live AI brain.
 
 ## Architecture
 
@@ -22,19 +22,15 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - `packages/config` — shared configuration
 - `packages/ui` — shared UI primitives
 
-## Core capabilities
+## Implemented foundation
 
-- AI reasoning and planning
-- Long-term memory
-- Autonomous development workflows
-- Cybersecurity assistance for authorized work
-- Web research and browser automation
-- GeekyAce Digital Hub business/social workflows
-- Job discovery and application assistance
-- Windows and Android device control
-- Voice and vision
-- Scheduled automation
+- Model-provider boundary with Gemini and OpenAI adapters, plus a truthful offline test fallback
+- Persistent conversation context, user preferences, and memory-candidate review
+- Permissioned tools, an approval center, agent runs, mission/automation records, and audit trails
+- Web Control Center, Android companion source, and an opt-in desktop-device agent
+- Browser speech controls and device/native capability bridges where the host grants permission
 
+The remaining product scope is tracked honestly in [docs/ROADMAP.md](docs/ROADMAP.md). A feature is not considered ready merely because a screen or interface exists: it needs a configured provider/device/integration and an end-to-end verification.
 
 ## Running FROSH locally
 
@@ -148,18 +144,23 @@ fail the job by name if any module falls out of the build.
 `apps/mobile/android/` is generated and git-ignored; only the Kotlin sources in
 `apps/mobile/modules/*/android/` are tracked.
 
-The whole suite runs offline: no `OPENAI_API_KEY` and no database are needed,
-because the API falls back to the in-memory stores and the development provider.
+The whole suite runs offline: no provider key and no database are needed,
+because the API falls back to in-memory stores and an explicitly non-production development provider.
 CI (`.github/workflows/ci.yml`) runs typecheck, tests, migration discovery and a
 production web build on every push to `main`.
 
 ### Provider behaviour
 
-FROSH never requires model credentials just to run. `createProvider()` returns the
-OpenAI provider when `OPENAI_API_KEY` is set and the offline `DevelopmentProvider`
-otherwise, so the API, missions, automations, and tools can be exercised locally.
-Mission evaluation is advisory: if the evaluator is unavailable the mission
-continues conservatively instead of failing completed work.
+FROSH can boot without model credentials so its APIs and test suite remain usable,
+but that fallback is **not a live AI assistant**. The Control Center marks it as
+“AI brain setup needed” and its response explains that no model was used.
+
+For a no-cost personal deployment, set `FROSH_AI_PROVIDER=gemini`,
+`GEMINI_API_KEY`, and optionally `FROSH_GEMINI_MODEL=gemini-2.5-flash` in each
+server runtime. Gemini requests are made server-side and use the same
+permissioned tool and approval path as OpenAI. `OPENAI_API_KEY` remains an
+optional alternative. Mission evaluation is advisory: if no live evaluator is
+available, missions continue conservatively rather than inventing verification.
 
 ### Deployment
 
@@ -295,8 +296,8 @@ POST /v1/agent-runs        { goal, mode: "loop" }   -> 201, the run
 GET  /v1/agent-runs/users/:userId/:runId            -> run plus its pending approval
 ```
 
-Without `mode: "loop"` the endpoint behaves exactly as before. With no
-`OPENAI_API_KEY` the offline provider never calls a tool, so a loop run
+Without `mode: "loop"` the endpoint behaves exactly as before. With no live
+model key the development provider never calls a tool, so a loop run
 deterministically ends `failed` with the unproven-claim message — which is the
 honest outcome, and what the integration test asserts.
 

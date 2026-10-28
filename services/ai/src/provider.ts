@@ -23,6 +23,11 @@ export interface ProviderContinuationInput {
   toolOutputs?: Array<{ callId: string; output: string }>;
 }
 
+export interface ProviderGenerateOptions {
+  runId?: string;
+  continuation?: ProviderContinuationInput;
+}
+
 export interface ProviderResponse {
   message: string;
   toolCalls?: FroshToolCall[];
@@ -30,11 +35,44 @@ export interface ProviderResponse {
   waitingForApproval?: boolean;
 }
 
+export type FroshStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "tool"; name: string; status: "planned" | "completed" | "failed"; toolCallId?: string }
+  | { type: "approval"; approvalId?: string }
+  | { type: "done"; message: string; toolCalls: FroshToolCall[]; conversationId?: string };
+
 export interface ProviderClient {
   generate(
     input: ReturnType<typeof buildModelInput>,
-    options?: { runId?: string; continuation?: ProviderContinuationInput },
+    options?: ProviderGenerateOptions,
   ): Promise<ProviderResponse>;
+}
+
+/** A model adapter can opt into the chat endpoint's event protocol. */
+export interface StreamingProviderClient extends ProviderClient {
+  stream(
+    input: ReturnType<typeof buildModelInput>,
+    options?: ProviderGenerateOptions,
+  ): AsyncGenerator<FroshStreamEvent>;
+}
+
+export interface MissionEvaluation {
+  complete: boolean;
+  nextAction: "continue" | "recover" | "finish";
+  reason: string;
+  nextStep?: string;
+}
+
+export interface MissionEvaluatingProvider extends ProviderClient {
+  evaluateMission(input: { goal: string; step: string; result: string }): Promise<MissionEvaluation>;
+}
+
+export function isStreamingProvider(provider: ProviderClient): provider is StreamingProviderClient {
+  return typeof (provider as Partial<StreamingProviderClient>).stream === "function";
+}
+
+export function isMissionEvaluatingProvider(provider: ProviderClient): provider is MissionEvaluatingProvider {
+  return typeof (provider as Partial<MissionEvaluatingProvider>).evaluateMission === "function";
 }
 
 export class ConfiguredModelAdapter {

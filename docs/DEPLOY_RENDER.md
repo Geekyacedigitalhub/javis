@@ -70,7 +70,10 @@ WebSocket support, server-side OAuth exchange, and persistent storage.
    | `GOOGLE_CLIENT_SECRET` | the new Google OAuth client secret |
    | `FROSH_GOOGLE_REDIRECT_URI` | `https://frosh.geekyacedigitalhub.com/api/google/callback` |
    | `FROSH_GOOGLE_TOKEN_ENCRYPTION_KEY` | exactly 32 random bytes encoded as base64 |
-   | `OPENAI_API_KEY` | optional; omit to use the offline provider until configured |
+   | `FROSH_AI_PROVIDER` | `gemini` for the no-cost Gemini route (or `openai` for an OpenAI deployment) |
+   | `GEMINI_API_KEY` | server-only Gemini API key; use the same value in `frosh-web` |
+   | `FROSH_GEMINI_MODEL` | optional; defaults to `gemini-2.5-flash` |
+   | `OPENAI_API_KEY` | optional alternative provider key |
 
    To generate an encryption key locally, run:
 
@@ -119,7 +122,10 @@ starting. If migration fails, correct the database URL rather than bypassing it.
    | `FROSH_GOOGLE_REDIRECT_URI` | `https://frosh.geekyacedigitalhub.com/api/google/callback` |
    | `FROSH_GOOGLE_TOKEN_ENCRYPTION_KEY` | the exact same API token-encryption key |
    | `FROSH_PUBLIC_APP_URL` | `https://frosh.geekyacedigitalhub.com` |
-   | `OPENAI_API_KEY` | optional; copy it only if configured on `frosh-api` and chat should use it |
+   | `FROSH_AI_PROVIDER` | same provider selection as `frosh-api` (for example `gemini`) |
+   | `GEMINI_API_KEY` | same server-only Gemini key as `frosh-api` when using Gemini |
+   | `FROSH_GEMINI_MODEL` | same optional Gemini model as `frosh-api` |
+   | `OPENAI_API_KEY` | optional alternative; copy only when using OpenAI |
 
    Also copy any other optional provider/tool variables that you deliberately
    configured on `frosh-api`. Do **not** set `FROSH_WEB_AUTH_DISABLED` in a

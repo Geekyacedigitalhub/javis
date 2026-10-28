@@ -16,6 +16,13 @@ type Conversation = {
   preview?: string;
 };
 
+type AssistantStatus = {
+  provider: "gemini" | "openai" | "development";
+  configured: boolean;
+  model?: string;
+  message: string;
+};
+
 const API = "/api/frosh";
 const USER_ID = process.env.NEXT_PUBLIC_FROSH_USER_ID ?? "default-user";
 
@@ -33,6 +40,21 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [loadingConversation, setLoadingConversation] = useState(false);
   const [error, setError] = useState("");
+  const [assistantStatus, setAssistantStatus] = useState<AssistantStatus | null>(null);
+
+  async function loadAssistantStatus() {
+    try {
+      const response = await fetch(`${API}/v1/assistant/status`, { cache: "no-store" });
+      const data = await response.json();
+      if (!response.ok || !data.assistant || typeof data.assistant.configured !== "boolean") {
+        throw new Error("Could not load assistant status.");
+      }
+      setAssistantStatus(data.assistant as AssistantStatus);
+    } catch {
+      // Chat itself will report an actionable error if the API is unavailable.
+      setAssistantStatus(null);
+    }
+  }
 
   async function loadConversations() {
     try {
@@ -50,6 +72,7 @@ export default function Home() {
 
   useEffect(() => {
     void loadConversations();
+    void loadAssistantStatus();
   }, []);
 
   async function openConversation(id: string) {
@@ -83,9 +106,8 @@ export default function Home() {
     setError("");
   }
 
-  async function send(event: FormEvent) {
-    event.preventDefault();
-    const message = input.trim();
+  async function sendMessage(rawMessage: string) {
+    const message = rawMessage.trim();
     if (!message || busy) return;
 
     setInput("");
@@ -171,6 +193,11 @@ export default function Home() {
     }
   }
 
+  function send(event: FormEvent) {
+    event.preventDefault();
+    void sendMessage(input);
+  }
+
   const latestAssistantReply = [...messages].reverse().find((message) => message.role === "assistant")?.content;
 
   return (
@@ -210,10 +237,12 @@ export default function Home() {
             </button>
           ))}
         </section>
-        <div className="sidebar-status">
+        <div className={`sidebar-status ${assistantStatus?.configured ? "assistant-online" : "assistant-setup"}`}>
           <span className="status-dot" />
-          FROSH Core
-          <small>Ready for commands</small>
+          {assistantStatus?.configured ? "AI brain online" : "AI brain setup needed"}
+          <small>{assistantStatus?.configured
+            ? `${assistantStatus.provider.toUpperCase()}${assistantStatus.model ? ` · ${assistantStatus.model}` : ""}`
+            : "No live model is configured"}</small>
         </div>
       </aside>
 
@@ -223,7 +252,9 @@ export default function Home() {
             <div className="eyebrow">COMMAND CENTER</div>
             <h1>{conversationId ? "Continue your conversation" : "What can I do for you?"}</h1>
           </div>
-          <div className="connection">● LOCAL API</div>
+          <div className={`connection ${assistantStatus?.configured ? "connection-ready" : "connection-warning"}`}>
+            ● {assistantStatus?.configured ? "AI READY" : "AI SETUP NEEDED"}
+          </div>
         </header>
 
         <div className="messages" aria-busy={busy || loadingConversation}>
@@ -263,11 +294,16 @@ export default function Home() {
         </div>
 
         {error && <div className="error">{error}</div>}
+        {assistantStatus && !assistantStatus.configured && (
+          <div className="assistant-setup-note" role="status">
+            <strong>FROSH is not pretending to be an AI yet.</strong> {assistantStatus.message}
+          </div>
+        )}
 
         <VoiceControls
           disabled={busy || loadingConversation}
           speechText={latestAssistantReply}
-          onTranscript={(transcript) => setInput((current) => current ? `${current} ${transcript}` : transcript)}
+          onTranscript={(transcript) => void sendMessage(transcript)}
         />
 
         <form className="composer" onSubmit={send}>

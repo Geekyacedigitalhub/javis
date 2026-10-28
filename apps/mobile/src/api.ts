@@ -46,6 +46,17 @@ async function request<T>(path: string, init?: RequestInit, options: { includeCr
   return body as T;
 }
 
+export type FroshAssistantStatus = {
+  provider: "gemini" | "openai" | "development";
+  configured: boolean;
+  model?: string;
+  message: string;
+};
+
+export function getAssistantStatus() {
+  return request<{ assistant: FroshAssistantStatus }>("/v1/assistant/status");
+}
+
 export function sendMessage(message: string, conversationId?: string) {
   return request<FroshResponse>("/v1/chat", {
     method: "POST",

@@ -3,6 +3,7 @@ export * from "./provider";
 export * from "./provider-factory";
 export * from "./mock-provider";
 export * from "./openai-provider";
+export * from "./gemini-provider";
 export * from "./coding-agent";
 export * from "./run-store";
 export * from "./run-store-factory";

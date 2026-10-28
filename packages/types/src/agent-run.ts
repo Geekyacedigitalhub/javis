@@ -2,13 +2,26 @@ import type { FroshToolCall } from "./javis";
 
 export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed";
 
-export interface FroshProviderContinuation {
-  provider: "openai";
-  responseId: string;
-  pendingCallId?: string;
-  pendingToolName?: string;
-  pendingToolOutputs?: Array<{ callId: string; output: string }>;
-}
+/**
+ * A provider continuation is intentionally provider-specific. It contains only
+ * the minimal state needed to resume a model after an approval; credentials and
+ * provider secrets are never persisted here.
+ */
+export type FroshProviderContinuation =
+  | {
+      provider: "openai";
+      responseId: string;
+      pendingCallId?: string;
+      pendingToolName?: string;
+      pendingToolOutputs?: Array<{ callId: string; output: string }>;
+    }
+  | {
+      provider: "gemini";
+      /** Gemini has no server-side response id, so retain the bounded transcript required to resume a function call. */
+      contents: Array<Record<string, unknown>>;
+      pendingCallId?: string;
+      pendingToolName?: string;
+    };
 
 export interface FroshAgentRun {
   id: string;

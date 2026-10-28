@@ -1,8 +1,7 @@
 import { postChat } from "./routes";
 import { getFroshConversation, listFroshConversations, streamFroshRequest } from "./server";
 import { approvalStore, resolveApproval } from "../../tools/src";
-import { CodingLoop, CodingSessionManager, agentRunStore, createProvider } from "../../ai/src";
-import { OpenAIProvider } from "../../ai/src/openai-provider";
+import { CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, isMissionEvaluatingProvider } from "../../ai/src";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
@@ -399,6 +398,13 @@ const server = Bun.serve<RealtimeSocketData>({
 
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "frosh-api", realtimeClients: realtimeClientCount() });
+    }
+
+    // Authenticated status lets every client distinguish a genuine model from
+    // the offline wiring fallback. It deliberately exposes no provider key or
+    // deployment secret.
+    if (request.method === "GET" && url.pathname === "/v1/assistant/status") {
+      return Response.json({ assistant: describeProvider() });
     }
 
     if (request.method === "GET" && url.pathname === "/v1/realtime") {
@@ -1350,7 +1356,7 @@ const server = Bun.serve<RealtimeSocketData>({
       const userId=decodeBoundedUserId(missionMatch[1]);
       const id=decodeBoundedResourceId(missionMatch[2]);
       const {getMissionStore, planMission, createRecoveryStep}=await import("../../missions/src");
-      const missionEvaluator=new OpenAIProvider();
+      const missionEvaluator=createProvider();
       const store=getMissionStore();
       const requestedWorkerId=request.headers.get("x-frosh-mission-worker-id")?.trim();
       const executionOwner=requestedWorkerId||("http-"+crypto.randomUUID());
@@ -1744,11 +1750,13 @@ const server = Bun.serve<RealtimeSocketData>({
             // invalidate a step whose tool work already completed successfully.
             let evaluation:{complete:boolean;nextAction:"continue"|"recover"|"finish";reason:string;nextStep?:string};
             try{
-              evaluation=await missionEvaluator.evaluateMission({
-                goal:mission.goal,
-                step:step.title,
-                result:run.result??""
-              });
+              evaluation=isMissionEvaluatingProvider(missionEvaluator)
+                ? await missionEvaluator.evaluateMission({
+                    goal:mission.goal,
+                    step:step.title,
+                    result:run.result??""
+                  })
+                : {complete:false,nextAction:"continue",reason:"No live mission evaluator is configured; continuing conservatively."};
             }catch(error){
               logOperationalError("FROSH mission evaluator unavailable", error);
               evaluation={complete:false,nextAction:"continue",reason:"Mission evaluator unavailable; continuing conservatively."};
