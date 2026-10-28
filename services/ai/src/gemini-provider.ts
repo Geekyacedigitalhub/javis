@@ -13,6 +13,7 @@ const GEMINI_API_ORIGIN = "https://generativelanguage.googleapis.com/v1beta/mode
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 const MAX_TOOL_ROUNDS = 8;
 const MAX_CONTINUATION_BYTES = 120_000;
+const MAX_STREAM_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_VISION_IMAGE_BYTES = 3 * 1024 * 1024;
 const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
@@ -112,6 +113,20 @@ function responseMessage(payload: unknown): string {
   const root = asRecord(payload);
   const error = asRecord(root?.error);
   return safeText(error?.message, 300) ?? "Gemini did not return a usable response.";
+}
+
+function ssePayload(frame: string): unknown | null {
+  const data = frame
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("data:"))
+    .map((line) => line.slice(5).trimStart())
+    .join("\n");
+  if (!data || data === "[DONE]") return null;
+  try {
+    return JSON.parse(data) as unknown;
+  } catch {
+    throw new Error("Gemini returned an invalid streaming response.");
+  }
 }
 
 function candidateContent(payload: unknown): GeminiContent | null {
@@ -245,6 +260,72 @@ export class GeminiProvider {
     }
   }
 
+  private async *streamContent(body: Record<string, unknown>): AsyncGenerator<unknown> {
+    const endpoint = `${GEMINI_API_ORIGIN}${encodeURIComponent(this.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    try {
+      const response = await this.fetcher(endpoint, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "text/event-stream" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let payload: unknown = {};
+        try { payload = text ? JSON.parse(text) : {}; } catch { /* fall through to a safe error */ }
+        throw new Error(`Gemini request failed (${response.status}): ${responseMessage(payload)}`);
+      }
+      if (!response.body) throw new Error("Gemini returned an empty streaming response.");
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffered = "";
+      let receivedBytes = 0;
+      const consume = function* (final = false): Generator<unknown> {
+        let boundary = buffered.search(/\r?\n\r?\n/);
+        while (boundary >= 0) {
+          const frame = buffered.slice(0, boundary);
+          const separatorLength = buffered.startsWith("\r\n", boundary) ? 4 : 2;
+          buffered = buffered.slice(boundary + separatorLength);
+          const payload = ssePayload(frame);
+          if (payload !== null) yield payload;
+          boundary = buffered.search(/\r?\n\r?\n/);
+        }
+        if (final && buffered.trim()) {
+          const payload = ssePayload(buffered);
+          buffered = "";
+          if (payload !== null) yield payload;
+        }
+      };
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          receivedBytes += value.byteLength;
+          if (receivedBytes > MAX_STREAM_RESPONSE_BYTES) {
+            throw new Error("Gemini stream exceeded FROSH's safe response limit.");
+          }
+          buffered += decoder.decode(value, { stream: true });
+          yield* consume();
+        }
+        buffered += decoder.decode();
+        yield* consume(true);
+      } finally {
+        reader.releaseLock();
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error("Gemini did not respond in time. Please retry shortly.");
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   private modelRequest(input: ReturnType<typeof buildModelInput>, contents: GeminiContent[]): Record<string, unknown> {
     const request: Record<string, unknown> = {
       systemInstruction: systemInstruction(input),
@@ -269,18 +350,84 @@ export class GeminiProvider {
     input: ReturnType<typeof buildModelInput>,
     options: ProviderGenerateOptions = {},
   ): AsyncGenerator<FroshStreamEvent> {
-    const response = await this.generate(input, options);
-    for (const tool of response.toolCalls ?? []) {
-      yield { type: "tool", name: tool.name, status: "planned", toolCallId: tool.id };
-      yield { type: "tool", name: tool.name, status: tool.status === "completed" ? "completed" : "failed", toolCallId: tool.id };
+    if (options.continuation && options.continuation.continuation.provider !== "gemini") {
+      throw new Error("This run was started with a different AI provider and cannot be resumed here.");
     }
-    if (response.waitingForApproval) {
-      const pending = response.toolCalls?.at(-1)?.result;
-      const approvalId = asRecord(pending)?.approvalId;
-      yield { type: "approval", approvalId: typeof approvalId === "string" ? approvalId : undefined };
+
+    const rawContinuation = options.continuation?.continuation;
+    const priorContinuation = rawContinuation?.provider === "gemini" ? rawContinuation : undefined;
+    let contents: GeminiContent[];
+    if (priorContinuation) {
+      contents = cloneContents(priorContinuation.contents);
+      if (!options.continuation?.toolOutput || !priorContinuation.pendingToolName) {
+        throw new Error("The paused Gemini task has no pending tool result to resume.");
+      }
+      let output: unknown = options.continuation.toolOutput.output;
+      try { output = JSON.parse(options.continuation.toolOutput.output); } catch { /* Non-JSON tool output is valid. */ }
+      contents.push(functionResponse(priorContinuation.pendingToolName, output));
+    } else {
+      contents = contentFromMessages(input.messages);
     }
-    if (response.message) yield { type: "delta", text: response.message };
-    yield { type: "done", message: response.message, toolCalls: response.toolCalls ?? [] };
+    if (!contents.length) throw new Error("A Gemini request needs at least one message.");
+
+    const executedCalls: FroshToolCall[] = [];
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+      const answer: GeminiContent = { role: "model", parts: [] };
+      for await (const payload of this.streamContent(this.modelRequest(input, contents))) {
+        const content = candidateContent(payload);
+        if (!content) continue;
+        for (const part of content.parts) {
+          answer.parts.push(part);
+          if (typeof part.text === "string" && part.text) {
+            yield { type: "delta", text: part.text };
+          }
+        }
+      }
+      if (!answer.parts.length) throw new Error("Gemini stream ended without a usable candidate.");
+      contents.push(answer);
+
+      const calls = functionCalls(answer);
+      if (!calls.length) {
+        yield { type: "done", message: textFromContent(answer), toolCalls: executedCalls };
+        return;
+      }
+
+      for (const call of calls) {
+        const planned: FroshToolCall = {
+          id: `gemini-${round}-${crypto.randomUUID()}`,
+          name: call.name,
+          arguments: call.arguments,
+          status: "planned",
+        };
+        yield { type: "tool", name: planned.name, status: "planned", toolCallId: planned.id };
+        const result = await executeTimedToolCall(planned, options.runId);
+        executedCalls.push(result);
+        yield {
+          type: "tool",
+          name: planned.name,
+          status: result.status === "completed" ? "completed" : "failed",
+          toolCallId: planned.id,
+        };
+
+        const approvalId = asRecord(result.result)?.approvalId;
+        if (typeof approvalId === "string") {
+          yield { type: "approval", approvalId };
+          yield {
+            type: "done",
+            message: "FROSH is waiting for your approval before continuing.",
+            toolCalls: executedCalls,
+          };
+          return;
+        }
+        contents.push(functionResponse(call.name, result));
+      }
+    }
+
+    yield {
+      type: "done",
+      message: "FROSH reached the maximum tool-execution rounds for this request.",
+      toolCalls: executedCalls,
+    };
   }
 
   async generate(
