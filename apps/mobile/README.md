@@ -32,6 +32,7 @@ High-risk capabilities remain behind explicit Android permissions and FROSH auth
 - capability reporting
 - user-initiated camera capture for Gemini visual analysis
 - spoken model responses with `expo-speech`
+- foreground-only Android speech recognition, with explicit microphone permission and transcript submission
 
 ## Camera and voice privacy
 
@@ -39,14 +40,15 @@ The Visual Assist card requests camera permission only when you tap **Open
 Camera**. It sends a photo only after **Capture & Analyze** is tapped; the
 transient image is not saved by FROSH. Visual analysis requires the paired
 server to have a live Gemini provider configured. The returned answer can be
-read aloud, but this app does not claim native speech-to-text support.
+read aloud. The Voice button uses Android's selected speech-recognition service
+only after an explicit tap and microphone grant; it sends FROSH the resulting
+text transcript rather than an audio upload.
 
 ## Next native integrations
 
 1. screen/accessibility bridge
 2. location/maps
 3. phone-to-Windows control
-4. verified native speech-to-text input
 
 ## Media architecture
 

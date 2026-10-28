@@ -1,7 +1,7 @@
 name: Android
 
 # Builds the real Android app: expo prebuild generates the native Gradle
-# project, then Gradle compiles the six Kotlin modules under
+# project, then Gradle compiles the Kotlin modules under
 # apps/mobile/modules/frosh-* and links them into a debug APK.
 #
 # This job exists because the Kotlin sources were never compiled anywhere.
@@ -118,7 +118,7 @@ jobs:
       # when either is missing the module is dropped silently and the app
       # still builds, but every native call fails at runtime with
       # "Cannot find native module 'Frosh...'".
-      - name: Verify all six native modules are autolinked
+      - name: Verify all seven native modules are autolinked
         run: |
           set -euo pipefail
           npx expo-modules-autolinking resolve --platform android \
@@ -127,7 +127,7 @@ jobs:
 
           missing=0
           for module in frosh-apps frosh-calls frosh-contacts \
-                        frosh-media frosh-messaging frosh-notifications; do
+                        frosh-media frosh-messaging frosh-notifications frosh-speech; do
             if grep -q "expo-$module" /tmp/autolinking.txt; then
               echo "autolinked: expo-$module"
             else
@@ -150,9 +150,9 @@ jobs:
           restore-keys: |
             gradle-${{ runner.os }}-
 
-      # Proves Gradle itself sees the six modules as real projects, and
+      # Proves Gradle itself sees the native modules as real projects, and
       # surfaces any build.gradle error before the full compile starts.
-      - name: Verify Gradle includes the six native projects
+      - name: Verify Gradle includes the seven native projects
         working-directory: apps/mobile/android
         run: |
           set -euo pipefail
@@ -160,7 +160,7 @@ jobs:
 
           missing=0
           for module in frosh-apps frosh-calls frosh-contacts \
-                        frosh-media frosh-messaging frosh-notifications; do
+                        frosh-media frosh-messaging frosh-notifications frosh-speech; do
             if grep -q "expo-$module" /tmp/projects.txt; then
               echo "gradle project present: :expo-$module"
             else
