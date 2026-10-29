@@ -11,6 +11,7 @@ import { closeTaskStore, getTaskStore } from "../../productivity/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import { closeFroshDatabaseClient } from "../../database/src";
+import { FroshAgentRunConcurrencyError } from "../../../packages/types/src/agent-run";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -2455,6 +2456,12 @@ const server = Bun.serve<RealtimeSocketData>({
           headers: created ? undefined : { "Idempotent-Replay": "true" },
         });
       } catch (error) {
+        if (error instanceof FroshAgentRunConcurrencyError) {
+          return Response.json(
+            { error: error.message, limit: error.limit, retryable: true },
+            { status: 429, headers: { "Retry-After": "30" } },
+          );
+        }
         const message = "Agent run failed";
         return Response.json({ error: message }, { status: 500 });
       }

@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { InMemoryAgentRunStore } from "../services/ai/src/run-store";
+import { agentRunMaxActiveRuns } from "../services/ai/src/agent-run-concurrency";
 
 /**
  * Reading back what FROSH did.
@@ -193,6 +194,15 @@ describe("reading runs back", () => {
   });
 });
 
+describe("agent-run concurrency limit", () => {
+  test("is bounded to a safe operational range", () => {
+    expect(agentRunMaxActiveRuns(0)).toBe(1);
+    expect(agentRunMaxActiveRuns(2.9)).toBe(2);
+    expect(agentRunMaxActiveRuns(999)).toBe(5);
+    expect(agentRunMaxActiveRuns(Number.NaN)).toBe(2);
+  });
+});
+
 describe("InMemoryAgentRunStore.list", () => {
   function run(overrides: Record<string, unknown> = {}) {
     return { goal: "goal", status: "completed" as const, toolCalls: [], ...overrides };
@@ -239,6 +249,21 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(replay.created).toBe(false);
     expect(replay.run.id).toBe(first.run.id);
     expect(otherOwner.run.id).not.toBe(first.run.id);
+  });
+
+  test("bounds active runs per owner and frees capacity on a terminal state", async () => {
+    const store = new InMemoryAgentRunStore(1);
+    const first = await store.create(run({ status: "running", userId: "owner-a" }));
+
+    await expect(store.create(run({ status: "waiting_approval", userId: "owner-a" }))).rejects.toMatchObject({
+      name: "FroshAgentRunConcurrencyError",
+      limit: 1,
+    });
+    // Another account has an independent capacity bound.
+    await expect(store.create(run({ status: "running", userId: "owner-b" }))).resolves.toMatchObject({ userId: "owner-b" });
+
+    await store.cancel(first.id, "owner-a");
+    await expect(store.create(run({ status: "running", userId: "owner-a" }))).resolves.toMatchObject({ userId: "owner-a" });
   });
 
   test("clamps the limit", async () => {

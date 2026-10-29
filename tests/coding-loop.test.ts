@@ -237,7 +237,7 @@ describe("CodingLoop with real tools", () => {
     };
     const loop = new CodingLoop(provider, { maxSteps: 3 });
 
-    const run = await loop.start({ goal: "Never finishes" });
+    const run = await loop.start({ userId: `loop-budget-${crypto.randomUUID()}`, goal: "Never finishes" });
 
     expect(run.status).toBe("failed");
     expect(run.error).toBe("Step budget exhausted before validation passed");
