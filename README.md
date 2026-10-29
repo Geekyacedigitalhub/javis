@@ -197,6 +197,16 @@ permissioned tool and approval path as OpenAI. Web and Android chat use
 Gemini's `streamGenerateContent` server-sent events for real response deltas;
 tool calls remain permissioned and approval-gated before a streamed follow-up
 is produced.
+
+Interactive chat retries one transient provider failure **only before** FROSH
+has emitted a delta or tool event; after visible output starts, it returns the
+real failure rather than replaying text or actions. Set
+`FROSH_AI_STREAM_RETRIES=0` to disable that retry, or a maximum of `2` to tune
+it. Cross-provider failover is deliberately opt-in: set
+`FROSH_AI_FALLBACK_PROVIDER=openai` or `gemini` only when the alternate key is
+configured and you accept its usage/cost. FROSH never silently selects a paid
+fallback for a no-cost Gemini deployment.
+
 `OPENAI_API_KEY` remains an optional alternative. Mission evaluation is
 advisory: if no live evaluator is available, missions continue conservatively
 rather than inventing verification.

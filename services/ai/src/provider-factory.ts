@@ -1,7 +1,9 @@
 import type { ProviderClient } from "./provider";
+import { isStreamingProvider } from "./provider";
 import { OpenAIProvider } from "./openai-provider";
 import { GeminiProvider } from "./gemini-provider";
 import { DevelopmentProvider } from "./mock-provider";
+import { ResilientChatProvider } from "./chat-provider";
 
 export type FroshAIProviderName = "gemini" | "openai" | "development";
 
@@ -9,6 +11,7 @@ export type FroshAIProviderStatus = {
   provider: FroshAIProviderName;
   configured: boolean;
   model?: string;
+  fallbackProvider?: "gemini" | "openai";
   message: string;
 };
 
@@ -19,6 +22,20 @@ function requestedProvider(env: Environment): FroshAIProviderName | undefined {
   if (!requested) return undefined;
   if (requested === "gemini" || requested === "openai" || requested === "development") return requested;
   return undefined;
+}
+
+function requestedFallbackProvider(env: Environment): "gemini" | "openai" | undefined {
+  const requested = env.FROSH_AI_FALLBACK_PROVIDER?.trim().toLowerCase();
+  return requested === "gemini" || requested === "openai" ? requested : undefined;
+}
+
+function isConfigured(name: "gemini" | "openai", env: Environment) {
+  return name === "gemini" ? Boolean(env.GEMINI_API_KEY?.trim()) : Boolean(env.OPENAI_API_KEY?.trim());
+}
+
+function configuredFallback(primary: FroshAIProviderName, env: Environment) {
+  const fallback = requestedFallbackProvider(env);
+  return fallback && fallback !== primary && isConfigured(fallback, env) ? fallback : undefined;
 }
 
 /**
@@ -37,6 +54,7 @@ export function describeProvider(env: Environment = process.env): FroshAIProvide
       provider: "gemini",
       configured: true,
       model: env.FROSH_GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+      fallbackProvider: configuredFallback("gemini", env),
       message: "Gemini is connected and can reason, use approved tools, and retain conversation context.",
     };
   }
@@ -45,6 +63,7 @@ export function describeProvider(env: Environment = process.env): FroshAIProvide
       provider: "openai",
       configured: true,
       model: env.FROSH_MODEL?.trim() || "gpt-6-luna",
+      fallbackProvider: configuredFallback("openai", env),
       message: "OpenAI is connected and can reason, use approved tools, and retain conversation context.",
     };
   }
@@ -57,9 +76,34 @@ export function describeProvider(env: Environment = process.env): FroshAIProvide
   };
 }
 
+function createConfiguredProvider(name: "gemini" | "openai", model?: string): ProviderClient {
+  return name === "gemini" ? new GeminiProvider({ model }) : new OpenAIProvider();
+}
+
 export function createProvider(): ProviderClient {
   const status = describeProvider();
-  if (status.provider === "gemini") return new GeminiProvider({ model: status.model });
-  if (status.provider === "openai") return new OpenAIProvider();
+  if (status.provider === "gemini") return createConfiguredProvider("gemini", status.model);
+  if (status.provider === "openai") return createConfiguredProvider("openai", status.model);
   return new DevelopmentProvider();
+}
+
+/**
+ * Interactive chat gets a conservative retry/failover layer. Failover is
+ * opt-in through FROSH_AI_FALLBACK_PROVIDER so a personal deployment never
+ * spends on a second provider unexpectedly. It only retries before any stream
+ * event reaches the client; after output/tool work starts, the real error is
+ * surfaced instead of replaying a potentially side-effecting request.
+ */
+export function createChatProvider(): ProviderClient {
+  const env = process.env;
+  const status = describeProvider(env);
+  const primary = createProvider();
+  if (!status.configured || !isStreamingProvider(primary)) return primary;
+
+  const fallback = status.fallbackProvider
+    ? createConfiguredProvider(status.fallbackProvider)
+    : undefined;
+  const configuredRetries = Number(env.FROSH_AI_STREAM_RETRIES ?? 1);
+  const retries = Number.isFinite(configuredRetries) ? Math.min(2, Math.max(0, Math.floor(configuredRetries))) : 1;
+  return new ResilientChatProvider(primary, { fallback, retries });
 }

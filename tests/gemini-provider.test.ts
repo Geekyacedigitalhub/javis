@@ -227,4 +227,15 @@ test("provider status is explicit when no live model is configured and selects t
     model: "gemini-test",
   });
   expect(describeProvider({ FROSH_AI_PROVIDER: "gemini" })).toMatchObject({ provider: "development", configured: false });
+  expect(describeProvider({
+    FROSH_AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "primary",
+    OPENAI_API_KEY: "fallback",
+    FROSH_AI_FALLBACK_PROVIDER: "openai",
+  })).toMatchObject({ provider: "gemini", configured: true, fallbackProvider: "openai" });
+  expect(describeProvider({
+    FROSH_AI_PROVIDER: "gemini",
+    GEMINI_API_KEY: "primary",
+    FROSH_AI_FALLBACK_PROVIDER: "openai",
+  }).fallbackProvider).toBeUndefined();
 });
