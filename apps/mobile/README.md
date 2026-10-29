@@ -23,7 +23,7 @@ High-risk capabilities remain behind explicit Android permissions and FROSH auth
 ## Current client
 
 - secure device pairing
-- FROSH chat with live streamed response text, durable conversation history, reopenable threads, and explicit new-chat control
+- FROSH chat with live streamed response text, an explicit stop-response control, durable conversation history, reopenable threads, and explicit new-chat control
 - agent task launcher
 - task status
 - approval UI

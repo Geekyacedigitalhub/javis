@@ -139,9 +139,11 @@ export async function streamMessage(
   message: string,
   conversationId: string | undefined,
   onEvent: (event: FroshChatStreamEvent) => void,
+  signal?: AbortSignal,
 ) {
   const trimmed = message.trim();
   if (!trimmed) throw new Error("message is required");
+  if (signal?.aborted) throw new Error("FROSH response was cancelled.");
   if (credential && Date.parse(credential.expiresAt) <= Date.now()) {
     credential = null;
     authenticatedUserId = null;
@@ -161,6 +163,7 @@ export async function streamMessage(
       } : {}),
     },
     body: JSON.stringify({ message: trimmed, conversationId }),
+    signal,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { error?: unknown };
@@ -180,7 +183,9 @@ export async function streamMessage(
   let completed = false;
   try {
     while (true) {
+      if (signal?.aborted) throw new Error("FROSH response was cancelled.");
       const { done, value } = await reader.read();
+      if (signal?.aborted) throw new Error("FROSH response was cancelled.");
       if (done) break;
       receivedBytes += value.byteLength;
       if (receivedBytes > MAX_CHAT_STREAM_BYTES) throw new Error("FROSH response exceeded the safe streaming limit.");

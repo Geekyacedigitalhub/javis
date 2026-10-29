@@ -1,5 +1,5 @@
 import { FroshOrchestrator } from "../../ai/src";
-import { ConfiguredModelAdapter, buildModelInput, isStreamingProvider, type FroshStreamEvent } from "../../ai/src/provider";
+import { ConfiguredModelAdapter, buildModelInput, isStreamingProvider, throwIfProviderAborted, type FroshStreamEvent } from "../../ai/src/provider";
 import { createProvider } from "../../ai/src/provider-factory";
 import {
   buildConversationContext,
@@ -24,6 +24,8 @@ export interface FroshHttpRequest {
   message: string;
   conversationId?: string;
   userId?: string;
+  /** The HTTP/client lifetime for an interactive response. */
+  signal?: AbortSignal;
 }
 
 type PreparedConversation = {
@@ -143,14 +145,18 @@ async function finishConversation(
 }
 
 export async function handleFroshRequest(input: FroshHttpRequest): Promise<FroshResponse> {
+  throwIfProviderAborted(input.signal);
   const prepared = await prepareConversation(input);
-  const response = await orchestrator.respond(prepared.context);
+  throwIfProviderAborted(input.signal);
+  const response = await orchestrator.respond(prepared.context, { signal: input.signal });
+  throwIfProviderAborted(input.signal);
   const complete = {
     conversationId: prepared.conversation.id,
     message: response.message,
     toolCalls: response.toolCalls ?? [],
   };
 
+  throwIfProviderAborted(input.signal);
   await finishConversation(prepared, complete);
   return complete;
 }
@@ -163,11 +169,14 @@ export async function handleFroshRequest(input: FroshHttpRequest): Promise<Frosh
 export async function* streamFroshRequest(
   input: FroshHttpRequest,
 ): AsyncGenerator<FroshStreamEvent> {
+  throwIfProviderAborted(input.signal);
   const prepared = await prepareConversation(input);
+  throwIfProviderAborted(input.signal);
   let complete: Pick<FroshResponse, "message" | "toolCalls"> | undefined;
 
   if (isStreamingProvider(provider)) {
-    for await (const event of provider.stream(buildModelInput(prepared.context))) {
+    for await (const event of provider.stream(buildModelInput(prepared.context), { signal: input.signal })) {
+      throwIfProviderAborted(input.signal);
       if (event.type === "done") {
         complete = { message: event.message, toolCalls: event.toolCalls };
         yield { ...event, conversationId: prepared.conversation.id };
@@ -176,9 +185,11 @@ export async function* streamFroshRequest(
       }
     }
   } else {
-    const response = await orchestrator.respond(prepared.context);
+    const response = await orchestrator.respond(prepared.context, { signal: input.signal });
+    throwIfProviderAborted(input.signal);
     complete = { message: response.message, toolCalls: response.toolCalls ?? [] };
     if (complete.message) yield { type: "delta", text: complete.message };
+    throwIfProviderAborted(input.signal);
     yield {
       type: "done",
       conversationId: prepared.conversation.id,
@@ -188,8 +199,10 @@ export async function* streamFroshRequest(
   }
 
   // A provider that stops without a final event has not produced a valid chat
-  // response. Do not persist an empty assistant turn or report success.
+  // response. Do not persist an empty assistant turn or report success. The
+  // same rule applies to an explicit cancellation after a partial delta.
   if (!complete) throw new Error("Model stream ended without a completed response");
+  throwIfProviderAborted(input.signal);
   await finishConversation(prepared, complete);
 }
 

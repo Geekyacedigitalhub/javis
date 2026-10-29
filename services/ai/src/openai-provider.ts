@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import type { FroshToolCall } from "../../../packages/types/src/javis";
-import { buildModelInput, type FroshStreamEvent, type ProviderGenerateOptions } from "./provider";
+import { buildModelInput, throwIfProviderAborted, type FroshStreamEvent, type ProviderGenerateOptions } from "./provider";
 import { executeToolCall } from "../../tools/src";
 
 let cachedClient: OpenAI | undefined;
@@ -81,6 +81,7 @@ export class OpenAIProvider {
     }
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      throwIfProviderAborted(options.signal);
       const stream = await getClient().responses.create({
         model,
         instructions: input.system,
@@ -89,12 +90,13 @@ export class OpenAIProvider {
         tools: tools as any,
         store: true,
         stream: true,
-      });
+      }, options.signal ? { signal: options.signal } : undefined);
 
       let text = "";
       let completedResponse: any;
 
       for await (const event of stream as any) {
+        throwIfProviderAborted(options.signal);
         if (event.type === "response.output_text.delta" && typeof event.delta === "string") {
           text += event.delta;
           yield { type: "delta", text: event.delta };
@@ -104,6 +106,7 @@ export class OpenAIProvider {
         }
       }
 
+      throwIfProviderAborted(options.signal);
       if (!completedResponse) {
         throw new Error("OpenAI stream ended without a completed response");
       }
@@ -114,6 +117,7 @@ export class OpenAIProvider {
       );
 
       if (!calls.length) {
+        throwIfProviderAborted(options.signal);
         yield { type: "done", message: text || completedResponse.output_text || "", toolCalls: executedCalls };
         return;
       }
@@ -136,6 +140,7 @@ export class OpenAIProvider {
           status: "planned",
         };
 
+        throwIfProviderAborted(options.signal);
         yield { type: "tool", name: item.name, status: "planned", toolCallId: callId };
 
         const continuationOutput = continuationToolOutputs.get(planned.id);
@@ -149,6 +154,7 @@ export class OpenAIProvider {
         }
 
         const result = await executeTimedToolCall(planned, options.runId);
+        throwIfProviderAborted(options.signal);
         executedCalls.push(result);
 
         yield {
@@ -184,8 +190,10 @@ export class OpenAIProvider {
       }
     }
 
+    throwIfProviderAborted(options.signal);
     const message = "FROSH reached the maximum tool-execution rounds for this request.";
     yield { type: "delta", text: message };
+    throwIfProviderAborted(options.signal);
     yield { type: "done", message, toolCalls: executedCalls };
   }
 
@@ -276,6 +284,7 @@ export class OpenAIProvider {
     }
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      throwIfProviderAborted(options.signal);
       const response = await getClient().responses.create({
         model,
         instructions: input.system,
@@ -283,7 +292,8 @@ export class OpenAIProvider {
         previous_response_id: previousResponseId,
         tools: tools as any,
         store: true,
-      });
+      }, options.signal ? { signal: options.signal } : undefined);
+      throwIfProviderAborted(options.signal);
 
       previousResponseId = response.id;
       continuationInput = [];
@@ -324,7 +334,9 @@ export class OpenAIProvider {
           continue;
         }
 
+        throwIfProviderAborted(options.signal);
         const result = await executeTimedToolCall(planned, options.runId);
+        throwIfProviderAborted(options.signal);
         executedCalls.push(result);
 
         const resultValue = result.result;
@@ -361,6 +373,7 @@ export class OpenAIProvider {
       }
     }
 
+    throwIfProviderAborted(options.signal);
     return {
       message: "FROSH reached the maximum tool-execution rounds for this request.",
       toolCalls: executedCalls,
