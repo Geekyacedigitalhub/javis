@@ -111,6 +111,20 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return rows[0] ?? null;
   }
 
+  async recoverInterrupted(userId?: string) {
+    const values: unknown[] = [];
+    const ownerClause = userId ? (values.push(userId), " AND user_id=$1") : "";
+    const rows = await this.query<{ id: string }>(
+      `UPDATE frosh_agent_runs
+       SET status='failed', pending_approval_id=NULL, provider_continuation=NULL,
+           result='FROSH restarted before this run finished. It was not replayed because a provider or tool action may have already happened; review the evidence and start a new run if needed.',
+           error='Agent process restarted while this run was active', updated_at=NOW()
+       WHERE status='running'${ownerClause} RETURNING id`,
+      values,
+    );
+    return rows.length;
+  }
+
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt" | "userId">>) {
     const fields: string[] = [];
     const values: unknown[] = [id];

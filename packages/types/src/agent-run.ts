@@ -56,6 +56,9 @@ export interface FroshAgentRunStore {
   get(id: string): Promise<FroshAgentRun | null>;
   /** Atomically marks only a live/waiting run cancelled. */
   cancel(id: string, userId?: string): Promise<FroshAgentRun | null>;
+  /** Reconciles work left in progress by a process restart without replaying
+   * unknown tool/provider side effects. Approval-waiting runs remain resumable. */
+  recoverInterrupted(userId?: string): Promise<number>;
   update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt" | "userId">>): Promise<FroshAgentRun>;
   touch(id: string): Promise<FroshAgentRun>;
   claimApproval(id: string, approvalId: string, toolCall: FroshToolCall): Promise<FroshAgentRun | null>;
