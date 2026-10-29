@@ -344,6 +344,7 @@ either knowing about the other.
 ```
 POST /v1/agent-runs        { goal, mode: "loop" }                    -> 201, final run
 POST /v1/agent-runs        { goal, mode: "loop", background: true }  -> 202, durable running run
+POST /v1/agent-runs        Idempotency-Key: <8-128 chars>            -> retry-safe original run (no duplicate execution)
 GET  /v1/agent-runs/users/:userId/:runId                             -> run plus its pending approval
 POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop a live run
 GET  /v1/agent-runs/users/:userId/:runId/events                       -> append-only status audit history

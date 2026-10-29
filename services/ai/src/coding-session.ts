@@ -49,18 +49,26 @@ export class CodingSessionManager {
     messages: FroshMessage[];
     userId?: string;
     conversationId?: string;
-    onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>;
+    idempotencyKey?: string;
+    onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>, created: boolean) => Promise<void>;
     canPersist?: () => Promise<boolean>;
   }) {
-    const run = await agentRunStore.create({
+    const runInput = {
       userId: input.userId,
       conversationId: input.conversationId,
       goal: input.goal,
-      status: "running",
+      status: "running" as const,
       toolCalls: [],
-    });
+    };
+    const creation = input.idempotencyKey
+      ? await agentRunStore.createIdempotent({ ...runInput, idempotencyKey: input.idempotencyKey })
+      : { run: await agentRunStore.create(runInput), created: true };
+    const run = creation.run;
+    if (input.onRunCreated) await input.onRunCreated(run, creation.created);
+    // The original request owns model execution. A replay always returns its
+    // durable outcome instead of starting a second provider/tool attempt.
+    if (!creation.created) return run;
     try {
-      if (input.onRunCreated) await input.onRunCreated(run);
       return await this.step(run.id, input.messages, input.canPersist);
     } catch (error) {
       // Cancellation is already persisted atomically by the API. It is not a

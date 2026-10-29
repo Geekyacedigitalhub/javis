@@ -3,12 +3,13 @@ import {
   FROSH_AGENT_RUN_TIMEOUT_ERROR,
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
   type FroshAgentRun,
+  type FroshAgentRunCreateInput,
   type FroshAgentRunEvent,
   type FroshAgentRunStore,
 } from "../../../packages/types/src/agent-run";
 
 type Sql = ReturnType<typeof postgres>;
-type CreateInput = Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string };
+type CreateInput = FroshAgentRunCreateInput;
 
 const COLUMNS =
   'id, user_id AS "userId", conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error';
@@ -22,26 +23,52 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return this.sql.unsafe<T[]>(text, values as never[]);
   }
 
+  private createValues(input: CreateInput, idempotencyKey?: string) {
+    return [
+      crypto.randomUUID(),
+      input.userId?.trim() || "default-user",
+      input.conversationId ?? null,
+      input.goal,
+      input.status,
+      JSON.stringify(input.toolCalls),
+      input.pendingApprovalId ?? null,
+      input.providerContinuation ? JSON.stringify(input.providerContinuation) : null,
+      input.result ?? null,
+      input.error ?? null,
+      idempotencyKey ?? null,
+    ];
+  }
+
   async create(input: CreateInput) {
-    const id = crypto.randomUUID();
-    const userId = input.userId?.trim() || "default-user";
     const rows = await this.query<FroshAgentRun>(
-      `INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10) RETURNING ${COLUMNS}`,
-      [
-        id,
-        userId,
-        input.conversationId ?? null,
-        input.goal,
-        input.status,
-        JSON.stringify(input.toolCalls),
-        input.pendingApprovalId ?? null,
-        input.providerContinuation ? JSON.stringify(input.providerContinuation) : null,
-        input.result ?? null,
-        input.error ?? null,
-      ],
+      `INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11) RETURNING ${COLUMNS}`,
+      this.createValues(input),
     );
     return rows[0];
+  }
+
+  async createIdempotent(input: CreateInput & { idempotencyKey: string }) {
+    const rows = await this.query<FroshAgentRun>(
+      `INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
+       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11)
+       ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
+       RETURNING ${COLUMNS}`,
+      this.createValues(input, input.idempotencyKey),
+    );
+    if (rows[0]) return { run: rows[0], created: true };
+    const userId = input.userId?.trim() || "default-user";
+    const run = await this.findByIdempotencyKey(userId, input.idempotencyKey);
+    if (!run) throw new Error("Idempotent agent-run creation did not return a run");
+    return { run, created: false };
+  }
+
+  async findByIdempotencyKey(userId: string, idempotencyKey: string) {
+    const rows = await this.query<FroshAgentRun>(
+      `SELECT ${COLUMNS} FROM frosh_agent_runs WHERE user_id=$1 AND idempotency_key=$2`,
+      [userId, idempotencyKey],
+    );
+    return rows[0] ?? null;
   }
 
   async get(id: string) {
