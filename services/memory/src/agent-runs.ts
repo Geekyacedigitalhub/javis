@@ -1,5 +1,10 @@
 import postgres from "postgres";
-import type { FroshAgentRun, FroshAgentRunStore } from "../../../packages/types/src/agent-run";
+import {
+  FROSH_AGENT_RUN_TIMEOUT_ERROR,
+  FROSH_AGENT_RUN_TIMEOUT_RESULT,
+  type FroshAgentRun,
+  type FroshAgentRunStore,
+} from "../../../packages/types/src/agent-run";
 
 type Sql = ReturnType<typeof postgres>;
 type CreateInput = Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string };
@@ -62,12 +67,12 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
 
   async touch(id: string) {
     const rows = await this.query<FroshAgentRun>(
-      `UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 AND status <> 'cancelled' RETURNING ${COLUMNS}`,
+      `UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 AND status IN ('running', 'waiting_approval') RETURNING ${COLUMNS}`,
       [id],
     );
     if (rows[0]) return rows[0];
     const current = await this.get(id);
-    if (current?.status === "cancelled") return current;
+    if (current && current.status !== "running" && current.status !== "waiting_approval") return current;
     throw new Error("Agent run not found");
   }
 
@@ -111,6 +116,17 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return rows[0] ?? null;
   }
 
+  async timeout(id: string) {
+    const rows = await this.query<FroshAgentRun>(
+      `UPDATE frosh_agent_runs
+       SET status='failed', pending_approval_id=NULL, provider_continuation=NULL,
+           result=$2, error=$3, updated_at=NOW()
+       WHERE id=$1 AND status='running' RETURNING ${COLUMNS}`,
+      [id, FROSH_AGENT_RUN_TIMEOUT_RESULT, FROSH_AGENT_RUN_TIMEOUT_ERROR],
+    );
+    return rows[0] ?? null;
+  }
+
   async recoverInterrupted(userId?: string) {
     const values: unknown[] = [];
     const ownerClause = userId ? (values.push(userId), " AND user_id=$1") : "";
@@ -143,16 +159,16 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
 
     const rows = fields.length
       ? await this.query<FroshAgentRun>(
-          `UPDATE frosh_agent_runs SET ${fields.join(", ")}, updated_at=NOW() WHERE id=$1 AND status <> 'cancelled' RETURNING ${COLUMNS}`,
+          `UPDATE frosh_agent_runs SET ${fields.join(", ")}, updated_at=NOW() WHERE id=$1 AND status IN ('running', 'waiting_approval') RETURNING ${COLUMNS}`,
           values,
         )
       : await this.query<FroshAgentRun>(
-          `UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 AND status <> 'cancelled' RETURNING ${COLUMNS}`,
+          `UPDATE frosh_agent_runs SET updated_at=NOW() WHERE id=$1 AND status IN ('running', 'waiting_approval') RETURNING ${COLUMNS}`,
           [id],
         );
     if (rows[0]) return rows[0];
     const current = await this.get(id);
-    if (current?.status === "cancelled") return current;
+    if (current && current.status !== "running" && current.status !== "waiting_approval") return current;
     throw new Error("Agent run not found");
   }
 }

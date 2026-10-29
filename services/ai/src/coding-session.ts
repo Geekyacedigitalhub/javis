@@ -1,7 +1,8 @@
 import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/javis";
 import { listTools, approvalStore, resolveApproval } from "../../tools/src";
 import { FroshProviderAbortError, type ProviderClient } from "./provider";
-import { registerAgentRunAbortController } from "./agent-run-cancellation";
+import { abortActiveAgentRun, registerAgentRunAbortController } from "./agent-run-cancellation";
+import { agentRunTimeoutMs, isAgentRunTimedOut } from "./agent-run-timeout";
 import { createAgentRunStore } from "./run-store-factory";
 
 export const agentRunStore = createAgentRunStore();
@@ -18,7 +19,10 @@ const CODING_SYSTEM = [
 ].join(" ");
 
 export class CodingSessionManager {
-  constructor(private readonly model: ProviderClient) {}
+  constructor(
+    private readonly model: ProviderClient,
+    private readonly options: { runTimeoutMs?: number } = {},
+  ) {}
 
   private async generateForRun(
     runId: string,
@@ -27,9 +31,15 @@ export class CodingSessionManager {
   ) {
     const controller = new AbortController();
     const unregister = registerAgentRunAbortController(runId, controller);
+    const timeout = setTimeout(() => {
+      void agentRunStore.timeout(runId)
+        .then((timedOut) => { if (timedOut) abortActiveAgentRun(runId); })
+        .catch(() => undefined);
+    }, agentRunTimeoutMs(this.options.runTimeoutMs));
     try {
       return await this.model.generate(input, { ...options, runId, signal: controller.signal });
     } finally {
+      clearTimeout(timeout);
       unregister();
     }
   }
@@ -56,7 +66,7 @@ export class CodingSessionManager {
       // Cancellation is already persisted atomically by the API. It is not a
       // provider failure and must remain visible as cancelled.
       const current = await agentRunStore.get(run.id);
-      if (error instanceof FroshProviderAbortError || current?.status === "cancelled") {
+      if (error instanceof FroshProviderAbortError || current?.status === "cancelled" || isAgentRunTimedOut(current)) {
         return current ?? run;
       }
       try {
@@ -86,7 +96,7 @@ export class CodingSessionManager {
       );
     } catch (error) {
       const current = await agentRunStore.get(runId);
-      if (error instanceof FroshProviderAbortError || current?.status === "cancelled") return current ?? run;
+      if (error instanceof FroshProviderAbortError || current?.status === "cancelled" || isAgentRunTimedOut(current)) return current ?? run;
       throw error;
     }
 
@@ -221,7 +231,7 @@ export class CodingSessionManager {
       );
     } catch (error) {
       const current = await agentRunStore.get(run.id);
-      if (error instanceof FroshProviderAbortError || current?.status === "cancelled") return current ?? claimedRun;
+      if (error instanceof FroshProviderAbortError || current?.status === "cancelled" || isAgentRunTimedOut(current)) return current ?? claimedRun;
       if (canPersist && !(await canPersist())) throw error;
       await agentRunStore.update(run.id, {
         status: "failed",

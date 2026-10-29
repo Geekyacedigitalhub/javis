@@ -9,5 +9,6 @@ export * from "./coding-agent";
 export * from "./run-store";
 export * from "./run-store-factory";
 export * from "./agent-run-cancellation";
+export * from "./agent-run-timeout";
 export * from "./coding-session";
 export * from "./coding-loop";
