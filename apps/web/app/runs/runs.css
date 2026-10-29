@@ -59,9 +59,11 @@
 .call-state { color: #6f8f7d; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .call-args { color: #7c9b89; font-size: 11px; word-break: break-all; }
 
-.run-events { list-style: none; display: grid; gap: 8px; padding: 0; margin: 15px 0 0; }
-.run-events li { display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: baseline; border-left: 2px solid #21503a; padding: 7px 0 7px 10px; color: #a7c4b3; font-size: 12px; }
-.event-state { color: #a7f3d0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-.event-state.failed { color: #fca5a5; }.event-state.cancelled { color: #cbd5e1; }.event-state.waiting_approval { color: #fcd34d; }
-.run-events time { color: #668675; font-variant-numeric: tabular-nums; font-size: 11px; }
-@media(max-width:650px){.run-events li{grid-template-columns:1fr}.run-events time{margin-left:0}}
+.run-activity-heading { margin: 17px 0 0; color: #8cb9a0; font-size: 11px; letter-spacing: .11em; text-transform: uppercase; }
+.run-events, .run-checkpoints { list-style: none; display: grid; gap: 8px; padding: 0; margin: 9px 0 0; }
+.run-events li, .run-checkpoints li { display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: baseline; border-left: 2px solid #21503a; padding: 7px 0 7px 10px; color: #a7c4b3; font-size: 12px; }
+.run-checkpoints li { grid-template-columns: auto 1fr auto auto; border-left-color: #2e6a58; }
+.event-state, .checkpoint-kind { color: #a7f3d0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.event-state.failed, .checkpoint-kind.failed { color: #fca5a5; }.event-state.cancelled, .checkpoint-kind.cancelled { color: #cbd5e1; }.event-state.waiting_approval, .checkpoint-kind.awaiting_approval { color: #fcd34d; }
+.run-events time, .run-checkpoints time { color: #668675; font-variant-numeric: tabular-nums; font-size: 11px; }
+@media(max-width:650px){.run-events li,.run-checkpoints li{grid-template-columns:1fr}.run-events time,.run-checkpoints time{margin-left:0}}

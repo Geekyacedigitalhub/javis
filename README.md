@@ -348,6 +348,7 @@ POST /v1/agent-runs        Idempotency-Key: <8-128 chars>            -> retry-sa
 GET  /v1/agent-runs/users/:userId/:runId                             -> run plus its pending approval
 POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop a live run
 GET  /v1/agent-runs/users/:userId/:runId/events                       -> append-only status audit history
+GET  /v1/agent-runs/users/:userId/:runId/checkpoints                  -> secret-free durable task checkpoints
 ```
 
 Without `mode: "loop"` the endpoint behaves exactly as before. With no live
@@ -458,9 +459,12 @@ GET /v1/agent-runs/users/:userId?status=&limit=
 
 Counts describe the whole set so the tabs stay honest while one status is shown.
 
-Every new durable run also has an append-only status history. The run console's
-**Show run activity** view reads that history, including creation, approval
-waits, completion, cancellation, timeout, and restart-recovery failures.
+Every new durable run also has an append-only status history and compact,
+secret-free task checkpoints. The run console's **Show run activity** view reads
+both records, including creation, approval waits/resumption, evidence changes,
+completion, cancellation, timeout, and restart-recovery failures. A checkpoint
+is a recovery review marker, never permission to replay uncertain provider or
+tool work automatically.
 
 ### Control center authentication
 

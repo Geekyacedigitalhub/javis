@@ -163,6 +163,14 @@ describe("reading runs back", () => {
 
     const hidden = await call(`/v1/agent-runs/users/not-${USER}/${created.body.id}/events`);
     expect(hidden.status).toBe(404);
+
+    const checkpoints = await call(`/v1/agent-runs/users/${USER}/${created.body.id}/checkpoints`);
+    expect(checkpoints.status).toBe(200);
+    expect(checkpoints.body.checkpoints[0].kind).toBe("created");
+    expect(checkpoints.body.checkpoints.at(-1).kind).toBe("completed");
+
+    const hiddenCheckpoints = await call(`/v1/agent-runs/users/not-${USER}/${created.body.id}/checkpoints`);
+    expect(hiddenCheckpoints.status).toBe(404);
   });
 
   test("deduplicates retried agent-run requests by an owner-scoped idempotency key", async () => {
@@ -237,6 +245,23 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(events.map((event) => event.type)).toEqual(["created", "waiting_approval", "cancelled"]);
     expect(events.map((event) => event.status)).toEqual(["running", "waiting_approval", "cancelled"]);
     expect(await store.listEvents(active.id, "owner-b")).toEqual([]);
+  });
+
+  test("keeps compact checkpoints whenever task evidence or a stopping point changes", async () => {
+    const store = new InMemoryAgentRunStore();
+    const active = await store.create(run({ status: "running", userId: "owner-a" }));
+    await store.update(active.id, {
+      toolCalls: [{ id: "tool-1", name: "workspace_list", arguments: {}, status: "completed", result: [] }],
+    });
+    await store.update(active.id, { status: "waiting_approval", pendingApprovalId: "approval-1" });
+    await store.cancel(active.id, "owner-a");
+
+    const checkpoints = await store.listCheckpoints(active.id, "owner-a");
+    expect(checkpoints.map((checkpoint) => checkpoint.kind)).toEqual([
+      "created", "tool_evidence", "awaiting_approval", "cancelled",
+    ]);
+    expect(checkpoints[1]?.toolCallCount).toBe(1);
+    expect(await store.listCheckpoints(active.id, "owner-b")).toEqual([]);
   });
 
   test("creates an idempotency key only once per owner", async () => {

@@ -4,6 +4,7 @@ import {
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
   FroshAgentRunConcurrencyError,
   type FroshAgentRun,
+  type FroshAgentRunCheckpoint,
   type FroshAgentRunCreateInput,
   type FroshAgentRunEvent,
   type FroshAgentRunStore,
@@ -118,6 +119,19 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     return this.query<FroshAgentRunEvent>(
       `SELECT id::text AS id, run_id AS "runId", user_id AS "userId", type, status, message, created_at AS "createdAt"
        FROM frosh_agent_run_events WHERE run_id=$1${ownerClause} ORDER BY created_at ASC, id ASC LIMIT $${values.length}`,
+      values,
+    );
+  }
+
+  async listCheckpoints(runId: string, userId?: string, limit = 100) {
+    const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
+    const values: unknown[] = [runId];
+    const ownerClause = userId ? (values.push(userId), " AND user_id=$2") : "";
+    values.push(safeLimit);
+    return this.query<FroshAgentRunCheckpoint>(
+      `SELECT id::text AS id, run_id AS "runId", user_id AS "userId", kind, status, message,
+              tool_call_count AS "toolCallCount", created_at AS "createdAt"
+       FROM frosh_agent_run_checkpoints WHERE run_id=$1${ownerClause} ORDER BY created_at ASC, id ASC LIMIT $${values.length}`,
       values,
     );
   }
