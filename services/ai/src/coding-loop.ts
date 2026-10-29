@@ -1,7 +1,8 @@
 import type { FroshToolCall } from "../../../packages/types/src/javis";
 import type { FroshAgentRun } from "../../../packages/types/src/agent-run";
 import { approvalStore, executeToolCall, listTools, resolveApproval } from "../../tools/src";
-import type { ProviderClient } from "./provider";
+import { FroshProviderAbortError, type ProviderClient } from "./provider";
+import { registerAgentRunAbortController } from "./agent-run-cancellation";
 import { agentRunStore } from "./coding-session";
 
 /**
@@ -144,6 +145,16 @@ export class CodingLoop {
     private readonly options: { maxSteps?: number; maxCorrections?: number } = {},
   ) {}
 
+  private async generateForRun(runId: string, input: Parameters<ProviderClient["generate"]>[0]) {
+    const controller = new AbortController();
+    const unregister = registerAgentRunAbortController(runId, controller);
+    try {
+      return await this.model.generate(input, { runId, signal: controller.signal });
+    } finally {
+      unregister();
+    }
+  }
+
   private get maxSteps() {
     return this.options.maxSteps ?? 8;
   }
@@ -152,17 +163,24 @@ export class CodingLoop {
     return this.options.maxCorrections ?? 1;
   }
 
-  async start(input: { goal: string; conversationId?: string }) {
+  async start(input: {
+    goal: string;
+    userId?: string;
+    conversationId?: string;
+    onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>;
+  }) {
     const goal = input.goal.trim();
     if (!goal) throw new Error("A coding goal is required to start the loop");
 
     const run = await agentRunStore.create({
+      userId: input.userId,
       conversationId: input.conversationId,
       goal,
       status: "running",
       toolCalls: [],
     });
 
+    if (input.onRunCreated) await input.onRunCreated(run);
     return this.drive(run.id);
   }
 
@@ -174,6 +192,7 @@ export class CodingLoop {
   async resumeAfterApproval(runId: string, approvalId: string) {
     const run = await agentRunStore.get(runId);
     if (!run) throw new Error("Agent run not found");
+    if (run.status === "cancelled") throw new Error("Agent run was cancelled");
     if (run.status !== "waiting_approval" || run.pendingApprovalId !== approvalId) {
       throw new Error("Agent run is not waiting for this approval");
     }
@@ -183,6 +202,8 @@ export class CodingLoop {
     // Still pending on purpose: resolving it below is what records the decision
     // and performs the action, in that order, exactly once.
     if (approval.status !== "pending") throw new Error("Approval is no longer pending");
+    const beforeApprovedAction = await agentRunStore.get(runId);
+    if (beforeApprovedAction?.status === "cancelled") return beforeApprovedAction;
 
     let result: unknown;
     try {
@@ -227,6 +248,7 @@ export class CodingLoop {
 
     const run = await agentRunStore.get(approval.runId);
     if (!run) throw new Error("Agent run not found");
+    if (run.status === "cancelled") throw new Error("Agent run was cancelled");
     if (run.status !== "waiting_approval" || run.pendingApprovalId !== approvalId) {
       throw new Error("Agent run is not waiting for this approval");
     }
@@ -246,14 +268,14 @@ export class CodingLoop {
     for (let step = 0; step < this.maxSteps; step += 1) {
       const run = await agentRunStore.get(runId);
       if (!run) throw new Error("Agent run not found");
-      if (run.status === "completed" || run.status === "failed") return run;
+      if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") return run;
 
       const phase = deriveCodingPhase(run.toolCalls);
       const evidence = collectCodingEvidence(run.toolCalls);
 
       let response;
       try {
-        response = await this.model.generate({
+        response = await this.generateForRun(runId, {
           system: CODING_LOOP_SYSTEM,
           messages: [
             { role: "user", content: run.goal },
@@ -276,6 +298,8 @@ export class CodingLoop {
           tools: listTools(),
         });
       } catch (error) {
+        const current = await agentRunStore.get(runId);
+        if (error instanceof FroshProviderAbortError || current?.status === "cancelled") return current ?? run;
         return agentRunStore.update(runId, {
           status: "failed",
           error: error instanceof Error ? error.message : "Provider failed",
@@ -286,8 +310,17 @@ export class CodingLoop {
       const requested = response.toolCalls ?? [];
       const executed: FroshToolCall[] = [];
 
+      // Provider and tools are asynchronous. Re-read the durable state before
+      // every action so cancellation prevents all later tool dispatches.
+      const beforeTools = await agentRunStore.get(runId);
+      if (!beforeTools || beforeTools.status === "cancelled") return beforeTools ?? run;
+
       for (const call of requested) {
+        const current = await agentRunStore.get(runId);
+        if (!current || current.status === "cancelled") return current ?? run;
         const outcome = await executeToolCall(call, { runId });
+        const afterTool = await agentRunStore.get(runId);
+        if (!afterTool || afterTool.status === "cancelled") return afterTool ?? run;
         const outcomeResult = resultRecord(outcome);
 
         // A tool needing approval parks the whole loop. Nothing is recorded for

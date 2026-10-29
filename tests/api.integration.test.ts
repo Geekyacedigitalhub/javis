@@ -478,6 +478,16 @@ describe("coding loop", () => {
     expect(body.toolCalls).toEqual([]);
   });
 
+  test("background starts return a durable id before the run finishes", async () => {
+    const created = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Work in the background", background: true }),
+    });
+    expect(created.status).toBe(202);
+    expect(created.body.status).toBe("running");
+    expect(created.body.userId).toBe(USER);
+  });
+
   test("a loop run can be read back by id", async () => {
     const created = await call("/v1/agent-runs", {
       method: "POST",

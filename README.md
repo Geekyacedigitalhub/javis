@@ -90,7 +90,8 @@ bun run build:web      # production build of the control center
 | `tests/coding-loop.test.ts` | Loop phases, evidence gates, approval parking, real tool execution |
 | `tests/windows-agent.test.ts` | Device agent handlers, reconnect backoff, live enrolment and command dispatch |
 | `tests/desktop-tools.test.ts` | Desktop tools end to end: safe info, approval-gated commands, refusal without a device |
-| `tests/agent-runs.test.ts` | Run listing, filters, counts, ordering, limit clamp, auth |
+| `tests/agent-runs.test.ts` | Run listing, owner scope, filters, counts, ordering, limit clamp, auth |
+| `tests/agent-run-cancellation.test.ts` | Provider abort propagation and terminal cancellation race protection |
 | `tests/run-summary.test.ts` | The console's evidence rules: only a zero exit counts as verified |
 | `tests/tool-workspace.test.ts` | The workspace root follows `FROSH_WORKSPACE` per call instead of being frozen at import |
 
@@ -341,8 +342,10 @@ from the result. That is why the approval center and the loop compose without
 either knowing about the other.
 
 ```
-POST /v1/agent-runs        { goal, mode: "loop" }   -> 201, the run
-GET  /v1/agent-runs/users/:userId/:runId            -> run plus its pending approval
+POST /v1/agent-runs        { goal, mode: "loop" }                    -> 201, final run
+POST /v1/agent-runs        { goal, mode: "loop", background: true }  -> 202, durable running run
+GET  /v1/agent-runs/users/:userId/:runId                             -> run plus its pending approval
+POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop a live run
 ```
 
 Without `mode: "loop"` the endpoint behaves exactly as before. With no live
@@ -433,11 +436,14 @@ complete, and once in `apps/web/app/runs/summary.ts` that decides what the page
 may claim. It lives in its own module precisely so it can be tested, because a
 console that rounded "a validation ran" up to "verified" would undo the promise
 in the one place a person actually looks. Approving a parked run is a link away:
-a run in `waiting_approval` points at `/approvals`.
+a run in `waiting_approval` points at `/approvals`. A live run also has a **Stop
+run** control. Stopping first writes a terminal `cancelled` state, then aborts
+any active model request; late provider output cannot turn it back into a
+completed or failed run.
 
 ```
 GET /v1/agent-runs/users/:userId?status=&limit=
-  -> { runs, counts: { running, waiting_approval, completed, failed } }
+  -> { runs, counts: { running, waiting_approval, completed, failed, cancelled } }
 ```
 
 Counts describe the whole set so the tabs stay honest while one status is shown.

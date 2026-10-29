@@ -16,7 +16,6 @@ type Counts = Record<RunStatus, number>;
 
 type View = RunStatus | "all";
 
-const userId = "default-user";
 const POLL_MS = 8_000;
 
 const TABS: Array<{ key: View; label: string }> = [
@@ -25,17 +24,21 @@ const TABS: Array<{ key: View; label: string }> = [
   { key: "waiting_approval", label: "Waiting" },
   { key: "completed", label: "Completed" },
   { key: "failed", label: "Failed" },
+  { key: "cancelled", label: "Stopped" },
 ];
 
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
-  const [counts, setCounts] = useState<Counts>({ running: 0, waiting_approval: 0, completed: 0, failed: 0 });
+  const [userId, setUserId] = useState<string | null>(null);
+  const [counts, setCounts] = useState<Counts>({ running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
   const [view, setView] = useState<View>("all");
   const [status, setStatus] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [stopping, setStopping] = useState<string | null>(null);
 
   const load = useCallback(async (which: View) => {
+    if (!userId) return;
     try {
       const response = await fetch("/api/frosh/v1/agent-runs/users/" + encodeURIComponent(userId) + "?status=" + which, {
         cache: "no-store",
@@ -43,22 +46,61 @@ export default function RunsPage() {
       if (!response.ok) throw new Error("Request failed with status " + response.status);
       const body = await response.json();
       setRuns(Array.isArray(body.runs) ? body.runs : []);
-      setCounts(body.counts ?? { running: 0, waiting_approval: 0, completed: 0, failed: 0 });
+      setCounts(body.counts ?? { running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
       setStatus("");
       setLoaded(true);
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not load runs");
       setLoaded(true);
     }
+  }, [userId]);
+
+  useEffect(() => {
+    let active = true;
+    void fetch("/api/frosh/v1/session", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not establish the FROSH account session.");
+        const body = await response.json();
+        if (typeof body?.userId !== "string" || !body.userId) throw new Error("FROSH returned an invalid account session.");
+        if (active) setUserId(body.userId);
+      })
+      .catch((error: unknown) => {
+        if (active) {
+          setStatus(error instanceof Error ? error.message : "Could not establish the FROSH account session.");
+          setLoaded(true);
+        }
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
+    if (!userId) return;
     void load(view);
     const timer = setInterval(() => void load(view), POLL_MS);
     return () => clearInterval(timer);
-  }, [load, view]);
+  }, [load, userId, view]);
 
-  const total = counts.running + counts.waiting_approval + counts.completed + counts.failed;
+  const total = counts.running + counts.waiting_approval + counts.completed + counts.failed + counts.cancelled;
+
+  const stopRun = async (run: Run) => {
+    if (!userId) return;
+    setStopping(run.id);
+    setStatus("");
+    try {
+      const response = await fetch(
+        "/api/frosh/v1/agent-runs/users/" + encodeURIComponent(userId) + "/" + encodeURIComponent(run.id) + "/cancel",
+        { method: "POST", cache: "no-store" },
+      );
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : "Could not stop this run.");
+      await load(view);
+      setStatus("Run stopped. FROSH will not dispatch any more work for it.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not stop this run.");
+    } finally {
+      setStopping(null);
+    }
+  };
 
   return (
     <main className="runs-page">
@@ -153,6 +195,18 @@ export default function RunsPage() {
               {run.status === "waiting_approval" ? (
                 <div className="run-waiting">
                   Waiting on a decision. <Link href="/approvals">Open the approval center →</Link>
+                </div>
+              ) : null}
+
+              {run.status === "cancelled" ? (
+                <div className="run-cancelled">Stopped by you. No later provider result can reopen this run.</div>
+              ) : null}
+
+              {run.status === "running" || run.status === "waiting_approval" ? (
+                <div className="run-actions">
+                  <button type="button" className="run-stop" disabled={stopping === run.id} onClick={() => void stopRun(run)}>
+                    {stopping === run.id ? "Stopping…" : "Stop run"}
+                  </button>
                 </div>
               ) : null}
 

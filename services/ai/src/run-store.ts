@@ -4,9 +4,9 @@ import type { FroshToolCall } from "../../../packages/types/src/javis";
 export class InMemoryAgentRunStore implements FroshAgentRunStore {
   private readonly runs = new Map<string, FroshAgentRun>();
 
-  async create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt">) {
+  async create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string }) {
     const now = new Date().toISOString();
-    const run: FroshAgentRun = { ...input, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+    const run: FroshAgentRun = { ...input, userId: input.userId?.trim() || "default-user", id: crypto.randomUUID(), createdAt: now, updatedAt: now };
     this.runs.set(run.id, run);
     return run;
   }
@@ -15,10 +15,10 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return this.runs.get(id) ?? null;
   }
 
-  async list(filter: { status?: FroshAgentRun["status"] | "all"; limit?: number } = {}) {
+  async list(filter: { userId?: string; status?: FroshAgentRun["status"] | "all"; limit?: number } = {}) {
     const limit = Math.min(200, Math.max(1, Math.trunc(filter.limit ?? 50)));
     return [...this.runs.values()]
-      .filter((run) => !filter.status || filter.status === "all" || run.status === filter.status)
+      .filter((run) => (!filter.userId || run.userId === filter.userId) && (!filter.status || filter.status === "all" || run.status === filter.status))
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
       .slice(0, limit);
   }
@@ -75,9 +75,29 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return updated;
   }
 
-  async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>) {
+  async cancel(id: string, userId?: string) {
+    const current = this.runs.get(id);
+    if (!current || (userId && current.userId !== userId)) return null;
+    if (current.status !== "running" && current.status !== "waiting_approval") return null;
+    const updated: FroshAgentRun = {
+      ...current,
+      status: "cancelled",
+      pendingApprovalId: undefined,
+      providerContinuation: undefined,
+      result: "Cancelled by the user before FROSH could complete this run.",
+      error: undefined,
+      updatedAt: new Date().toISOString(),
+    };
+    this.runs.set(id, updated);
+    return updated;
+  }
+
+  async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt" | "userId">>) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");
+    // A cancellation is terminal. Late provider/tool writes must not turn a
+    // user-stopped run into a completed or failed one.
+    if (current.status === "cancelled") return current;
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
     this.runs.set(id, updated);
     return updated;

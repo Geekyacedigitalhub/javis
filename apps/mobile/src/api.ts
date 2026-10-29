@@ -230,12 +230,23 @@ export async function streamMessage(
 export function startAgentRun(goal: string) {
   return request<FroshAgentRun>("/v1/agent-runs", {
     method: "POST",
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify({ goal, background: true }),
   });
 }
 
-export function getAgentRun(id: string) {
-  return request<FroshAgentRun>(`/v1/agent-runs/${id}`);
+export async function getAgentRun(id: string) {
+  const userId = await currentUserId();
+  const response = await request<{ run: FroshAgentRun }>(`/v1/agent-runs/users/${encodeURIComponent(userId)}/${encodeURIComponent(id)}`);
+  return response.run;
+}
+
+export async function cancelAgentRun(id: string) {
+  const userId = await currentUserId();
+  const response = await request<{ run: FroshAgentRun }>(
+    `/v1/agent-runs/users/${encodeURIComponent(userId)}/${encodeURIComponent(id)}/cancel`,
+    { method: "POST" },
+  );
+  return response.run;
 }
 
 export function getApproval(id: string) {

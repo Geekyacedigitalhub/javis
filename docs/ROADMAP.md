@@ -35,7 +35,7 @@ FROSH is a personal AI operating system, not only a chatbot. The long-term produ
 - resumable multi-step workflows
 - task checkpoints
 - background jobs
-- task cancellation
+- task cancellation — **done for agent runs** (durable cancelled state, provider abort propagation, and terminal-write protection)
 - retry/recovery
 - concurrency control
 - idempotency
@@ -588,6 +588,7 @@ Completed foundation:
 - approval/run continuation integration
 - durable OpenAI Responses continuation state
 - persistent Postgres approval storage
+- scoped, cancellable agent runs (Postgres owner migration, live provider aborts, and recovery-safe terminal state)
 
 Next engineering priorities:
 

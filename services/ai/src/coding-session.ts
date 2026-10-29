@@ -1,6 +1,7 @@
 import type { FroshMessage, FroshToolCall } from "../../../packages/types/src/javis";
 import { listTools, approvalStore, resolveApproval } from "../../tools/src";
-import type { ProviderClient } from "./provider";
+import { FroshProviderAbortError, type ProviderClient } from "./provider";
+import { registerAgentRunAbortController } from "./agent-run-cancellation";
 import { createAgentRunStore } from "./run-store-factory";
 
 export const agentRunStore = createAgentRunStore();
@@ -19,14 +20,30 @@ const CODING_SYSTEM = [
 export class CodingSessionManager {
   constructor(private readonly model: ProviderClient) {}
 
+  private async generateForRun(
+    runId: string,
+    input: Parameters<ProviderClient["generate"]>[0],
+    options?: Parameters<ProviderClient["generate"]>[1],
+  ) {
+    const controller = new AbortController();
+    const unregister = registerAgentRunAbortController(runId, controller);
+    try {
+      return await this.model.generate(input, { ...options, runId, signal: controller.signal });
+    } finally {
+      unregister();
+    }
+  }
+
   async start(input: {
     goal: string;
     messages: FroshMessage[];
+    userId?: string;
     conversationId?: string;
     onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>;
     canPersist?: () => Promise<boolean>;
   }) {
     const run = await agentRunStore.create({
+      userId: input.userId,
       conversationId: input.conversationId,
       goal: input.goal,
       status: "running",
@@ -36,6 +53,12 @@ export class CodingSessionManager {
       if (input.onRunCreated) await input.onRunCreated(run);
       return await this.step(run.id, input.messages, input.canPersist);
     } catch (error) {
+      // Cancellation is already persisted atomically by the API. It is not a
+      // provider failure and must remain visible as cancelled.
+      const current = await agentRunStore.get(run.id);
+      if (error instanceof FroshProviderAbortError || current?.status === "cancelled") {
+        return current ?? run;
+      }
       try {
         if (!input.canPersist || await input.canPersist()) {
           await agentRunStore.update(run.id, {
@@ -52,12 +75,20 @@ export class CodingSessionManager {
   async step(runId: string, messages: FroshMessage[], canPersist?: () => Promise<boolean>) {
     const run = await agentRunStore.get(runId);
     if (!run) throw new Error("Agent run not found");
-    if (run.status === "completed" || run.status === "failed") return run;
+    if (run.status === "completed" || run.status === "failed" || run.status === "cancelled") return run;
 
-    const result = await this.model.generate(
-      { system: CODING_SYSTEM, messages, tools: listTools() },
-      { runId, continuation: run.providerContinuation ? { continuation: run.providerContinuation } : undefined },
-    );
+    let result;
+    try {
+      result = await this.generateForRun(
+        runId,
+        { system: CODING_SYSTEM, messages, tools: listTools() },
+        { continuation: run.providerContinuation ? { continuation: run.providerContinuation } : undefined },
+      );
+    } catch (error) {
+      const current = await agentRunStore.get(runId);
+      if (error instanceof FroshProviderAbortError || current?.status === "cancelled") return current ?? run;
+      throw error;
+    }
 
     const calls: FroshToolCall[] = [...run.toolCalls, ...(result.toolCalls ?? [])];
 
@@ -98,6 +129,7 @@ export class CodingSessionManager {
 
     const run = await agentRunStore.get(approval.runId);
     if (!run) throw new Error("Agent run not found");
+    if (run.status === "cancelled") throw new Error("Agent run was cancelled");
     if (run.status !== "waiting_approval" || run.pendingApprovalId !== approvalId) {
       throw new Error("Agent run is not waiting for this approval");
     }
@@ -122,6 +154,11 @@ export class CodingSessionManager {
       await agentRunStore.restoreApprovalWait(run.id, approvalId, run.toolCalls);
       throw new Error("Mission lease was lost before approval could be resolved");
     }
+
+    // Do not begin an approved side effect when a concurrent Stop has already
+    // changed this run to terminal cancellation.
+    const beforeApprovedAction = await agentRunStore.get(run.id);
+    if (beforeApprovedAction?.status === "cancelled") return beforeApprovedAction;
 
     let resolved: Awaited<ReturnType<typeof resolveApproval>>;
     try {
@@ -169,10 +206,10 @@ export class CodingSessionManager {
 
     let resumed;
     try {
-      resumed = await this.model.generate(
+      resumed = await this.generateForRun(
+        run.id,
         { system: CODING_SYSTEM, messages: [], tools: listTools() },
         {
-          runId: run.id,
           continuation: {
             continuation: claimedRun.providerContinuation!,
             toolOutput: {
@@ -183,6 +220,8 @@ export class CodingSessionManager {
         },
       );
     } catch (error) {
+      const current = await agentRunStore.get(run.id);
+      if (error instanceof FroshProviderAbortError || current?.status === "cancelled") return current ?? claimedRun;
       if (canPersist && !(await canPersist())) throw error;
       await agentRunStore.update(run.id, {
         status: "failed",

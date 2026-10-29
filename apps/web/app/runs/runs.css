@@ -20,6 +20,7 @@
 .run-card { background: #0a1b13; border: 1px solid #164e32; border-radius: 16px; padding: 18px; }
 .run-card.waiting_approval { border-color: #5b4810; }
 .run-card.failed { border-color: #442020; }
+.run-card.cancelled { border-color: #374151; }
 
 .run-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; }
 .run-goal { font-size: 16px; font-weight: 700; color: #ecfdf5; line-height: 1.45; }
@@ -28,6 +29,7 @@
 .run-state.waiting_approval { color: #fcd34d; background: #352a0b; }
 .run-state.completed { color: #86efac; background: #123c25; }
 .run-state.failed { color: #fca5a5; background: #451a1a; }
+.run-state.cancelled { color: #cbd5e1; background: #26313f; }
 
 .run-meta { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 8px; color: #6f8f7d; font-size: 12px; }
 
@@ -39,6 +41,10 @@
 
 .run-waiting { margin-top: 12px; font-size: 13px; color: #fcd34d; }
 .run-waiting a { color: #fcd34d; text-decoration: underline; }
+.run-cancelled { margin-top: 12px; font-size: 13px; color: #cbd5e1; }
+.run-actions { display: flex; justify-content: flex-end; margin-top: 13px; }
+.run-stop { border: 1px solid #9f3030; background: #351414; color: #fecaca; border-radius: 8px; padding: 8px 11px; font-weight: 800; font-size: 12px; }
+.run-stop:disabled { opacity: .55; cursor: wait; }
 
 .run-result { margin-top: 12px; color: #a7c4b3; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .run-error { margin-top: 10px; color: #fca5a5; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
