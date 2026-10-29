@@ -103,8 +103,9 @@ TCP socket for it. Memory work belongs to the server; the phone talks to the API
 
 The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. It
 uses the same authenticated conversation endpoints as the web Control Center:
-users can start a new chat, reopen a saved chat, and continue it with the
-server's durable context rather than treating every mobile prompt as isolated.
+users can start a new chat, reopen a saved chat, continue it with the
+server's durable context, and see response deltas as they arrive rather than
+treating every mobile prompt as isolated or waiting for a completed reply.
 Its seven native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
 `frosh-messaging`, `frosh-notifications`, `frosh-speech`) are Kotlin sources.
 
@@ -189,9 +190,10 @@ but that fallback is **not a live AI assistant**. The Control Center marks it as
 For a no-cost personal deployment, set `FROSH_AI_PROVIDER=gemini`,
 `GEMINI_API_KEY`, and optionally `FROSH_GEMINI_MODEL=gemini-2.5-flash` in each
 server runtime. Gemini requests are made server-side and use the same
-permissioned tool and approval path as OpenAI. Web chat uses Gemini's
-`streamGenerateContent` server-sent events for real response deltas; tool calls
-remain permissioned and approval-gated before a streamed follow-up is produced.
+permissioned tool and approval path as OpenAI. Web and Android chat use
+Gemini's `streamGenerateContent` server-sent events for real response deltas;
+tool calls remain permissioned and approval-gated before a streamed follow-up
+is produced.
 `OPENAI_API_KEY` remains an optional alternative. Mission evaluation is
 advisory: if no live evaluator is available, missions continue conservatively
 rather than inventing verification.
