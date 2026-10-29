@@ -2388,22 +2388,37 @@ const server = Bun.serve<RealtimeSocketData>({
         // provider is still working, rather than waiting for that provider to
         // finish before they learn which run to cancel.
         const background = body?.background === true;
+        const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+        if (idempotencyKey !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(idempotencyKey)) {
+          return Response.json({ error: "Idempotency-Key must be 8-128 URL-safe characters." }, { status: 400 });
+        }
+
+        // Return the original durable run before scheduling any work when a
+        // client retries after a lost response. The store repeats this fence
+        // atomically for races across processes.
+        if (idempotencyKey) {
+          const prior = await agentRunStore.findByIdempotencyKey(configuredUserId, idempotencyKey);
+          if (prior) return Response.json(prior, { headers: { "Idempotent-Replay": "true" } });
+        }
+
         if (background) {
-          let resolveCreated: ((run: Awaited<ReturnType<typeof agentRunStore.create>>) => void) | undefined;
+          type CreatedRun = { run: Awaited<ReturnType<typeof agentRunStore.create>>; created: boolean };
+          let resolveCreated: ((run: CreatedRun) => void) | undefined;
           let rejectCreated: ((error: unknown) => void) | undefined;
-          const created = new Promise<Awaited<ReturnType<typeof agentRunStore.create>>>((resolve, reject) => {
+          const created = new Promise<CreatedRun>((resolve, reject) => {
             resolveCreated = resolve;
             rejectCreated = reject;
           });
-          const onRunCreated = async (run: Awaited<ReturnType<typeof agentRunStore.create>>) => {
-            resolveCreated?.(run);
+          const onRunCreated = async (run: Awaited<ReturnType<typeof agentRunStore.create>>, wasCreated: boolean) => {
+            resolveCreated?.({ run, created: wasCreated });
           };
           const execution = body?.mode === "loop"
-            ? codingLoop.start({ goal, userId: configuredUserId, conversationId, onRunCreated })
+            ? codingLoop.start({ goal, userId: configuredUserId, conversationId, idempotencyKey, onRunCreated })
             : codingSessions.start({
                 goal,
                 userId: configuredUserId,
                 conversationId,
+                idempotencyKey,
                 messages: [{ role: "user", content: message }],
                 onRunCreated,
               });
@@ -2411,21 +2426,34 @@ const server = Bun.serve<RealtimeSocketData>({
             rejectCreated?.(error);
             logOperationalError("Background agent run failed", error);
           });
-          return Response.json(await created, { status: 202 });
+          const createdRun = await created;
+          return Response.json(createdRun.run, {
+            status: createdRun.created ? 202 : 200,
+            headers: createdRun.created ? undefined : { "Idempotent-Replay": "true" },
+          });
         }
 
         // The default remains synchronous for compatibility with existing
         // callers that expect the final result in this response.
+        let created = true;
+        const onRunCreated = async (_run: Awaited<ReturnType<typeof agentRunStore.create>>, wasCreated: boolean) => {
+          created = wasCreated;
+        };
         const run = body?.mode === "loop"
-          ? await codingLoop.start({ goal, userId: configuredUserId, conversationId })
+          ? await codingLoop.start({ goal, userId: configuredUserId, conversationId, idempotencyKey, onRunCreated })
           : await codingSessions.start({
               goal,
               userId: configuredUserId,
               conversationId,
+              idempotencyKey,
               messages: [{ role: "user", content: message }],
+              onRunCreated,
             });
 
-        return Response.json(run, { status: 201 });
+        return Response.json(run, {
+          status: created ? 201 : 200,
+          headers: created ? undefined : { "Idempotent-Replay": "true" },
+        });
       } catch (error) {
         const message = "Agent run failed";
         return Response.json({ error: message }, { status: 500 });

@@ -28,7 +28,7 @@ async function call(path: string, init: RequestInit = {}) {
   } catch {
     body = text;
   }
-  return { status: response.status, body };
+  return { status: response.status, body, headers: response.headers };
 }
 
 async function waitForHealth(timeoutMs = 20_000) {
@@ -163,6 +163,34 @@ describe("reading runs back", () => {
     const hidden = await call(`/v1/agent-runs/users/not-${USER}/${created.body.id}/events`);
     expect(hidden.status).toBe(404);
   });
+
+  test("deduplicates retried agent-run requests by an owner-scoped idempotency key", async () => {
+    const headers = { "idempotency-key": "retry-safe-run-0001" };
+    const first = await call("/v1/agent-runs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ goal: "Do this exactly once" }),
+    });
+    const replay = await call("/v1/agent-runs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ goal: "This replay must not run" }),
+    });
+    expect(first.status).toBe(201);
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get("idempotent-replay")).toBe("true");
+    expect(replay.body.id).toBe(first.body.id);
+    expect(replay.body.goal).toBe("Do this exactly once");
+  });
+
+  test("rejects an unsafe idempotency key", async () => {
+    const response = await call("/v1/agent-runs", {
+      method: "POST",
+      headers: { "idempotency-key": "short" },
+      body: JSON.stringify({ goal: "Do not create this" }),
+    });
+    expect(response.status).toBe(400);
+  });
 });
 
 describe("InMemoryAgentRunStore.list", () => {
@@ -199,6 +227,18 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(events.map((event) => event.type)).toEqual(["created", "waiting_approval", "cancelled"]);
     expect(events.map((event) => event.status)).toEqual(["running", "waiting_approval", "cancelled"]);
     expect(await store.listEvents(active.id, "owner-b")).toEqual([]);
+  });
+
+  test("creates an idempotency key only once per owner", async () => {
+    const store = new InMemoryAgentRunStore();
+    const first = await store.createIdempotent({ ...run({ userId: "owner-a" }), idempotencyKey: "same-request" });
+    const replay = await store.createIdempotent({ ...run({ userId: "owner-a", goal: "ignored replay" }), idempotencyKey: "same-request" });
+    const otherOwner = await store.createIdempotent({ ...run({ userId: "owner-b" }), idempotencyKey: "same-request" });
+
+    expect(first.created).toBe(true);
+    expect(replay.created).toBe(false);
+    expect(replay.run.id).toBe(first.run.id);
+    expect(otherOwner.run.id).not.toBe(first.run.id);
   });
 
   test("clamps the limit", async () => {

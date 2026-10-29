@@ -92,6 +92,6 @@ describe("migrations", () => {
 
   test("the runner discovers all migrations", async () => {
     const total = SERVICES.reduce((count, service) => count + migrationsFor(service).length, 0);
-    expect(total).toBe(24);
+    expect(total).toBe(25);
   });
 });

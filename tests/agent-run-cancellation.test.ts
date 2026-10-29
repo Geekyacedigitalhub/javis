@@ -13,6 +13,15 @@ class IgnoringAbortProvider implements ProviderClient {
   }
 }
 
+class CountingProvider implements ProviderClient {
+  calls = 0;
+
+  async generate(): Promise<ProviderResponse> {
+    this.calls += 1;
+    return { message: "One durable result." };
+  }
+}
+
 class BlockingProvider implements ProviderClient {
   signals: AbortSignal[] = [];
 
@@ -43,6 +52,25 @@ async function waitForRun(userId: string) {
 }
 
 describe("agent-run cancellation", () => {
+  test("does not start the provider twice when an idempotent run creation is replayed", async () => {
+    const provider = new CountingProvider();
+    const manager = new CodingSessionManager(provider);
+    const userId = `idempotent-${crypto.randomUUID()}`;
+    const input = {
+      userId,
+      goal: "Run this once",
+      messages: [{ role: "user" as const, content: "run once" }],
+      idempotencyKey: "provider-once-0001",
+    };
+
+    const first = await manager.start(input);
+    const replay = await manager.start({ ...input, goal: "Ignored retry payload" });
+
+    expect(provider.calls).toBe(1);
+    expect(replay.id).toBe(first.id);
+    expect(replay.goal).toBe("Run this once");
+  });
+
   test("cancels an in-flight coding session and preserves cancellation over late writes", async () => {
     const provider = new BlockingProvider();
     const manager = new CodingSessionManager(provider);

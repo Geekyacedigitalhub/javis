@@ -2,6 +2,7 @@ import {
   FROSH_AGENT_RUN_TIMEOUT_ERROR,
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
   type FroshAgentRun,
+  type FroshAgentRunCreateInput,
   type FroshAgentRunEvent,
   type FroshAgentRunStore,
 } from "../../../packages/types/src/agent-run";
@@ -10,6 +11,11 @@ import type { FroshToolCall } from "../../../packages/types/src/javis";
 export class InMemoryAgentRunStore implements FroshAgentRunStore {
   private readonly runs = new Map<string, FroshAgentRun>();
   private readonly events = new Map<string, FroshAgentRunEvent[]>();
+  private readonly idempotencyKeys = new Map<string, string>();
+
+  private idempotencyId(userId: string, key: string) {
+    return `${userId}\u0000${key}`;
+  }
 
   private eventFor(run: FroshAgentRun, previous?: FroshAgentRun): FroshAgentRunEvent | null {
     if (previous && previous.status === run.status) return null;
@@ -32,11 +38,34 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     if (event) this.events.set(run.id, [...(this.events.get(run.id) ?? []), event]);
   }
 
-  async create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string }) {
+  private createNew(input: FroshAgentRunCreateInput) {
     const now = new Date().toISOString();
     const run: FroshAgentRun = { ...input, userId: input.userId?.trim() || "default-user", id: crypto.randomUUID(), createdAt: now, updatedAt: now };
     this.save(run);
     return run;
+  }
+
+  async create(input: FroshAgentRunCreateInput) {
+    return this.createNew(input);
+  }
+
+  async createIdempotent(input: FroshAgentRunCreateInput & { idempotencyKey: string }) {
+    const userId = input.userId?.trim() || "default-user";
+    const key = this.idempotencyId(userId, input.idempotencyKey);
+    const existingId = this.idempotencyKeys.get(key);
+    if (existingId) {
+      const run = this.runs.get(existingId);
+      if (run) return { run, created: false };
+    }
+    const { idempotencyKey: _idempotencyKey, ...runInput } = input;
+    const run = this.createNew({ ...runInput, userId });
+    this.idempotencyKeys.set(key, run.id);
+    return { run, created: true };
+  }
+
+  async findByIdempotencyKey(userId: string, idempotencyKey: string) {
+    const id = this.idempotencyKeys.get(this.idempotencyId(userId, idempotencyKey));
+    return id ? this.runs.get(id) ?? null : null;
   }
 
   async get(id: string) {

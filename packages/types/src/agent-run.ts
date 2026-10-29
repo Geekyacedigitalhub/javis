@@ -50,6 +50,16 @@ export interface FroshAgentRunFilter {
   limit?: number;
 }
 
+export type FroshAgentRunCreateInput = Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & {
+  userId?: string;
+};
+
+export interface FroshIdempotentAgentRunCreation {
+  run: FroshAgentRun;
+  /** False means a prior request with this owner/key already owns execution. */
+  created: boolean;
+}
+
 /** Append-only audit record. It intentionally stores status transitions rather
  * than provider prompts or secrets, so the console can explain what happened
  * without exposing hidden model state. */
@@ -67,7 +77,11 @@ export interface FroshAgentRunStore {
   // userId is optional at this boundary for legacy/internal callers; stores
   // assign the configured default before persistence. New API work always
   // supplies an authenticated owner explicitly.
-  create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string }): Promise<FroshAgentRun>;
+  create(input: FroshAgentRunCreateInput): Promise<FroshAgentRun>;
+  /** Atomically creates once per owner/key, so a retried POST cannot start a
+   * second provider or tool execution. */
+  createIdempotent(input: FroshAgentRunCreateInput & { idempotencyKey: string }): Promise<FroshIdempotentAgentRunCreation>;
+  findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<FroshAgentRun | null>;
   /** Most recent runs first. Never cached: a run's evidence changes as it works. */
   list(filter?: FroshAgentRunFilter): Promise<FroshAgentRun[]>;
   get(id: string): Promise<FroshAgentRun | null>;

@@ -174,20 +174,28 @@ export class CodingLoop {
     goal: string;
     userId?: string;
     conversationId?: string;
-    onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>) => Promise<void>;
+    idempotencyKey?: string;
+    onRunCreated?: (run: Awaited<ReturnType<typeof agentRunStore.create>>, created: boolean) => Promise<void>;
   }) {
     const goal = input.goal.trim();
     if (!goal) throw new Error("A coding goal is required to start the loop");
 
-    const run = await agentRunStore.create({
+    const runInput = {
       userId: input.userId,
       conversationId: input.conversationId,
       goal,
-      status: "running",
+      status: "running" as const,
       toolCalls: [],
-    });
+    };
+    const creation = input.idempotencyKey
+      ? await agentRunStore.createIdempotent({ ...runInput, idempotencyKey: input.idempotencyKey })
+      : { run: await agentRunStore.create(runInput), created: true };
+    const run = creation.run;
 
-    if (input.onRunCreated) await input.onRunCreated(run);
+    if (input.onRunCreated) await input.onRunCreated(run, creation.created);
+    // A replay owns no execution. Returning the durable run also preserves a
+    // waiting approval rather than creating a duplicate approval request.
+    if (!creation.created) return run;
     return this.drive(run.id);
   }
 
