@@ -1,6 +1,7 @@
 import {
   FROSH_AGENT_RUN_TIMEOUT_ERROR,
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
+  FroshAgentRunConcurrencyError,
   type FroshAgentRun,
   type FroshAgentRunCreateInput,
   type FroshAgentRunEvent,
@@ -12,6 +13,8 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
   private readonly runs = new Map<string, FroshAgentRun>();
   private readonly events = new Map<string, FroshAgentRunEvent[]>();
   private readonly idempotencyKeys = new Map<string, string>();
+
+  constructor(private readonly maxActiveRuns = 2) {}
 
   private idempotencyId(userId: string, key: string) {
     return `${userId}\u0000${key}`;
@@ -38,9 +41,18 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     if (event) this.events.set(run.id, [...(this.events.get(run.id) ?? []), event]);
   }
 
+  private ensureCapacity(userId: string) {
+    const active = [...this.runs.values()].filter(
+      (run) => run.userId === userId && (run.status === "running" || run.status === "waiting_approval"),
+    ).length;
+    if (active >= this.maxActiveRuns) throw new FroshAgentRunConcurrencyError(this.maxActiveRuns);
+  }
+
   private createNew(input: FroshAgentRunCreateInput) {
+    const userId = input.userId?.trim() || "default-user";
+    if (input.status === "running" || input.status === "waiting_approval") this.ensureCapacity(userId);
     const now = new Date().toISOString();
-    const run: FroshAgentRun = { ...input, userId: input.userId?.trim() || "default-user", id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+    const run: FroshAgentRun = { ...input, userId, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
     this.save(run);
     return run;
   }

@@ -445,7 +445,11 @@ completed or failed run. On startup, FROSH marks any interrupted `running` run
 as failed rather than replaying unknown provider or tool side effects; approval
 waits remain resumable. Each active model phase also has a bounded execution
 budget (`FROSH_AGENT_RUN_TIMEOUT_MS`, ten minutes by default); expiry aborts the
-provider call and records a failure rather than replaying work.
+provider call and records a failure rather than replaying work. FROSH also
+limits each account to two active or approval-waiting runs by default
+(`FROSH_AGENT_MAX_ACTIVE_RUNS`, bounded to 1–5). A full queue receives an honest
+`429` response rather than starting unbounded parallel provider or tool work;
+cancelling or completing a run immediately frees its slot.
 
 ```
 GET /v1/agent-runs/users/:userId?status=&limit=

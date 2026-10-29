@@ -2,6 +2,7 @@ import postgres from "postgres";
 import {
   FROSH_AGENT_RUN_TIMEOUT_ERROR,
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
+  FroshAgentRunConcurrencyError,
   type FroshAgentRun,
   type FroshAgentRunCreateInput,
   type FroshAgentRunEvent,
@@ -17,7 +18,7 @@ const COLUMNS =
 /** Durable agent-run history. All mutations keep cancellation terminal, so a
  * slow provider cannot turn a user-stopped run into a completed/failed run. */
 export class PostgresAgentRunStore implements FroshAgentRunStore {
-  constructor(private readonly sql: Sql) {}
+  constructor(private readonly sql: Sql, private readonly maxActiveRuns = 2) {}
 
   private query<T extends object>(text: string, values: unknown[] = []) {
     return this.sql.unsafe<T[]>(text, values as never[]);
@@ -39,28 +40,44 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     ];
   }
 
-  async create(input: CreateInput) {
+  /** PostgreSQL advisory locks serialize capacity checks per owner without
+   * holding a connection for the full model request. The lock lasts only for
+   * this INSERT statement's transaction, so two API instances cannot both see
+   * the same final slot and start excess work. */
+  private async createWithCapacity(input: CreateInput, idempotencyKey?: string) {
+    const values = [...this.createValues(input, idempotencyKey), this.maxActiveRuns];
+    const conflict = idempotencyKey
+      ? "ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING"
+      : "";
     const rows = await this.query<FroshAgentRun>(
-      `INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11) RETURNING ${COLUMNS}`,
-      this.createValues(input),
+      `WITH owner_lock AS MATERIALIZED (
+         SELECT 1 AS guard FROM (SELECT pg_advisory_xact_lock(hashtext($2::text))) AS acquired
+       )
+       INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
+       SELECT $1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11
+       FROM owner_lock
+       WHERE $5::text NOT IN ('running', 'waiting_approval')
+          OR (SELECT COUNT(*) FROM frosh_agent_runs WHERE user_id=$2 AND status IN ('running', 'waiting_approval') AND owner_lock.guard=1) < $12
+       ${conflict}
+       RETURNING ${COLUMNS}`,
+      values,
     );
-    return rows[0];
+    return rows[0] ?? null;
+  }
+
+  async create(input: CreateInput) {
+    const run = await this.createWithCapacity(input);
+    if (!run) throw new FroshAgentRunConcurrencyError(this.maxActiveRuns);
+    return run;
   }
 
   async createIdempotent(input: CreateInput & { idempotencyKey: string }) {
-    const rows = await this.query<FroshAgentRun>(
-      `INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
-       VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11)
-       ON CONFLICT (user_id, idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING
-       RETURNING ${COLUMNS}`,
-      this.createValues(input, input.idempotencyKey),
-    );
-    if (rows[0]) return { run: rows[0], created: true };
+    const created = await this.createWithCapacity(input, input.idempotencyKey);
+    if (created) return { run: created, created: true };
     const userId = input.userId?.trim() || "default-user";
     const run = await this.findByIdempotencyKey(userId, input.idempotencyKey);
-    if (!run) throw new Error("Idempotent agent-run creation did not return a run");
-    return { run, created: false };
+    if (run) return { run, created: false };
+    throw new FroshAgentRunConcurrencyError(this.maxActiveRuns);
   }
 
   async findByIdempotencyKey(userId: string, idempotencyKey: string) {

@@ -37,7 +37,7 @@ FROSH is a personal AI operating system, not only a chatbot. The long-term produ
 - background jobs
 - task cancellation — **done for agent runs** (durable cancelled state, provider abort propagation, and terminal-write protection)
 - retry/recovery
-- concurrency control
+- concurrency control — **done for agent runs** (owner-scoped atomic active-run bound with honest `429` backpressure)
 - idempotency — **done for agent-run creation** (`Idempotency-Key` returns the original durable run and never starts a duplicate execution)
 - execution timeouts — **done for agent model phases** (bounded provider abort and durable non-replay failure)
 - event history — **done for agent runs** (durable append-only status audit records, API, and console timeline)

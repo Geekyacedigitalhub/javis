@@ -5,6 +5,16 @@ export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "fai
 export const FROSH_AGENT_RUN_TIMEOUT_ERROR = "Agent run execution timed out";
 export const FROSH_AGENT_RUN_TIMEOUT_RESULT =
   "FROSH stopped this run because its execution time limit expired. It did not replay any provider or tool action; review the recorded evidence before starting another run.";
+export const FROSH_AGENT_RUN_CONCURRENCY_ERROR = "FROSH already has the maximum number of active runs for this account.";
+
+/** Raised before model/tool execution when the owner already has its bounded
+ * number of active or approval-waiting runs. */
+export class FroshAgentRunConcurrencyError extends Error {
+  constructor(public readonly limit: number) {
+    super(FROSH_AGENT_RUN_CONCURRENCY_ERROR);
+    this.name = "FroshAgentRunConcurrencyError";
+  }
+}
 
 /**
  * A provider continuation is intentionally provider-specific. It contains only
