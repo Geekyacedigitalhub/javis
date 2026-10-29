@@ -105,7 +105,10 @@ The Android app (`apps/mobile`) typechecks with `bun run typecheck:mobile`. It
 uses the same authenticated conversation endpoints as the web Control Center:
 users can start a new chat, reopen a saved chat, continue it with the
 server's durable context, and see response deltas as they arrive rather than
-treating every mobile prompt as isolated or waiting for a completed reply.
+treating every mobile prompt as isolated or waiting for a completed reply. Both
+clients expose a **Stop response** control: it aborts the provider request,
+removes incomplete live text, and does not advance the local conversation as a
+completed assistant turn unless the stream finishes successfully.
 Its seven native modules (`frosh-apps`, `frosh-calls`, `frosh-contacts`, `frosh-media`,
 `frosh-messaging`, `frosh-notifications`, `frosh-speech`) are Kotlin sources.
 

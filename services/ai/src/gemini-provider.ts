@@ -3,6 +3,8 @@ import type { FroshProviderContinuation } from "../../../packages/types/src/agen
 import { executeToolCall } from "../../tools/src";
 import {
   buildModelInput,
+  FroshProviderAbortError,
+  throwIfProviderAborted,
   type FroshStreamEvent,
   type MissionEvaluation,
   type ProviderGenerateOptions,
@@ -209,6 +211,40 @@ async function executeTimedToolCall(call: FroshToolCall, runId?: string) {
   return { ...result, durationMs: Math.max(0, Date.now() - startedAt) };
 }
 
+function throwIfAborted(signal?: AbortSignal) {
+  throwIfProviderAborted(signal);
+}
+
+/** Keep FROSH's provider timeout independent of the client cancellation
+ * signal, while still cancelling the actual network request in either case. */
+function abortableRequest(signal?: AbortSignal) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort();
+  if (signal?.aborted) abortFromCaller();
+  else signal?.addEventListener("abort", abortFromCaller, { once: true });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, 30_000);
+  return {
+    signal: controller.signal,
+    wasTimedOut: () => timedOut,
+    dispose: () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", abortFromCaller);
+    },
+  };
+}
+
+function providerAbortError(error: unknown, callerSignal: AbortSignal | undefined, timedOut: boolean): never {
+  if (callerSignal?.aborted || error instanceof FroshProviderAbortError) throw new FroshProviderAbortError();
+  if (timedOut || (error instanceof Error && error.name === "AbortError")) {
+    throw new Error("Gemini did not respond in time. Please retry shortly.");
+  }
+  throw error;
+}
+
 /**
  * A first-class Gemini adapter. It uses Gemini's REST API directly so FROSH
  * does not add another heavyweight SDK, and it preserves the same permissioned
@@ -226,17 +262,18 @@ export class GeminiProvider {
     this.fetcher = options.fetcher ?? fetch;
   }
 
-  private async generateContent(body: Record<string, unknown>): Promise<GeminiContent> {
+  private async generateContent(body: Record<string, unknown>, callerSignal?: AbortSignal): Promise<GeminiContent> {
+    throwIfAborted(callerSignal);
     const endpoint = `${GEMINI_API_ORIGIN}${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
+    const request = abortableRequest(callerSignal);
     try {
       const response = await this.fetcher(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "application/json" },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: request.signal,
       });
+      throwIfAborted(callerSignal);
       const text = await response.text();
       let payload: unknown;
       try {
@@ -251,26 +288,24 @@ export class GeminiProvider {
       if (!content) throw new Error("Gemini returned no usable candidate.");
       return content;
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error("Gemini did not respond in time. Please retry shortly.");
-      }
-      throw error;
+      providerAbortError(error, callerSignal, request.wasTimedOut());
     } finally {
-      clearTimeout(timer);
+      request.dispose();
     }
   }
 
-  private async *streamContent(body: Record<string, unknown>): AsyncGenerator<unknown> {
+  private async *streamContent(body: Record<string, unknown>, callerSignal?: AbortSignal): AsyncGenerator<unknown> {
+    throwIfAborted(callerSignal);
     const endpoint = `${GEMINI_API_ORIGIN}${encodeURIComponent(this.model)}:streamGenerateContent?alt=sse&key=${encodeURIComponent(this.apiKey)}`;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 30_000);
+    const request = abortableRequest(callerSignal);
     try {
       const response = await this.fetcher(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json", accept: "text/event-stream" },
         body: JSON.stringify(body),
-        signal: controller.signal,
+        signal: request.signal,
       });
+      throwIfAborted(callerSignal);
       if (!response.ok) {
         const text = await response.text();
         let payload: unknown = {};
@@ -302,7 +337,9 @@ export class GeminiProvider {
 
       try {
         while (true) {
+          throwIfAborted(callerSignal);
           const { done, value } = await reader.read();
+          throwIfAborted(callerSignal);
           if (done) break;
           receivedBytes += value.byteLength;
           if (receivedBytes > MAX_STREAM_RESPONSE_BYTES) {
@@ -317,12 +354,9 @@ export class GeminiProvider {
         reader.releaseLock();
       }
     } catch (error) {
-      if (error instanceof Error && error.name === "AbortError") {
-        throw new Error("Gemini did not respond in time. Please retry shortly.");
-      }
-      throw error;
+      providerAbortError(error, callerSignal, request.wasTimedOut());
     } finally {
-      clearTimeout(timer);
+      request.dispose();
     }
   }
 
@@ -373,7 +407,9 @@ export class GeminiProvider {
     const executedCalls: FroshToolCall[] = [];
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
       const answer: GeminiContent = { role: "model", parts: [] };
-      for await (const payload of this.streamContent(this.modelRequest(input, contents))) {
+      throwIfAborted(options.signal);
+      for await (const payload of this.streamContent(this.modelRequest(input, contents), options.signal)) {
+        throwIfAborted(options.signal);
         const content = candidateContent(payload);
         if (!content) continue;
         for (const part of content.parts) {
@@ -399,8 +435,10 @@ export class GeminiProvider {
           arguments: call.arguments,
           status: "planned",
         };
+        throwIfAborted(options.signal);
         yield { type: "tool", name: planned.name, status: "planned", toolCallId: planned.id };
         const result = await executeTimedToolCall(planned, options.runId);
+        throwIfAborted(options.signal);
         executedCalls.push(result);
         yield {
           type: "tool",
@@ -423,6 +461,7 @@ export class GeminiProvider {
       }
     }
 
+    throwIfAborted(options.signal);
     yield {
       type: "done",
       message: "FROSH reached the maximum tool-execution rounds for this request.",
@@ -463,7 +502,9 @@ export class GeminiProvider {
     const executedCalls: FroshToolCall[] = [];
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const answer = await this.generateContent(this.modelRequest(input, contents));
+      throwIfAborted(options.signal);
+      const answer = await this.generateContent(this.modelRequest(input, contents), options.signal);
+      throwIfAborted(options.signal);
       contents.push(answer);
       const calls = functionCalls(answer);
       if (!calls.length) {
@@ -477,7 +518,9 @@ export class GeminiProvider {
           arguments: call.arguments,
           status: "planned",
         };
+        throwIfAborted(options.signal);
         const result = await executeTimedToolCall(planned, options.runId);
+        throwIfAborted(options.signal);
         executedCalls.push(result);
 
         const resultRecord = asRecord(result.result);
@@ -500,6 +543,7 @@ export class GeminiProvider {
       }
     }
 
+    throwIfAborted(options.signal);
     return {
       message: "FROSH reached the maximum tool-execution rounds for this request.",
       toolCalls: executedCalls,

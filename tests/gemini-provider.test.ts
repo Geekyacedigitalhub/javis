@@ -28,6 +28,45 @@ test("Gemini provider produces a real model response through the provider bounda
   expect(requests[0].body.tools).toBeDefined();
 });
 
+test("Gemini provider rejects an already-cancelled request before it reaches Gemini", async () => {
+  const controller = new AbortController();
+  controller.abort();
+  let called = false;
+  const provider = new GeminiProvider({
+    apiKey: "test-key",
+    fetcher: async () => {
+      called = true;
+      return new Response("{}", { status: 500 });
+    },
+  });
+
+  await expect(provider.generate(buildModelInput(messages), { signal: controller.signal })).rejects.toThrow("response was cancelled");
+  expect(called).toBe(false);
+});
+
+test("Gemini cancels its active streaming request when the caller stops FROSH", async () => {
+  const controller = new AbortController();
+  let providerSignal: AbortSignal | undefined;
+  const provider = new GeminiProvider({
+    apiKey: "test-key",
+    fetcher: async (_url, init) => new Promise<Response>((_resolve, reject) => {
+      providerSignal = init?.signal ?? undefined;
+      providerSignal?.addEventListener("abort", () => {
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      }, { once: true });
+    }),
+  });
+
+  const iterator = provider.stream(buildModelInput(messages), { signal: controller.signal });
+  const pending = iterator.next();
+  controller.abort();
+
+  await expect(pending).rejects.toThrow("response was cancelled");
+  expect(providerSignal?.aborted).toBe(true);
+});
+
 test("Gemini provider relays real SSE text chunks instead of waiting for a completed response", async () => {
   const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
   const provider = new GeminiProvider({

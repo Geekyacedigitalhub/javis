@@ -23,9 +23,24 @@ export interface ProviderContinuationInput {
   toolOutputs?: Array<{ callId: string; output: string }>;
 }
 
+export class FroshProviderAbortError extends Error {
+  constructor() {
+    super("FROSH response was cancelled.");
+    this.name = "FroshProviderAbortError";
+  }
+}
+
+export function throwIfProviderAborted(signal?: AbortSignal) {
+  if (signal?.aborted) throw new FroshProviderAbortError();
+}
+
 export interface ProviderGenerateOptions {
   runId?: string;
   continuation?: ProviderContinuationInput;
+  /** Caller-owned request lifetime. Providers must stop before emitting a
+   * completed response when it is aborted, so callers never persist a turn the
+   * user has explicitly cancelled. */
+  signal?: AbortSignal;
 }
 
 export interface ProviderResponse {

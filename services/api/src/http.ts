@@ -1,7 +1,7 @@
 import { postChat } from "./routes";
 import { getFroshConversation, listFroshConversations, streamFroshRequest } from "./server";
 import { approvalStore, resolveApproval } from "../../tools/src";
-import { CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, isMissionEvaluatingProvider, isVisionProvider } from "../../ai/src";
+import { CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, FroshProviderAbortError, isMissionEvaluatingProvider, isVisionProvider } from "../../ai/src";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
@@ -443,18 +443,25 @@ const server = Bun.serve<RealtimeSocketData>({
         const stream = new ReadableStream({
           async start(controller) {
             const send = (event: unknown) => {
+              if (request.signal.aborted) return;
               controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             };
 
             try {
-              for await (const event of streamFroshRequest({ message, conversationId, userId })) {
+              for await (const event of streamFroshRequest({ message, conversationId, userId, signal: request.signal })) {
+                if (request.signal.aborted) return;
                 send(event);
               }
             } catch (error) {
-              logOperationalError("FROSH chat stream failed", error);
-              send({ type: "error", message: "Streaming request failed" });
+              // An explicit client stop is not an operational server error, and
+              // must not become a final assistant turn or a misleading error
+              // frame after the client has already disconnected.
+              if (!request.signal.aborted && !(error instanceof FroshProviderAbortError)) {
+                logOperationalError("FROSH chat stream failed", error);
+                try { send({ type: "error", message: "Streaming request failed" }); } catch { /* response was closed */ }
+              }
             } finally {
-              controller.close();
+              try { controller.close(); } catch { /* response was closed */ }
             }
           },
         });

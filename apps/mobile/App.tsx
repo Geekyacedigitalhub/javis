@@ -58,6 +58,7 @@ export default function App() {
   const [conversationError, setConversationError] = useState("");
   const cameraRef = useRef<CameraView>(null);
   const busyRef = useRef(false);
+  const chatAbortRef = useRef<AbortController | null>(null);
 
   function refreshAssistantStatus() {
     return getAssistantStatus().then((result) => setAssistantStatus(result.assistant)).catch(() => setAssistantStatus(null));
@@ -187,6 +188,8 @@ export default function App() {
     setBusy(true);
     const localId = `local-${Date.now()}`;
     const assistantId = `${localId}-assistant`;
+    const abortController = new AbortController();
+    chatAbortRef.current = abortController;
     let assistantText = "";
     let hasAssistantTurn = false;
     let completed = false;
@@ -228,7 +231,7 @@ export default function App() {
           setConversationMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: finalMessage } : item));
         }
         assistantText = finalMessage;
-      });
+      }, abortController.signal);
       if (!completed || !completedConversationId) throw new Error("FROSH live response ended before completion.");
       // The stream only returns after the server has persisted the final turn.
       // Do not advance durable conversation state for an interrupted stream.
@@ -241,11 +244,21 @@ export default function App() {
       // Keep the compose text for retry, but do not display an interrupted
       // delta as a completed assistant turn.
       setConversationMessages((current) => current.filter((item) => item.id !== assistantId));
-      setReply(error instanceof Error ? error.message : "FROSH request failed.");
+      setReply(abortController.signal.aborted
+        ? "FROSH response stopped. Partial text was not kept as a completed turn; refresh this chat if you stopped it at the end of a response."
+        : error instanceof Error ? error.message : "FROSH request failed.");
     } finally {
+      if (chatAbortRef.current === abortController) chatAbortRef.current = null;
       busyRef.current = false;
       setBusy(false);
     }
+  }
+
+  function stopChatResponse() {
+    const active = chatAbortRef.current;
+    if (!active || active.signal.aborted) return;
+    active.abort();
+    setReply("Stopping FROSH response…");
   }
 
   async function ask() {
@@ -511,6 +524,11 @@ export default function App() {
             <Pressable style={styles.primary} onPress={ask} disabled={busy || listening}>
               {busy ? <ActivityIndicator color="#fff" /> : <Text style={styles.primaryText}>ASK</Text>}
             </Pressable>
+            {busy && chatAbortRef.current ? (
+              <Pressable style={styles.secondary} onPress={stopChatResponse}>
+                <Text style={styles.secondaryText}>STOP RESPONSE</Text>
+              </Pressable>
+            ) : null}
             <Pressable style={styles.secondary} onPress={listening ? () => stopVoiceInput() : startVoiceInput} disabled={busy}>
               <Text style={styles.secondaryText}>{listening ? "STOP VOICE" : "VOICE"}</Text>
             </Pressable>
