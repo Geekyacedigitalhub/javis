@@ -2,6 +2,10 @@ import type { FroshToolCall } from "./javis";
 
 export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 
+export const FROSH_AGENT_RUN_TIMEOUT_ERROR = "Agent run execution timed out";
+export const FROSH_AGENT_RUN_TIMEOUT_RESULT =
+  "FROSH stopped this run because its execution time limit expired. It did not replay any provider or tool action; review the recorded evidence before starting another run.";
+
 /**
  * A provider continuation is intentionally provider-specific. It contains only
  * the minimal state needed to resume a model after an approval; credentials and
@@ -56,6 +60,9 @@ export interface FroshAgentRunStore {
   get(id: string): Promise<FroshAgentRun | null>;
   /** Atomically marks only a live/waiting run cancelled. */
   cancel(id: string, userId?: string): Promise<FroshAgentRun | null>;
+  /** Atomically fails only work that is still actively executing after its
+   * execution budget expires. */
+  timeout(id: string): Promise<FroshAgentRun | null>;
   /** Reconciles work left in progress by a process restart without replaying
    * unknown tool/provider side effects. Approval-waiting runs remain resumable. */
   recoverInterrupted(userId?: string): Promise<number>;

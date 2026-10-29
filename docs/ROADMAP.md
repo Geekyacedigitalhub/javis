@@ -39,7 +39,7 @@ FROSH is a personal AI operating system, not only a chatbot. The long-term produ
 - retry/recovery
 - concurrency control
 - idempotency
-- execution timeouts
+- execution timeouts — **done for agent model phases** (bounded provider abort and durable non-replay failure)
 - event history
 
 ## Phase 3 — Permission & Safety Layer

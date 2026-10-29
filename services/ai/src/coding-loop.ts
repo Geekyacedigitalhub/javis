@@ -2,7 +2,8 @@ import type { FroshToolCall } from "../../../packages/types/src/javis";
 import type { FroshAgentRun } from "../../../packages/types/src/agent-run";
 import { approvalStore, executeToolCall, listTools, resolveApproval } from "../../tools/src";
 import { FroshProviderAbortError, type ProviderClient } from "./provider";
-import { registerAgentRunAbortController } from "./agent-run-cancellation";
+import { abortActiveAgentRun, registerAgentRunAbortController } from "./agent-run-cancellation";
+import { agentRunTimeoutMs, isAgentRunTimedOut } from "./agent-run-timeout";
 import { agentRunStore } from "./coding-session";
 
 /**
@@ -142,15 +143,21 @@ const CODING_LOOP_SYSTEM = [
 export class CodingLoop {
   constructor(
     private readonly model: ProviderClient,
-    private readonly options: { maxSteps?: number; maxCorrections?: number } = {},
+    private readonly options: { maxSteps?: number; maxCorrections?: number; runTimeoutMs?: number } = {},
   ) {}
 
   private async generateForRun(runId: string, input: Parameters<ProviderClient["generate"]>[0]) {
     const controller = new AbortController();
     const unregister = registerAgentRunAbortController(runId, controller);
+    const timeout = setTimeout(() => {
+      void agentRunStore.timeout(runId)
+        .then((timedOut) => { if (timedOut) abortActiveAgentRun(runId); })
+        .catch(() => undefined);
+    }, agentRunTimeoutMs(this.options.runTimeoutMs));
     try {
       return await this.model.generate(input, { runId, signal: controller.signal });
     } finally {
+      clearTimeout(timeout);
       unregister();
     }
   }
@@ -299,7 +306,7 @@ export class CodingLoop {
         });
       } catch (error) {
         const current = await agentRunStore.get(runId);
-        if (error instanceof FroshProviderAbortError || current?.status === "cancelled") return current ?? run;
+        if (error instanceof FroshProviderAbortError || current?.status === "cancelled" || isAgentRunTimedOut(current)) return current ?? run;
         return agentRunStore.update(runId, {
           status: "failed",
           error: error instanceof Error ? error.message : "Provider failed",

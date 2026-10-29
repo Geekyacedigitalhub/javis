@@ -207,6 +207,18 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(await store.cancel(active.id, "owner-a")).toBeNull();
   });
 
+  test("timeout is atomic and terminal", async () => {
+    const store = new InMemoryAgentRunStore();
+    const active = await store.create(run({ status: "running" }));
+
+    const timedOut = await store.timeout(active.id);
+    expect(timedOut?.status).toBe("failed");
+    expect(timedOut?.error).toBe("Agent run execution timed out");
+    expect(timedOut?.result).toContain("did not replay");
+    expect((await store.update(active.id, { status: "completed", result: "late result" })).status).toBe("failed");
+    expect(await store.timeout(active.id)).toBeNull();
+  });
+
   test("recovers interrupted running work without replaying it, but preserves approval waits", async () => {
     const store = new InMemoryAgentRunStore();
     const interrupted = await store.create(run({ status: "running", userId: "owner-a" }));

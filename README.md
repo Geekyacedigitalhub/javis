@@ -441,7 +441,9 @@ run** control. Stopping first writes a terminal `cancelled` state, then aborts
 any active model request; late provider output cannot turn it back into a
 completed or failed run. On startup, FROSH marks any interrupted `running` run
 as failed rather than replaying unknown provider or tool side effects; approval
-waits remain resumable.
+waits remain resumable. Each active model phase also has a bounded execution
+budget (`FROSH_AGENT_RUN_TIMEOUT_MS`, ten minutes by default); expiry aborts the
+provider call and records a failure rather than replaying work.
 
 ```
 GET /v1/agent-runs/users/:userId?status=&limit=

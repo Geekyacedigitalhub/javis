@@ -1,4 +1,9 @@
-import type { FroshAgentRun, FroshAgentRunStore } from "../../../packages/types/src/agent-run";
+import {
+  FROSH_AGENT_RUN_TIMEOUT_ERROR,
+  FROSH_AGENT_RUN_TIMEOUT_RESULT,
+  type FroshAgentRun,
+  type FroshAgentRunStore,
+} from "../../../packages/types/src/agent-run";
 import type { FroshToolCall } from "../../../packages/types/src/javis";
 
 export class InMemoryAgentRunStore implements FroshAgentRunStore {
@@ -26,6 +31,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
   async touch(id: string) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");
+    if (current.status !== "running" && current.status !== "waiting_approval") return current;
     const updated = { ...current, updatedAt: new Date().toISOString() };
     this.runs.set(id, updated);
     return updated;
@@ -92,6 +98,22 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return updated;
   }
 
+  async timeout(id: string) {
+    const current = this.runs.get(id);
+    if (!current || current.status !== "running") return null;
+    const updated: FroshAgentRun = {
+      ...current,
+      status: "failed",
+      pendingApprovalId: undefined,
+      providerContinuation: undefined,
+      result: FROSH_AGENT_RUN_TIMEOUT_RESULT,
+      error: FROSH_AGENT_RUN_TIMEOUT_ERROR,
+      updatedAt: new Date().toISOString(),
+    };
+    this.runs.set(id, updated);
+    return updated;
+  }
+
   async recoverInterrupted(userId?: string) {
     let recovered = 0;
     for (const [id, current] of this.runs) {
@@ -113,9 +135,9 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt" | "userId">>) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");
-    // A cancellation is terminal. Late provider/tool writes must not turn a
-    // user-stopped run into a completed or failed one.
-    if (current.status === "cancelled") return current;
+    // Terminal state is immutable. Late provider/tool writes must not turn a
+    // cancelled, timed-out, completed, or failed run into another outcome.
+    if (current.status !== "running" && current.status !== "waiting_approval") return current;
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
     this.runs.set(id, updated);
     return updated;

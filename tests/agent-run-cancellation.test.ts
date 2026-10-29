@@ -2,8 +2,16 @@ import { describe, expect, test } from "bun:test";
 import type { ProviderClient, ProviderResponse } from "../services/ai/src/provider";
 import { FroshProviderAbortError } from "../services/ai/src/provider";
 import { abortActiveAgentRun } from "../services/ai/src/agent-run-cancellation";
+import { AGENT_RUN_TIMEOUT_ERROR } from "../services/ai/src/agent-run-timeout";
 import { CodingLoop } from "../services/ai/src/coding-loop";
 import { agentRunStore, CodingSessionManager } from "../services/ai/src/coding-session";
+
+class IgnoringAbortProvider implements ProviderClient {
+  async generate(): Promise<ProviderResponse> {
+    await Bun.sleep(35);
+    return { message: "This arrived after the execution budget." };
+  }
+}
 
 class BlockingProvider implements ProviderClient {
   signals: AbortSignal[] = [];
@@ -65,6 +73,51 @@ describe("agent-run cancellation", () => {
 
     const late = await agentRunStore.update(createdId, { status: "completed", result: "provider eventually replied" });
     expect(late.status).toBe("cancelled");
+  });
+
+
+  test("times out an in-flight coding session and records an honest terminal failure", async () => {
+    const provider = new BlockingProvider();
+    const manager = new CodingSessionManager(provider, { runTimeoutMs: 20 });
+    const userId = `session-timeout-${crypto.randomUUID()}`;
+    const pending = manager.start({
+      userId,
+      goal: "Wait until the execution budget expires",
+      messages: [{ role: "user", content: "wait" }],
+    });
+    const run = await waitForRun(userId);
+
+    const finished = await pending;
+    expect(finished.id).toBe(run.id);
+    expect(finished.status).toBe("failed");
+    expect(finished.error).toBe(AGENT_RUN_TIMEOUT_ERROR);
+    expect(finished.result).toContain("did not replay");
+    expect(provider.signals[0]?.aborted).toBe(true);
+  });
+
+  test("does not let a late provider result overwrite a timeout", async () => {
+    const manager = new CodingSessionManager(new IgnoringAbortProvider(), { runTimeoutMs: 10 });
+    const run = await manager.start({
+      userId: `late-timeout-${crypto.randomUUID()}`,
+      goal: "Do not accept late work",
+      messages: [{ role: "user", content: "wait" }],
+    });
+
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe(AGENT_RUN_TIMEOUT_ERROR);
+    expect(run.result).toContain("did not replay");
+  });
+
+  test("times out a loop provider request before it dispatches tools", async () => {
+    const provider = new BlockingProvider();
+    const loop = new CodingLoop(provider, { runTimeoutMs: 20 });
+    const userId = `loop-timeout-${crypto.randomUUID()}`;
+    const pending = loop.start({ userId, goal: "Wait without changing anything" });
+
+    const finished = await pending;
+    expect(finished.status).toBe("failed");
+    expect(finished.error).toBe(AGENT_RUN_TIMEOUT_ERROR);
+    expect(finished.toolCalls).toEqual([]);
   });
 
   test("cancels an in-flight autonomous loop before it can dispatch tools", async () => {
