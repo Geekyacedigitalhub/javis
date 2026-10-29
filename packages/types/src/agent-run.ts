@@ -1,6 +1,6 @@
 import type { FroshToolCall } from "./javis";
 
-export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed";
+export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 
 /**
  * A provider continuation is intentionally provider-specific. It contains only
@@ -25,6 +25,9 @@ export type FroshProviderContinuation =
 
 export interface FroshAgentRun {
   id: string;
+  /** Server-scoped owner. Agent run records and cancellation are never shared
+   * merely because another client can guess an id. */
+  userId: string;
   conversationId?: string;
   goal: string;
   status: FroshRunStatus;
@@ -38,16 +41,22 @@ export interface FroshAgentRun {
 }
 
 export interface FroshAgentRunFilter {
+  userId?: string;
   status?: FroshRunStatus | "all";
   limit?: number;
 }
 
 export interface FroshAgentRunStore {
-  create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt">): Promise<FroshAgentRun>;
+  // userId is optional at this boundary for legacy/internal callers; stores
+  // assign the configured default before persistence. New API work always
+  // supplies an authenticated owner explicitly.
+  create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string }): Promise<FroshAgentRun>;
   /** Most recent runs first. Never cached: a run's evidence changes as it works. */
   list(filter?: FroshAgentRunFilter): Promise<FroshAgentRun[]>;
   get(id: string): Promise<FroshAgentRun | null>;
-  update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt">>): Promise<FroshAgentRun>;
+  /** Atomically marks only a live/waiting run cancelled. */
+  cancel(id: string, userId?: string): Promise<FroshAgentRun | null>;
+  update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt" | "userId">>): Promise<FroshAgentRun>;
   touch(id: string): Promise<FroshAgentRun>;
   claimApproval(id: string, approvalId: string, toolCall: FroshToolCall): Promise<FroshAgentRun | null>;
   restoreApprovalWait(id: string, approvalId: string, toolCalls: FroshToolCall[]): Promise<FroshAgentRun | null>;

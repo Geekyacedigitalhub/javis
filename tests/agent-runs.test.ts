@@ -71,11 +71,24 @@ describe("reading runs back", () => {
     expect(response.status).toBe(401);
   });
 
+  test("does not let a web caller select another run owner in the URL", async () => {
+    const listed = await call("/v1/agent-runs/users/another-user");
+    expect(listed.status).toBe(403);
+
+    const detail = await call("/v1/agent-runs/users/another-user/00000000-0000-4000-8000-000000000000");
+    expect(detail.status).toBe(404);
+  });
+
+  test("exposes a scoped cancellation endpoint without leaking unknown runs", async () => {
+    const response = await call(`/v1/agent-runs/users/${USER}/00000000-0000-4000-8000-000000000000/cancel`, { method: "POST" });
+    expect(response.status).toBe(404);
+  });
+
   test("a new server has no runs", async () => {
     const { status, body } = await call(`/v1/agent-runs/users/${USER}`);
     expect(status).toBe(200);
     expect(body.runs).toEqual([]);
-    expect(body.counts).toEqual({ running: 0, waiting_approval: 0, completed: 0, failed: 0 });
+    expect(body.counts).toEqual({ running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
   });
 
   test("a loop run that could not prove its work is listed as failed", async () => {
@@ -169,5 +182,28 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(await store.list({ limit: 2 })).toHaveLength(2);
     expect(await store.list({ limit: 0 })).toHaveLength(1);
     expect(await store.list({ limit: 10_000 })).toHaveLength(4);
+  });
+
+  test("keeps runs scoped to their owner", async () => {
+    const store = new InMemoryAgentRunStore();
+    const mine = await store.create(run({ userId: "owner-a" }));
+    await store.create(run({ userId: "owner-b" }));
+
+    expect((await store.list({ userId: "owner-a" })).map((entry) => entry.id)).toEqual([mine.id]);
+  });
+
+  test("cancellation is atomic and terminal", async () => {
+    const store = new InMemoryAgentRunStore();
+    const active = await store.create(run({ status: "running", userId: "owner-a" }));
+
+    expect(await store.cancel(active.id, "owner-b")).toBeNull();
+    const cancelled = await store.cancel(active.id, "owner-a");
+    expect(cancelled?.status).toBe("cancelled");
+    expect(cancelled?.pendingApprovalId).toBeUndefined();
+
+    const late = await store.update(active.id, { status: "completed", result: "late provider output" });
+    expect(late.status).toBe("cancelled");
+    expect(late.result).toContain("Cancelled by the user");
+    expect(await store.cancel(active.id, "owner-a")).toBeNull();
   });
 });

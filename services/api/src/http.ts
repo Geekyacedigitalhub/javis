@@ -1,7 +1,7 @@
 import { postChat } from "./routes";
 import { getFroshConversation, listFroshConversations, streamFroshRequest } from "./server";
 import { approvalStore, resolveApproval } from "../../tools/src";
-import { CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, FroshProviderAbortError, isMissionEvaluatingProvider, isVisionProvider } from "../../ai/src";
+import { abortActiveAgentRun, CodingLoop, CodingSessionManager, agentRunStore, createProvider, describeProvider, FroshProviderAbortError, isMissionEvaluatingProvider, isVisionProvider } from "../../ai/src";
 import { authenticateDevice, issueDeviceCredential, listDevices, registerDevice, getDevice, revokeDeviceCredential, initializeDeviceStore, purgeExpiredDeviceCredentials, purgeExpiredDeviceCommandLedger, markAllDevicesOffline, closeDeviceStore, updateDeviceCapabilities } from "./devices";
 import { addRealtimeClient, disconnectDeviceClients, handleDeviceCommandResult, handleRealtimeClose, realtimeClientCount, shutdownRealtime } from "./realtime";
 import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
@@ -1694,6 +1694,7 @@ const server = Bun.serve<RealtimeSocketData>({
             try{
               run=await codingSessions.start({
                 goal:step.title+"\nOverall objective: "+mission.goal,
+                userId,
                 messages:[{role:"user",content:[step.title,"Overall objective: "+mission.goal,"Step context:",step.context??"No prior context stored for this step.","Previous mission findings:",steps.filter(item=>item.status==="completed").map(item=>"- "+item.title+": "+(item.result??"")).join("\n")||"None yet"].join("\n")}],
                 canPersist:async()=>{
                   const current=await store.get(id,userId);
@@ -2138,6 +2139,15 @@ const server = Bun.serve<RealtimeSocketData>({
 
       const approval = await approvalStore.get(approvalId);
       if (!approval) return Response.json({ error: "Approval not found" }, { status: 404 });
+      // Approval records are historical global records, but an approval that
+      // belongs to an agent run must never be used to cross that run's owner
+      // boundary through this alternate endpoint.
+      if (approval.runId) {
+        const approvalRun = await agentRunStore.get(approval.runId);
+        if (approvalRun && approvalRun.userId !== userId) {
+          return Response.json({ error: "Approval not found" }, { status: 404 });
+        }
+      }
       if (approval.status !== "pending") {
         return Response.json(
           { error: "Approval is already " + approval.status, approval },
@@ -2267,12 +2277,15 @@ const server = Bun.serve<RealtimeSocketData>({
     if (agentRunListMatch && request.method === "GET") {
       const userId = decodeBoundedUserId(agentRunListMatch[1]);
       if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      // This deployment is single-user until a user-auth provider is configured.
+      // Never let the shared web token turn a URL segment into an owner selector.
+      if (userId !== configuredUserId) return Response.json({ error: "Agent runs are not available for this user." }, { status: 403 });
 
       const requested = (url.searchParams.get("status") ?? "all").trim();
-      const allowed = ["running", "waiting_approval", "completed", "failed", "all"];
+      const allowed = ["running", "waiting_approval", "completed", "failed", "cancelled", "all"];
       if (!allowed.includes(requested)) {
         return Response.json(
-          { error: "status must be one of running, waiting_approval, completed, failed, all" },
+          { error: "status must be one of running, waiting_approval, completed, failed, cancelled, all" },
           { status: 400 },
         );
       }
@@ -2282,31 +2295,54 @@ const server = Bun.serve<RealtimeSocketData>({
 
       // Counts come from the whole set, so the console can show what exists
       // while displaying only one status.
-      const all = await agentRunStore.list({ status: "all", limit: 200 });
-      const counts = { running: 0, waiting_approval: 0, completed: 0, failed: 0 };
+      const all = await agentRunStore.list({ userId, status: "all", limit: 200 });
+      const counts = { running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 };
       for (const run of all) counts[run.status] += 1;
 
       const runs = (requested === "all" ? all : all.filter((run) => run.status === requested)).slice(0, limit);
       return Response.json({ runs, counts });
     }
 
+    const agentRunCancelMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/cancel$/);
+    if (agentRunCancelMatch && request.method === "POST") {
+      const userId = decodeBoundedUserId(agentRunCancelMatch[1]);
+      const runId = decodeBoundedResourceId(agentRunCancelMatch[2]);
+      if (!userId || !runId) return Response.json({ error: "Invalid agent run identifier" }, { status: 400 });
+      if (userId !== configuredUserId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+
+      const cancelled = await agentRunStore.cancel(runId, userId);
+      if (!cancelled) {
+        const current = await agentRunStore.get(runId);
+        if (!current || current.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+        return Response.json({ error: "Only running or approval-waiting agent runs can be cancelled.", run: current }, { status: 409 });
+      }
+      // Persist first, then interrupt any provider request in this process. The
+      // store's terminal-write guard also covers providers that race this abort.
+      abortActiveAgentRun(cancelled.id);
+      return Response.json({ run: cancelled });
+    }
+
     const agentRunMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)$/);
     if (agentRunMatch && request.method === "GET") {
       const userId = decodeBoundedUserId(agentRunMatch[1]);
       if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      if (userId !== configuredUserId) return Response.json({ error: "Agent run not found" }, { status: 404 });
       const runId = decodeBoundedResourceId(agentRunMatch[2]);
       if (!runId) return Response.json({ error: "Invalid agent run ID" }, { status: 400 });
 
       const run = await agentRunStore.get(runId);
-      if (!run) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      if (!run || run.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
 
       const pendingApproval = run.pendingApprovalId ? await approvalStore.get(run.pendingApprovalId) : null;
       return Response.json({ run, pendingApproval });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
-      if (!webAuthenticated) {
-        return Response.json({ error: "Direct agent runs require trusted web authentication." }, { status: 403 });
+      // A paired device is an authenticated user client too. It is scoped to
+      // configuredUserId by the gate above; an unpaired caller still cannot
+      // create a durable run just by guessing an endpoint.
+      if (!webAuthenticated && !deviceId) {
+        return Response.json({ error: "Direct agent runs require a trusted web session or paired device." }, { status: 403 });
       }
       try {
         const body = await parseBoundedJson(request);
@@ -2325,16 +2361,47 @@ const server = Bun.serve<RealtimeSocketData>({
 
         // mode=loop drives the run to a verified result: it executes tools,
         // validates with real output, and refuses to report success without it.
-        // The default stays the single-shot session so existing callers are
-        // unaffected.
-        const run =
-          body?.mode === "loop"
-            ? await codingLoop.start({ goal, conversationId })
-            : await codingSessions.start({
+        // `background` returns the durable run as soon as it has an id. Mobile
+        // and future clients can therefore show a real Stop control while a
+        // provider is still working, rather than waiting for that provider to
+        // finish before they learn which run to cancel.
+        const background = body?.background === true;
+        if (background) {
+          let resolveCreated: ((run: Awaited<ReturnType<typeof agentRunStore.create>>) => void) | undefined;
+          let rejectCreated: ((error: unknown) => void) | undefined;
+          const created = new Promise<Awaited<ReturnType<typeof agentRunStore.create>>>((resolve, reject) => {
+            resolveCreated = resolve;
+            rejectCreated = reject;
+          });
+          const onRunCreated = async (run: Awaited<ReturnType<typeof agentRunStore.create>>) => {
+            resolveCreated?.(run);
+          };
+          const execution = body?.mode === "loop"
+            ? codingLoop.start({ goal, userId: configuredUserId, conversationId, onRunCreated })
+            : codingSessions.start({
                 goal,
+                userId: configuredUserId,
                 conversationId,
                 messages: [{ role: "user", content: message }],
+                onRunCreated,
               });
+          void execution.catch((error) => {
+            rejectCreated?.(error);
+            logOperationalError("Background agent run failed", error);
+          });
+          return Response.json(await created, { status: 202 });
+        }
+
+        // The default remains synchronous for compatibility with existing
+        // callers that expect the final result in this response.
+        const run = body?.mode === "loop"
+          ? await codingLoop.start({ goal, userId: configuredUserId, conversationId })
+          : await codingSessions.start({
+              goal,
+              userId: configuredUserId,
+              conversationId,
+              messages: [{ role: "user", content: message }],
+            });
 
         return Response.json(run, { status: 201 });
       } catch (error) {

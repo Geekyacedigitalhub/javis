@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Speech from "expo-speech";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { analyzeVision, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, setDeviceCredential, startAgentRun, streamMessage, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
+import { analyzeVision, cancelAgentRun, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, setDeviceCredential, startAgentRun, streamMessage, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import type { FroshNotification } from "../../packages/types/src/notifications";
@@ -359,6 +359,22 @@ export default function App() {
     }
   }
 
+  async function stopTask() {
+    if (!run || (run.status !== "running" && run.status !== "waiting_approval") || busyRef.current) return;
+    busyRef.current = true;
+    setBusy(true);
+    try {
+      const stopped = await cancelAgentRun(run.id);
+      setRun(stopped);
+      setReply("Task stopped. FROSH will not dispatch any more work for it.");
+    } catch (error) {
+      setReply(error instanceof Error ? error.message : "Could not stop task.");
+    } finally {
+      busyRef.current = false;
+      setBusy(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.safe}>
       <StatusBar style="light" />
@@ -558,6 +574,11 @@ export default function App() {
           </Text>
           {run?.pendingApprovalId ? (
             <Text style={styles.warning}>Approval required: {run.pendingApprovalId}</Text>
+          ) : null}
+          {run && (run.status === "running" || run.status === "waiting_approval") ? (
+            <Pressable style={styles.secondary} onPress={stopTask} disabled={busy}>
+              <Text style={styles.secondaryText}>{busy ? "STOPPING…" : "STOP TASK"}</Text>
+            </Pressable>
           ) : null}
         </View>
 
