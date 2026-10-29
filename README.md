@@ -439,7 +439,9 @@ in the one place a person actually looks. Approving a parked run is a link away:
 a run in `waiting_approval` points at `/approvals`. A live run also has a **Stop
 run** control. Stopping first writes a terminal `cancelled` state, then aborts
 any active model request; late provider output cannot turn it back into a
-completed or failed run.
+completed or failed run. On startup, FROSH marks any interrupted `running` run
+as failed rather than replaying unknown provider or tool side effects; approval
+waits remain resumable.
 
 ```
 GET /v1/agent-runs/users/:userId?status=&limit=

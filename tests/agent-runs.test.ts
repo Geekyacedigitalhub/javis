@@ -206,4 +206,19 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(late.result).toContain("Cancelled by the user");
     expect(await store.cancel(active.id, "owner-a")).toBeNull();
   });
+
+  test("recovers interrupted running work without replaying it, but preserves approval waits", async () => {
+    const store = new InMemoryAgentRunStore();
+    const interrupted = await store.create(run({ status: "running", userId: "owner-a" }));
+    const waiting = await store.create(run({ status: "waiting_approval", userId: "owner-a", pendingApprovalId: "approval-1" }));
+    await store.create(run({ status: "running", userId: "owner-b" }));
+
+    expect(await store.recoverInterrupted("owner-a")).toBe(1);
+    const recovered = await store.get(interrupted.id);
+    expect(recovered?.status).toBe("failed");
+    expect(recovered?.result).toContain("not replayed");
+    expect(recovered?.error).toContain("restarted");
+    expect((await store.get(waiting.id))?.status).toBe("waiting_approval");
+    expect(await store.recoverInterrupted("owner-a")).toBe(0);
+  });
 });

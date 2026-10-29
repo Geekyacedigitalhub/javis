@@ -92,6 +92,24 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return updated;
   }
 
+  async recoverInterrupted(userId?: string) {
+    let recovered = 0;
+    for (const [id, current] of this.runs) {
+      if (current.status !== "running" || (userId && current.userId !== userId)) continue;
+      this.runs.set(id, {
+        ...current,
+        status: "failed",
+        providerContinuation: undefined,
+        pendingApprovalId: undefined,
+        result: "FROSH restarted before this run finished. It was not replayed because a provider or tool action may have already happened; review the evidence and start a new run if needed.",
+        error: "Agent process restarted while this run was active",
+        updatedAt: new Date().toISOString(),
+      });
+      recovered += 1;
+    }
+    return recovered;
+  }
+
   async update(id: string, patch: Partial<Omit<FroshAgentRun, "id" | "createdAt" | "userId">>) {
     const current = this.runs.get(id);
     if (!current) throw new Error("Agent run not found");

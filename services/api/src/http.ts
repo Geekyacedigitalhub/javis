@@ -29,9 +29,19 @@ const codingLoop = new CodingLoop(createProvider());
 // loopback port. Render supplies PORT for the public Next server in that
 // deployment, so use an explicit API-port override when present.
 const port = Number(process.env.FROSH_API_PORT ?? process.env.PORT ?? 3001);
+const configuredUserId = process.env.FROSH_USER_ID?.trim() || "default-user";
 const backgroundRunnersEnabled = process.env.FROSH_DISABLE_BACKGROUND_RUNNERS !== "1";
 await initializeDeviceStore();
 await markAllDevicesOffline();
+// Runs cannot be safely replayed after a process restart: a provider request or
+// tool action may already have crossed its external boundary. Reconcile those
+// active records into an honest, actionable failure before accepting traffic.
+try {
+  const recoveredAgentRuns = await agentRunStore.recoverInterrupted(configuredUserId);
+  if (recoveredAgentRuns > 0) console.warn(`FROSH recovered ${recoveredAgentRuns} interrupted agent run(s) without replaying work.`);
+} catch (error) {
+  logOperationalError("FROSH agent-run startup recovery failed", error);
+}
 let credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
 if (backgroundRunnersEnabled) {
   void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Initial device credential cleanup failed", error));
@@ -377,7 +387,6 @@ const server = Bun.serve<RealtimeSocketData>({
       return Response.json({ error: "FROSH authentication required" }, { status: 401 });
     }
 
-    const configuredUserId = process.env.FROSH_USER_ID?.trim() || "default-user";
     const userScopedPath = url.pathname.match(/\/users\/([^/]+)/);
     if (!webAuthenticated && deviceId && userScopedPath && decodeBoundedUserId(userScopedPath[1]) !== configuredUserId) {
       return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
