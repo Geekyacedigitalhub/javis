@@ -58,3 +58,10 @@
 .call-name.failed { color: #fca5a5; }
 .call-state { color: #6f8f7d; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
 .call-args { color: #7c9b89; font-size: 11px; word-break: break-all; }
+
+.run-events { list-style: none; display: grid; gap: 8px; padding: 0; margin: 15px 0 0; }
+.run-events li { display: grid; grid-template-columns: auto 1fr auto; gap: 9px; align-items: baseline; border-left: 2px solid #21503a; padding: 7px 0 7px 10px; color: #a7c4b3; font-size: 12px; }
+.event-state { color: #a7f3d0; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.event-state.failed { color: #fca5a5; }.event-state.cancelled { color: #cbd5e1; }.event-state.waiting_approval { color: #fcd34d; }
+.run-events time { color: #668675; font-variant-numeric: tabular-nums; font-size: 11px; }
+@media(max-width:650px){.run-events li{grid-template-columns:1fr}.run-events time{margin-left:0}}

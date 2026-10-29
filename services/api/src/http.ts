@@ -2331,6 +2331,19 @@ const server = Bun.serve<RealtimeSocketData>({
       return Response.json({ run: cancelled });
     }
 
+    const agentRunEventsMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/events$/);
+    if (agentRunEventsMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(agentRunEventsMatch[1]);
+      const runId = decodeBoundedResourceId(agentRunEventsMatch[2]);
+      if (!userId || !runId) return Response.json({ error: "Invalid agent run identifier" }, { status: 400 });
+      if (userId !== configuredUserId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      const run = await agentRunStore.get(runId);
+      if (!run || run.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      const rawLimit = Number(url.searchParams.get("limit") ?? 100);
+      const limit = Number.isFinite(rawLimit) ? Math.min(200, Math.max(1, Math.trunc(rawLimit))) : 100;
+      return Response.json({ events: await agentRunStore.listEvents(runId, userId, limit) });
+    }
+
     const agentRunMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)$/);
     if (agentRunMatch && request.method === "GET") {
       const userId = decodeBoundedUserId(agentRunMatch[1]);
