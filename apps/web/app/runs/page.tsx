@@ -22,6 +22,15 @@ type RunEvent = {
   createdAt: string;
 };
 
+type RunCheckpoint = {
+  id: string;
+  kind: string;
+  status: RunStatus;
+  message: string;
+  toolCallCount: number;
+  createdAt: string;
+};
+
 type View = RunStatus | "all";
 
 const POLL_MS = 8_000;
@@ -44,6 +53,7 @@ export default function RunsPage() {
   const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({});
+  const [checkpointsByRun, setCheckpointsByRun] = useState<Record<string, RunCheckpoint[]>>({});
   const [stopping, setStopping] = useState<string | null>(null);
 
   const load = useCallback(async (which: View) => {
@@ -98,15 +108,20 @@ export default function RunsPage() {
       return;
     }
     setExpanded(runId);
-    if (eventsByRun[runId]) return;
+    if (eventsByRun[runId] && checkpointsByRun[runId]) return;
     try {
-      const response = await fetch(
-        "/api/frosh/v1/agent-runs/users/" + encodeURIComponent(userId) + "/" + encodeURIComponent(runId) + "/events",
-        { cache: "no-store" },
-      );
-      if (!response.ok) throw new Error("Could not load run activity.");
-      const body = await response.json();
-      setEventsByRun((current) => ({ ...current, [runId]: Array.isArray(body.events) ? body.events : [] }));
+      const base = "/api/frosh/v1/agent-runs/users/" + encodeURIComponent(userId) + "/" + encodeURIComponent(runId);
+      const [eventsResponse, checkpointsResponse] = await Promise.all([
+        fetch(base + "/events", { cache: "no-store" }),
+        fetch(base + "/checkpoints", { cache: "no-store" }),
+      ]);
+      if (!eventsResponse.ok || !checkpointsResponse.ok) throw new Error("Could not load run activity.");
+      const [eventsBody, checkpointsBody] = await Promise.all([eventsResponse.json(), checkpointsResponse.json()]);
+      setEventsByRun((current) => ({ ...current, [runId]: Array.isArray(eventsBody.events) ? eventsBody.events : [] }));
+      setCheckpointsByRun((current) => ({
+        ...current,
+        [runId]: Array.isArray(checkpointsBody.checkpoints) ? checkpointsBody.checkpoints : [],
+      }));
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "Could not load run activity.");
     }
@@ -253,6 +268,19 @@ export default function RunsPage() {
 
               {open ? (
                 <>
+                  <h3 className="run-activity-heading">Durable checkpoints</h3>
+                  <ol className="run-checkpoints">
+                    {(checkpointsByRun[run.id] ?? []).map((checkpoint) => (
+                      <li key={checkpoint.id}>
+                        <span className={"checkpoint-kind " + checkpoint.kind}>{checkpoint.kind.replaceAll("_", " ")}</span>
+                        <span>{checkpoint.message}</span>
+                        <span>{checkpoint.toolCallCount} tool call{checkpoint.toolCallCount === 1 ? "" : "s"}</span>
+                        <time>{when(checkpoint.createdAt)}</time>
+                      </li>
+                    ))}
+                    {checkpointsByRun[run.id]?.length === 0 ? <li>No checkpoint is available for this legacy run.</li> : null}
+                  </ol>
+                  <h3 className="run-activity-heading">Status history</h3>
                   <ol className="run-events">
                     {(eventsByRun[run.id] ?? []).map((event) => (
                       <li key={event.id}>

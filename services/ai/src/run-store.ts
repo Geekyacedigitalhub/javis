@@ -3,6 +3,7 @@ import {
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
   FroshAgentRunConcurrencyError,
   type FroshAgentRun,
+  type FroshAgentRunCheckpoint,
   type FroshAgentRunCreateInput,
   type FroshAgentRunEvent,
   type FroshAgentRunStore,
@@ -12,6 +13,7 @@ import type { FroshToolCall } from "../../../packages/types/src/javis";
 export class InMemoryAgentRunStore implements FroshAgentRunStore {
   private readonly runs = new Map<string, FroshAgentRun>();
   private readonly events = new Map<string, FroshAgentRunEvent[]>();
+  private readonly checkpoints = new Map<string, FroshAgentRunCheckpoint[]>();
   private readonly idempotencyKeys = new Map<string, string>();
 
   constructor(private readonly maxActiveRuns = 2) {}
@@ -35,10 +37,45 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     };
   }
 
+  private checkpointFor(run: FroshAgentRun, previous?: FroshAgentRun): FroshAgentRunCheckpoint | null {
+    const statusChanged = Boolean(previous && previous.status !== run.status);
+    const toolCallsChanged = Boolean(previous && previous.toolCalls.length !== run.toolCalls.length);
+    const approvalChanged = Boolean(previous && previous.pendingApprovalId !== run.pendingApprovalId);
+    if (previous && !statusChanged && !toolCallsChanged && !approvalChanged) return null;
+
+    const kind = !previous
+      ? "created"
+      : run.status === "waiting_approval"
+        ? "awaiting_approval"
+        : previous.status === "waiting_approval" && run.status === "running"
+          ? "approval_resumed"
+          : run.status === "completed" || run.status === "failed" || run.status === "cancelled"
+            ? run.status
+            : toolCallsChanged
+              ? "tool_evidence"
+              : "running";
+    const latestTool = toolCallsChanged ? run.toolCalls.at(-1) : undefined;
+    const message =
+      kind === "created" ? "Checkpoint created before FROSH began work."
+      : kind === "awaiting_approval" ? "Checkpoint saved while FROSH waits for approval."
+      : kind === "approval_resumed" ? "Checkpoint saved after approval; execution resumed."
+      : kind === "tool_evidence" && latestTool ? `Checkpoint saved after ${latestTool.name} (${latestTool.status}).`
+      : kind === "completed" ? "Checkpoint saved when the run completed."
+      : kind === "failed" ? "Checkpoint saved when the run stopped safely."
+      : kind === "cancelled" ? "Checkpoint saved when the run was cancelled."
+      : "Checkpoint saved while FROSH continued work.";
+    return {
+      id: crypto.randomUUID(), runId: run.id, userId: run.userId, kind,
+      status: run.status, message, toolCallCount: run.toolCalls.length, createdAt: run.updatedAt,
+    };
+  }
+
   private save(run: FroshAgentRun, previous?: FroshAgentRun) {
     this.runs.set(run.id, run);
     const event = this.eventFor(run, previous);
     if (event) this.events.set(run.id, [...(this.events.get(run.id) ?? []), event]);
+    const checkpoint = this.checkpointFor(run, previous);
+    if (checkpoint) this.checkpoints.set(run.id, [...(this.checkpoints.get(run.id) ?? []), checkpoint]);
   }
 
   private ensureCapacity(userId: string) {
@@ -89,6 +126,13 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     if (!run || (userId && run.userId !== userId)) return [];
     const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
     return (this.events.get(runId) ?? []).slice(0, safeLimit);
+  }
+
+  async listCheckpoints(runId: string, userId?: string, limit = 100) {
+    const run = this.runs.get(runId);
+    if (!run || (userId && run.userId !== userId)) return [];
+    const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
+    return (this.checkpoints.get(runId) ?? []).slice(0, safeLimit);
   }
 
   async list(filter: { userId?: string; status?: FroshAgentRun["status"] | "all"; limit?: number } = {}) {

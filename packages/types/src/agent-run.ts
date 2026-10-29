@@ -83,6 +83,30 @@ export interface FroshAgentRunEvent {
   createdAt: string;
 }
 
+/** A compact, secret-free durable snapshot of where a task stopped. It is
+ * deliberately not a replay instruction: restart recovery remains conservative
+ * whenever a provider or external tool may already have acted. */
+export type FroshAgentRunCheckpointKind =
+  | "created"
+  | "running"
+  | "awaiting_approval"
+  | "approval_resumed"
+  | "tool_evidence"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface FroshAgentRunCheckpoint {
+  id: string;
+  runId: string;
+  userId: string;
+  kind: FroshAgentRunCheckpointKind;
+  status: FroshRunStatus;
+  message: string;
+  toolCallCount: number;
+  createdAt: string;
+}
+
 export interface FroshAgentRunStore {
   // userId is optional at this boundary for legacy/internal callers; stores
   // assign the configured default before persistence. New API work always
@@ -97,6 +121,8 @@ export interface FroshAgentRunStore {
   get(id: string): Promise<FroshAgentRun | null>;
   /** Oldest event first, scoped to the owner when supplied. */
   listEvents(runId: string, userId?: string, limit?: number): Promise<FroshAgentRunEvent[]>;
+  /** Compact, append-only task state snapshots; no provider prompts or secrets. */
+  listCheckpoints(runId: string, userId?: string, limit?: number): Promise<FroshAgentRunCheckpoint[]>;
   /** Atomically marks only a live/waiting run cancelled. */
   cancel(id: string, userId?: string): Promise<FroshAgentRun | null>;
   /** Atomically fails only work that is still actively executing after its
