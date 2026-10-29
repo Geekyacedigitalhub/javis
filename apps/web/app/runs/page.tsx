@@ -7,6 +7,7 @@ import { duration, evidenceLabel, summarise, when, type RunLike, type RunStatus,
 
 type Run = RunLike & {
   id: string;
+  mode?: "session" | "loop";
   pendingApprovalId?: string;
   result?: string;
   error?: string;
@@ -55,6 +56,7 @@ export default function RunsPage() {
   const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({});
   const [checkpointsByRun, setCheckpointsByRun] = useState<Record<string, RunCheckpoint[]>>({});
   const [stopping, setStopping] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
 
   const load = useCallback(async (which: View) => {
     if (!userId) return;
@@ -144,6 +146,30 @@ export default function RunsPage() {
       setStatus(error instanceof Error ? error.message : "Could not stop this run.");
     } finally {
       setStopping(null);
+    }
+  };
+
+  const retryRun = async (run: Run) => {
+    if (!userId) return;
+    setRetrying(run.id);
+    setStatus("");
+    try {
+      const response = await fetch(
+        "/api/frosh/v1/agent-runs/users/" + encodeURIComponent(userId) + "/" + encodeURIComponent(run.id) + "/retry",
+        {
+          method: "POST",
+          cache: "no-store",
+          headers: { "idempotency-key": "retry-" + run.id },
+        },
+      );
+      const body = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(typeof body?.error === "string" ? body.error : "Could not start a fresh retry.");
+      await load(view);
+      setStatus("Fresh retry started. FROSH kept the goal and mode, but did not replay old provider or tool state.");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not start a fresh retry.");
+    } finally {
+      setRetrying(null);
     }
   };
 
@@ -251,6 +277,14 @@ export default function RunsPage() {
                 <div className="run-actions">
                   <button type="button" className="run-stop" disabled={stopping === run.id} onClick={() => void stopRun(run)}>
                     {stopping === run.id ? "Stopping…" : "Stop run"}
+                  </button>
+                </div>
+              ) : null}
+
+              {run.status === "failed" || run.status === "cancelled" ? (
+                <div className="run-actions">
+                  <button type="button" className="run-retry" disabled={retrying === run.id} onClick={() => void retryRun(run)}>
+                    {retrying === run.id ? "Starting fresh retry…" : "Retry as fresh work"}
                   </button>
                 </div>
               ) : null}

@@ -57,6 +57,7 @@ export class CodingSessionManager {
       userId: input.userId,
       conversationId: input.conversationId,
       goal: input.goal,
+      mode: "session" as const,
       status: "running" as const,
       toolCalls: [],
     };
