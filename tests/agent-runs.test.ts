@@ -149,6 +149,20 @@ describe("reading runs back", () => {
     expect(status).toBe(400);
     expect(body.error).toContain("status must be one of");
   });
+
+  test("returns an owner-scoped append-only event history", async () => {
+    const created = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Record this run" }),
+    });
+    const events = await call(`/v1/agent-runs/users/${USER}/${created.body.id}/events`);
+    expect(events.status).toBe(200);
+    expect(events.body.events[0].type).toBe("created");
+    expect(events.body.events.at(-1).status).toBe("completed");
+
+    const hidden = await call(`/v1/agent-runs/users/not-${USER}/${created.body.id}/events`);
+    expect(hidden.status).toBe(404);
+  });
 });
 
 describe("InMemoryAgentRunStore.list", () => {
@@ -173,6 +187,18 @@ describe("InMemoryAgentRunStore.list", () => {
 
     expect(await store.list({ status: "failed" })).toHaveLength(1);
     expect(await store.list({ status: "all" })).toHaveLength(2);
+  });
+
+  test("keeps an owner-scoped append-only status history", async () => {
+    const store = new InMemoryAgentRunStore();
+    const active = await store.create(run({ status: "running", userId: "owner-a" }));
+    await store.update(active.id, { status: "waiting_approval", pendingApprovalId: "approval-1" });
+    await store.cancel(active.id, "owner-a");
+
+    const events = await store.listEvents(active.id, "owner-a");
+    expect(events.map((event) => event.type)).toEqual(["created", "waiting_approval", "cancelled"]);
+    expect(events.map((event) => event.status)).toEqual(["running", "waiting_approval", "cancelled"]);
+    expect(await store.listEvents(active.id, "owner-b")).toEqual([]);
   });
 
   test("clamps the limit", async () => {

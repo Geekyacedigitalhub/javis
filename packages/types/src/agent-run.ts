@@ -50,6 +50,19 @@ export interface FroshAgentRunFilter {
   limit?: number;
 }
 
+/** Append-only audit record. It intentionally stores status transitions rather
+ * than provider prompts or secrets, so the console can explain what happened
+ * without exposing hidden model state. */
+export interface FroshAgentRunEvent {
+  id: string;
+  runId: string;
+  userId: string;
+  type: "created" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+  status: FroshRunStatus;
+  message: string;
+  createdAt: string;
+}
+
 export interface FroshAgentRunStore {
   // userId is optional at this boundary for legacy/internal callers; stores
   // assign the configured default before persistence. New API work always
@@ -58,6 +71,8 @@ export interface FroshAgentRunStore {
   /** Most recent runs first. Never cached: a run's evidence changes as it works. */
   list(filter?: FroshAgentRunFilter): Promise<FroshAgentRun[]>;
   get(id: string): Promise<FroshAgentRun | null>;
+  /** Oldest event first, scoped to the owner when supplied. */
+  listEvents(runId: string, userId?: string, limit?: number): Promise<FroshAgentRunEvent[]>;
   /** Atomically marks only a live/waiting run cancelled. */
   cancel(id: string, userId?: string): Promise<FroshAgentRun | null>;
   /** Atomically fails only work that is still actively executing after its

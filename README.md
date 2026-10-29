@@ -346,6 +346,7 @@ POST /v1/agent-runs        { goal, mode: "loop" }                    -> 201, fin
 POST /v1/agent-runs        { goal, mode: "loop", background: true }  -> 202, durable running run
 GET  /v1/agent-runs/users/:userId/:runId                             -> run plus its pending approval
 POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop a live run
+GET  /v1/agent-runs/users/:userId/:runId/events                       -> append-only status audit history
 ```
 
 Without `mode: "loop"` the endpoint behaves exactly as before. With no live
@@ -451,6 +452,10 @@ GET /v1/agent-runs/users/:userId?status=&limit=
 ```
 
 Counts describe the whole set so the tabs stay honest while one status is shown.
+
+Every new durable run also has an append-only status history. The run console's
+**Show run activity** view reads that history, including creation, approval
+waits, completion, cancellation, timeout, and restart-recovery failures.
 
 ### Control center authentication
 

@@ -2,22 +2,52 @@ import {
   FROSH_AGENT_RUN_TIMEOUT_ERROR,
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
   type FroshAgentRun,
+  type FroshAgentRunEvent,
   type FroshAgentRunStore,
 } from "../../../packages/types/src/agent-run";
 import type { FroshToolCall } from "../../../packages/types/src/javis";
 
 export class InMemoryAgentRunStore implements FroshAgentRunStore {
   private readonly runs = new Map<string, FroshAgentRun>();
+  private readonly events = new Map<string, FroshAgentRunEvent[]>();
+
+  private eventFor(run: FroshAgentRun, previous?: FroshAgentRun): FroshAgentRunEvent | null {
+    if (previous && previous.status === run.status) return null;
+    const type = previous ? run.status : "created";
+    const message =
+      type === "created" ? "Agent run created." :
+      type === "waiting_approval" ? "FROSH is waiting for approval." :
+      type === "cancelled" ? "Run cancelled by the user." :
+      type === "failed" ? run.error || "Agent run failed." :
+      type === "completed" ? "Agent run completed." : "Agent run is running.";
+    return {
+      id: crypto.randomUUID(), runId: run.id, userId: run.userId, type,
+      status: run.status, message, createdAt: run.updatedAt,
+    };
+  }
+
+  private save(run: FroshAgentRun, previous?: FroshAgentRun) {
+    this.runs.set(run.id, run);
+    const event = this.eventFor(run, previous);
+    if (event) this.events.set(run.id, [...(this.events.get(run.id) ?? []), event]);
+  }
 
   async create(input: Omit<FroshAgentRun, "id" | "createdAt" | "updatedAt" | "userId"> & { userId?: string }) {
     const now = new Date().toISOString();
     const run: FroshAgentRun = { ...input, userId: input.userId?.trim() || "default-user", id: crypto.randomUUID(), createdAt: now, updatedAt: now };
-    this.runs.set(run.id, run);
+    this.save(run);
     return run;
   }
 
   async get(id: string) {
     return this.runs.get(id) ?? null;
+  }
+
+  async listEvents(runId: string, userId?: string, limit = 100) {
+    const run = this.runs.get(runId);
+    if (!run || (userId && run.userId !== userId)) return [];
+    const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
+    return (this.events.get(runId) ?? []).slice(0, safeLimit);
   }
 
   async list(filter: { userId?: string; status?: FroshAgentRun["status"] | "all"; limit?: number } = {}) {
@@ -33,7 +63,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     if (!current) throw new Error("Agent run not found");
     if (current.status !== "running" && current.status !== "waiting_approval") return current;
     const updated = { ...current, updatedAt: new Date().toISOString() };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 
@@ -47,7 +77,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
       toolCalls: [...current.toolCalls, toolCall],
       updatedAt: new Date().toISOString(),
     };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 
@@ -61,7 +91,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
       toolCalls,
       updatedAt: new Date().toISOString(),
     };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 
@@ -77,7 +107,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
       error,
       updatedAt: new Date().toISOString(),
     };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 
@@ -94,7 +124,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
       error: undefined,
       updatedAt: new Date().toISOString(),
     };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 
@@ -110,7 +140,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
       error: FROSH_AGENT_RUN_TIMEOUT_ERROR,
       updatedAt: new Date().toISOString(),
     };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 
@@ -118,7 +148,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     let recovered = 0;
     for (const [id, current] of this.runs) {
       if (current.status !== "running" || (userId && current.userId !== userId)) continue;
-      this.runs.set(id, {
+      this.save({
         ...current,
         status: "failed",
         providerContinuation: undefined,
@@ -126,7 +156,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
         result: "FROSH restarted before this run finished. It was not replayed because a provider or tool action may have already happened; review the evidence and start a new run if needed.",
         error: "Agent process restarted while this run was active",
         updatedAt: new Date().toISOString(),
-      });
+      }, current);
       recovered += 1;
     }
     return recovered;
@@ -139,7 +169,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     // cancelled, timed-out, completed, or failed run into another outcome.
     if (current.status !== "running" && current.status !== "waiting_approval") return current;
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    this.runs.set(id, updated);
+    this.save(updated, current);
     return updated;
   }
 }

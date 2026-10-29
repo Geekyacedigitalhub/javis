@@ -3,6 +3,7 @@ import {
   FROSH_AGENT_RUN_TIMEOUT_ERROR,
   FROSH_AGENT_RUN_TIMEOUT_RESULT,
   type FroshAgentRun,
+  type FroshAgentRunEvent,
   type FroshAgentRunStore,
 } from "../../../packages/types/src/agent-run";
 
@@ -61,6 +62,18 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
     values.push(limit);
     return this.query<FroshAgentRun>(
       `SELECT ${COLUMNS} FROM frosh_agent_runs${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY created_at DESC LIMIT $${values.length}`,
+      values,
+    );
+  }
+
+  async listEvents(runId: string, userId?: string, limit = 100) {
+    const safeLimit = Math.min(200, Math.max(1, Math.trunc(limit)));
+    const values: unknown[] = [runId];
+    const ownerClause = userId ? (values.push(userId), " AND user_id=$2") : "";
+    values.push(safeLimit);
+    return this.query<FroshAgentRunEvent>(
+      `SELECT id::text AS id, run_id AS "runId", user_id AS "userId", type, status, message, created_at AS "createdAt"
+       FROM frosh_agent_run_events WHERE run_id=$1${ownerClause} ORDER BY created_at ASC, id ASC LIMIT $${values.length}`,
       values,
     );
   }

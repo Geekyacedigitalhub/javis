@@ -14,6 +14,14 @@ type Run = RunLike & {
 
 type Counts = Record<RunStatus, number>;
 
+type RunEvent = {
+  id: string;
+  type: string;
+  status: RunStatus;
+  message: string;
+  createdAt: string;
+};
+
 type View = RunStatus | "all";
 
 const POLL_MS = 8_000;
@@ -35,6 +43,7 @@ export default function RunsPage() {
   const [status, setStatus] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [eventsByRun, setEventsByRun] = useState<Record<string, RunEvent[]>>({});
   const [stopping, setStopping] = useState<string | null>(null);
 
   const load = useCallback(async (which: View) => {
@@ -81,6 +90,27 @@ export default function RunsPage() {
   }, [load, userId, view]);
 
   const total = counts.running + counts.waiting_approval + counts.completed + counts.failed + counts.cancelled;
+
+  const toggleRunDetails = async (runId: string) => {
+    if (!userId) return;
+    if (expanded === runId) {
+      setExpanded(null);
+      return;
+    }
+    setExpanded(runId);
+    if (eventsByRun[runId]) return;
+    try {
+      const response = await fetch(
+        "/api/frosh/v1/agent-runs/users/" + encodeURIComponent(userId) + "/" + encodeURIComponent(runId) + "/events",
+        { cache: "no-store" },
+      );
+      if (!response.ok) throw new Error("Could not load run activity.");
+      const body = await response.json();
+      setEventsByRun((current) => ({ ...current, [runId]: Array.isArray(body.events) ? body.events : [] }));
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "Could not load run activity.");
+    }
+  };
 
   const stopRun = async (run: Run) => {
     if (!userId) return;
@@ -213,22 +243,38 @@ export default function RunsPage() {
               {run.result ? <p className="run-result">{run.result}</p> : null}
               {run.error ? <p className="run-error">{run.error}</p> : null}
 
-              {run.toolCalls.length > 0 ? (
-                <button className="run-toggle" type="button" onClick={() => setExpanded(open ? null : run.id)}>
-                  {open ? "Hide tool calls" : "Show " + run.toolCalls.length + " tool call" + (run.toolCalls.length === 1 ? "" : "s")}
-                </button>
-              ) : null}
+              <button className="run-toggle" type="button" onClick={() => void toggleRunDetails(run.id)}>
+                {open
+                  ? "Hide run activity"
+                  : run.toolCalls.length > 0
+                    ? "Show activity and " + run.toolCalls.length + " tool call" + (run.toolCalls.length === 1 ? "" : "s")
+                    : "Show run activity"}
+              </button>
 
               {open ? (
-                <ol className="run-calls">
-                  {run.toolCalls.map((call) => (
-                    <li key={call.id}>
-                      <span className={"call-name " + call.status}>{call.name}</span>
-                      <span className="call-state">{call.status}</span>
-                      <code className="call-args">{JSON.stringify(call.arguments)}</code>
-                    </li>
-                  ))}
-                </ol>
+                <>
+                  <ol className="run-events">
+                    {(eventsByRun[run.id] ?? []).map((event) => (
+                      <li key={event.id}>
+                        <span className={"event-state " + event.status}>{event.status.replace("_", " ")}</span>
+                        <span>{event.message}</span>
+                        <time>{when(event.createdAt)}</time>
+                      </li>
+                    ))}
+                    {eventsByRun[run.id]?.length === 0 ? <li>No activity record is available for this legacy run.</li> : null}
+                  </ol>
+                  {run.toolCalls.length > 0 ? (
+                    <ol className="run-calls">
+                      {run.toolCalls.map((call) => (
+                        <li key={call.id}>
+                          <span className={"call-name " + call.status}>{call.name}</span>
+                          <span className="call-state">{call.status}</span>
+                          <code className="call-args">{JSON.stringify(call.arguments)}</code>
+                        </li>
+                      ))}
+                    </ol>
+                  ) : null}
+                </>
               ) : null}
             </article>
           );
