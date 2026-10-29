@@ -1,6 +1,6 @@
 import { FroshOrchestrator } from "../../ai/src";
 import { ConfiguredModelAdapter, buildModelInput, isStreamingProvider, throwIfProviderAborted, type FroshStreamEvent } from "../../ai/src/provider";
-import { createProvider } from "../../ai/src/provider-factory";
+import { createChatProvider } from "../../ai/src/provider-factory";
 import {
   buildConversationContext,
   createMemoryStore,
@@ -13,7 +13,7 @@ import type { FroshMessage, FroshResponse } from "../../../packages/types/src/ja
 import type { ConversationRecord, MemoryStore } from "../../memory/src";
 import { getUserPreferenceStore } from "../../preferences/src";
 
-const provider = createProvider();
+const provider = createChatProvider();
 const orchestrator = new FroshOrchestrator(new ConfiguredModelAdapter(provider));
 // This process owns the in-memory fallback. Creating a store for every request
 // makes local chat look stateless, so keep one store for the lifetime of the

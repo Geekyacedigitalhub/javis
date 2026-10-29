@@ -1,6 +1,7 @@
 export * from "./orchestrator";
 export * from "./provider";
 export * from "./provider-factory";
+export * from "./chat-provider";
 export * from "./mock-provider";
 export * from "./openai-provider";
 export * from "./gemini-provider";

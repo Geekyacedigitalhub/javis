@@ -24,7 +24,7 @@ FROSH is a personal AI operating system, not only a chatbot. The long-term produ
 - project/task/decision memory
 - context compression and retrieval
 - user preferences
-- model fallback and retry handling
+- model fallback and retry handling — **done for interactive chat streams** (bounded pre-output retries; explicit, cost-aware cross-provider fallback only when configured)
 - cancellation and timeout handling — **done for interactive chat streams** (web/mobile stop controls propagate to provider requests and interrupted turns are not shown as complete)
 
 ## Phase 2 — Durable Agent Runtime
