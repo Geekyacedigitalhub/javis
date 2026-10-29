@@ -1,7 +1,9 @@
 import type { FroshDevice, FroshDeviceCredential } from "../../../packages/types/src/device";
 import type { FroshAgentRun } from "../../../packages/types/src/agent-run";
 import type { FroshApprovalRequest } from "../../../packages/types/src/approval";
-import type { FroshResponse } from "../../../packages/types/src/javis";
+import type { FroshToolCall } from "../../../packages/types/src/javis";
+import { fetch as expoFetch } from "expo/fetch";
+import { sseData, takeSseFrames } from "./sse";
 import { clearDeviceCredential, saveDeviceCredential } from "./session";
 
 export const FROSH_API_URL =
@@ -111,11 +113,113 @@ export async function getConversation(conversationId: string, limit = 100) {
   );
 }
 
-export function sendMessage(message: string, conversationId?: string) {
-  return request<FroshResponse>("/v1/chat", {
+export type FroshChatStreamEvent =
+  | { type: "delta"; text: string }
+  | { type: "tool"; name: string; status: "planned" | "completed" | "failed"; toolCallId?: string }
+  | { type: "approval"; approvalId?: string }
+  | { type: "done"; message: string; toolCalls: FroshToolCall[]; conversationId: string };
+
+const MAX_CHAT_STREAM_BYTES = 2 * 1024 * 1024;
+
+function isStreamEvent(value: unknown): value is FroshChatStreamEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  if (event.type === "delta") return typeof event.text === "string";
+  if (event.type === "tool") return typeof event.name === "string" && (event.status === "planned" || event.status === "completed" || event.status === "failed");
+  if (event.type === "approval") return event.approvalId === undefined || typeof event.approvalId === "string";
+  return event.type === "done" && typeof event.message === "string" && typeof event.conversationId === "string" && Array.isArray(event.toolCalls);
+}
+
+/**
+ * Read the API's SSE chat route with Expo's standards-compliant fetch. The
+ * request is still authenticated with the short-lived paired-device credential;
+ * only text/tool events cross this boundary, never model-provider secrets.
+ */
+export async function streamMessage(
+  message: string,
+  conversationId: string | undefined,
+  onEvent: (event: FroshChatStreamEvent) => void,
+) {
+  const trimmed = message.trim();
+  if (!trimmed) throw new Error("message is required");
+  if (credential && Date.parse(credential.expiresAt) <= Date.now()) {
+    credential = null;
+    authenticatedUserId = null;
+    await clearDeviceCredential().catch(() => undefined);
+    throw new Error("Device credential has expired. Re-pair this phone.");
+  }
+
+  const requestCredential = credential;
+  const response = await expoFetch(`${FROSH_API_URL}/v1/chat/stream`, {
     method: "POST",
-    body: JSON.stringify({ message, conversationId }),
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...(requestCredential ? {
+        "x-frosh-device-id": requestCredential.deviceId,
+        "x-frosh-device-token": requestCredential.token,
+      } : {}),
+    },
+    body: JSON.stringify({ message: trimmed, conversationId }),
   });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: unknown };
+    if (response.status === 401 && requestCredential && credential?.deviceId === requestCredential.deviceId && credential.token === requestCredential.token) {
+      credential = null;
+      authenticatedUserId = null;
+      await clearDeviceCredential().catch(() => undefined);
+    }
+    throw new Error(typeof body.error === "string" ? body.error : `Request failed: ${response.status}`);
+  }
+  if (!response.body) throw new Error("This FROSH app build cannot receive live responses. Update the app and try again.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  let receivedBytes = 0;
+  let completed = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      receivedBytes += value.byteLength;
+      if (receivedBytes > MAX_CHAT_STREAM_BYTES) throw new Error("FROSH response exceeded the safe streaming limit.");
+      buffered += decoder.decode(value, { stream: true });
+      const extracted = takeSseFrames(buffered);
+      buffered = extracted.remainder;
+      for (const frame of extracted.frames) {
+        const data = sseData(frame);
+        if (!data) continue;
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { throw new Error("FROSH returned an invalid live response."); }
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as Record<string, unknown>).type === "error") {
+          const error = (parsed as Record<string, unknown>).message;
+          throw new Error(typeof error === "string" ? error : "FROSH streaming request failed.");
+        }
+        if (!isStreamEvent(parsed)) throw new Error("FROSH returned an invalid live response.");
+        onEvent(parsed);
+        if (parsed.type === "done") completed = true;
+      }
+    }
+    buffered += decoder.decode();
+    if (buffered.trim()) {
+      const data = sseData(buffered);
+      if (data) {
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { throw new Error("FROSH returned an invalid live response."); }
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as Record<string, unknown>).type === "error") {
+          const error = (parsed as Record<string, unknown>).message;
+          throw new Error(typeof error === "string" ? error : "FROSH streaming request failed.");
+        }
+        if (!isStreamEvent(parsed)) throw new Error("FROSH returned an invalid live response.");
+        onEvent(parsed);
+        if (parsed.type === "done") completed = true;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!completed) throw new Error("FROSH live response ended before completion.");
 }
 
 export function startAgentRun(goal: string) {

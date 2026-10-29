@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Speech from "expo-speech";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { analyzeVision, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, sendMessage, setDeviceCredential, startAgentRun, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
+import { analyzeVision, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, setDeviceCredential, startAgentRun, streamMessage, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import type { FroshNotification } from "../../packages/types/src/notifications";
@@ -186,6 +186,11 @@ export default function App() {
     busyRef.current = true;
     setBusy(true);
     const localId = `local-${Date.now()}`;
+    const assistantId = `${localId}-assistant`;
+    let assistantText = "";
+    let hasAssistantTurn = false;
+    let completed = false;
+    let completedConversationId: string | undefined;
     setConversationMessages((current) => [...current, {
       id: localId,
       role: "user",
@@ -193,22 +198,49 @@ export default function App() {
       createdAt: new Date().toISOString(),
     }]);
     try {
-      const result = await sendMessage(value, conversationId);
-      setConversationId(result.conversationId);
-      setConversationMessages((current) => [...current, {
-        id: `local-${Date.now()}-assistant`,
-        role: "assistant",
-        content: result.message,
-        createdAt: new Date().toISOString(),
-      }]);
-      setReply(result.message);
+      await streamMessage(value, conversationId, (event) => {
+        if (event.type === "delta") {
+          assistantText += event.text;
+          if (!hasAssistantTurn) {
+            hasAssistantTurn = true;
+            setConversationMessages((current) => [...current, { id: assistantId, role: "assistant", content: assistantText, createdAt: new Date().toISOString() }]);
+          } else {
+            setConversationMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: assistantText } : item));
+          }
+          return;
+        }
+        if (event.type === "tool") {
+          setReply(`FROSH ${event.status === "planned" ? "is preparing" : event.status === "completed" ? "completed" : "could not complete"} ${event.name.replace(/_/g, " ")}.`);
+          return;
+        }
+        if (event.type === "approval") {
+          setReply("FROSH is waiting for your approval before continuing.");
+          return;
+        }
+
+        completed = true;
+        completedConversationId = event.conversationId;
+        const finalMessage = event.message || assistantText;
+        if (!hasAssistantTurn && finalMessage) {
+          hasAssistantTurn = true;
+          setConversationMessages((current) => [...current, { id: assistantId, role: "assistant", content: finalMessage, createdAt: new Date().toISOString() }]);
+        } else if (hasAssistantTurn) {
+          setConversationMessages((current) => current.map((item) => item.id === assistantId ? { ...item, content: finalMessage } : item));
+        }
+        assistantText = finalMessage;
+      });
+      if (!completed || !completedConversationId) throw new Error("FROSH live response ended before completion.");
+      // The stream only returns after the server has persisted the final turn.
+      // Do not advance durable conversation state for an interrupted stream.
+      setConversationId(completedConversationId);
+      setReply(assistantText || "FROSH completed the response.");
       setMessage("");
-      speakReply(result.message);
-      void refreshConversations();
+      if (assistantText) speakReply(assistantText);
+      await refreshConversations();
     } catch (error) {
-      // The compose field keeps the text for retry, but an unsaved request must
-      // not remain in a history that looks durable.
-      setConversationMessages((current) => current.filter((item) => item.id !== localId));
+      // Keep the compose text for retry, but do not display an interrupted
+      // delta as a completed assistant turn.
+      setConversationMessages((current) => current.filter((item) => item.id !== assistantId));
       setReply(error instanceof Error ? error.message : "FROSH request failed.");
     } finally {
       busyRef.current = false;
