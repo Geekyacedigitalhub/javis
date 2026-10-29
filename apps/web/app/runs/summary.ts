@@ -6,7 +6,7 @@
  * that, or the whole point of the loop is lost in the UI.
  */
 
-export type RunStatus = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type RunStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 
 export type ToolCall = {
   id: string;

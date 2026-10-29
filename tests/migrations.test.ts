@@ -90,8 +90,17 @@ describe("migrations", () => {
     expect(missing).toEqual([]);
   });
 
+  test("agent-run migrations preserve the original queued instruction and queue status", () => {
+    const memory = migrationsFor("memory");
+    const inputMessage = memory.find((migration) => migration.name === "013_agent_run_input_message.sql")?.sql ?? "";
+    const queue = memory.find((migration) => migration.name === "014_agent_run_queue.sql")?.sql ?? "";
+    expect(inputMessage).toContain("input_message");
+    expect(queue).toContain("'queued'");
+    expect(queue).toContain("frosh_agent_runs_queued_user_idx");
+  });
+
   test("the runner discovers all migrations", async () => {
     const total = SERVICES.reduce((count, service) => count + migrationsFor(service).length, 0);
-    expect(total).toBe(28);
+    expect(total).toBe(30);
   });
 });

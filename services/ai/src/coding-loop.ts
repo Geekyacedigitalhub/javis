@@ -172,6 +172,8 @@ export class CodingLoop {
 
   async start(input: {
     goal: string;
+    /** Original request text retained for a safe future fresh retry. */
+    message?: string;
     userId?: string;
     conversationId?: string;
     idempotencyKey?: string;
@@ -184,6 +186,7 @@ export class CodingLoop {
       userId: input.userId,
       conversationId: input.conversationId,
       goal,
+      message: input.message,
       mode: "loop" as const,
       status: "running" as const,
       toolCalls: [],
@@ -198,6 +201,13 @@ export class CodingLoop {
     // waiting approval rather than creating a duplicate approval request.
     if (!creation.created) return run;
     return this.drive(run.id);
+  }
+
+  /** Drive a run already claimed from the durable background queue. */
+  async runExisting(runId: string) {
+    const run = await agentRunStore.get(runId);
+    if (!run) throw new Error("Agent run not found");
+    return this.drive(runId);
   }
 
   /**

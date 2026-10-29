@@ -46,6 +46,8 @@ export class CodingSessionManager {
 
   async start(input: {
     goal: string;
+    /** Original request text retained for a safe future fresh retry. */
+    message?: string;
     messages: FroshMessage[];
     userId?: string;
     conversationId?: string;
@@ -57,6 +59,7 @@ export class CodingSessionManager {
       userId: input.userId,
       conversationId: input.conversationId,
       goal: input.goal,
+      message: input.message,
       mode: "session" as const,
       status: "running" as const,
       toolCalls: [],
@@ -69,18 +72,27 @@ export class CodingSessionManager {
     // The original request owns model execution. A replay always returns its
     // durable outcome instead of starting a second provider/tool attempt.
     if (!creation.created) return run;
+    return this.runExisting(run.id, input.messages, input.canPersist);
+  }
+
+  /** Execute a run that has already been durably created and claimed from the
+   * background queue. It shares the same cancellation/timeout failure boundary
+   * as synchronous starts, but never creates a second run. */
+  async runExisting(runId: string, messages: FroshMessage[], canPersist?: () => Promise<boolean>) {
+    const initial = await agentRunStore.get(runId);
+    if (!initial) throw new Error("Agent run not found");
     try {
-      return await this.step(run.id, input.messages, input.canPersist);
+      return await this.step(runId, messages, canPersist);
     } catch (error) {
       // Cancellation is already persisted atomically by the API. It is not a
       // provider failure and must remain visible as cancelled.
-      const current = await agentRunStore.get(run.id);
+      const current = await agentRunStore.get(runId);
       if (error instanceof FroshProviderAbortError || current?.status === "cancelled" || isAgentRunTimedOut(current)) {
-        return current ?? run;
+        return current ?? initial;
       }
       try {
-        if (!input.canPersist || await input.canPersist()) {
-          await agentRunStore.update(run.id, {
+        if (!canPersist || await canPersist()) {
+          await agentRunStore.update(runId, {
             status: "failed",
             error: error instanceof Error ? error.message : "Agent run failed before provider execution",
             result: "The run was stopped before provider execution could begin.",

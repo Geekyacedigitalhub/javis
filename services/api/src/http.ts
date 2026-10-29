@@ -29,9 +29,9 @@ const codingLoop = new CodingLoop(createProvider());
 
 type BackgroundAgentRun = { run: Awaited<ReturnType<typeof agentRunStore.create>>; created: boolean };
 
-/** Start only a fresh durable run in the background. A retry passes only the
- * original goal and mode; it never inherits a continuation, tool calls, or an
- * uncertain external action from the stopped run. */
+/** Background requests are persisted as `queued` before any provider request.
+ * A fresh retry passes only the goal/message/mode; it never inherits a
+ * continuation, tool calls, approvals, or uncertain external action. */
 async function startAgentRunInBackground(input: {
   goal: string;
   message: string;
@@ -40,30 +40,71 @@ async function startAgentRunInBackground(input: {
   conversationId?: string;
   idempotencyKey?: string;
 }): Promise<BackgroundAgentRun> {
-  let resolveCreated: ((created: BackgroundAgentRun) => void) | undefined;
-  let rejectCreated: ((error: unknown) => void) | undefined;
-  const created = new Promise<BackgroundAgentRun>((resolve, reject) => {
-    resolveCreated = resolve;
-    rejectCreated = reject;
-  });
-  const onRunCreated = async (run: Awaited<ReturnType<typeof agentRunStore.create>>, wasCreated: boolean) => {
-    resolveCreated?.({ run, created: wasCreated });
+  const runInput = {
+    goal: input.goal,
+    message: input.message,
+    mode: input.mode,
+    userId: input.userId,
+    conversationId: input.conversationId,
+    status: "queued" as const,
+    toolCalls: [],
   };
-  const execution = input.mode === "loop"
-    ? codingLoop.start({
-        goal: input.goal, userId: input.userId, conversationId: input.conversationId,
-        idempotencyKey: input.idempotencyKey, onRunCreated,
-      })
-    : codingSessions.start({
-        goal: input.goal, userId: input.userId, conversationId: input.conversationId,
-        idempotencyKey: input.idempotencyKey,
-        messages: [{ role: "user", content: input.message }], onRunCreated,
-      });
-  void execution.catch((error) => {
-    rejectCreated?.(error);
-    logOperationalError("Background agent run failed", error);
+  const creation = input.idempotencyKey
+    ? await agentRunStore.createIdempotent({ ...runInput, idempotencyKey: input.idempotencyKey })
+    : { run: await agentRunStore.create(runInput), created: true };
+  if (creation.created && backgroundRunnersEnabled) scheduleQueuedAgentRun(creation.run.id, creation.run.userId);
+  return creation;
+}
+
+const queuedRunWorkers = new Set<string>();
+let queuedRunDrainTimer: ReturnType<typeof setInterval> | undefined;
+
+function scheduleQueuedAgentRun(runId: string, userId: string) {
+  if (queuedRunWorkers.has(runId)) return;
+  queuedRunWorkers.add(runId);
+  queueMicrotask(() => {
+    void executeQueuedAgentRun(runId, userId).finally(() => queuedRunWorkers.delete(runId));
   });
-  return created;
+}
+
+async function executeQueuedAgentRun(runId: string, userId: string) {
+  let run: Awaited<ReturnType<typeof agentRunStore.claimQueued>>;
+  try {
+    run = await agentRunStore.claimQueued(runId, userId);
+  } catch (error) {
+    // A transient database failure has not crossed a provider/tool boundary;
+    // leave the durable row queued for the next drain rather than failing it.
+    logOperationalError("Could not claim queued agent run", error);
+    return;
+  }
+  // Another API worker may own it, or active-run capacity is currently full.
+  // It remains honestly queued and the periodic drain will try again later.
+  if (!run) return;
+  try {
+    if (run.mode === "loop") {
+      await codingLoop.runExisting(run.id);
+    } else {
+      await codingSessions.runExisting(run.id, [{ role: "user", content: run.message ?? run.goal }]);
+    }
+  } catch (error) {
+    const current = await agentRunStore.get(run.id);
+    if (current?.status === "running") {
+      await agentRunStore.update(run.id, {
+        status: "failed",
+        result: "The background worker stopped before this run could finish.",
+        error: error instanceof Error ? error.message : "Background agent run failed",
+      }).catch(() => undefined);
+    }
+    logOperationalError("Background agent run failed", error);
+  }
+}
+
+async function drainQueuedAgentRuns() {
+  if (!backgroundRunnersEnabled) return;
+  // Scan every owner: durable data may outlive a configuration change, and the
+  // atomic claim still enforces each owner's independent capacity limit.
+  const queued = await agentRunStore.list({ status: "queued", limit: 50 });
+  for (const run of queued) scheduleQueuedAgentRun(run.id, run.userId);
 }
 
 // A Control Center container can run a colocated API sidecar on a private
@@ -87,6 +128,10 @@ let credentialCleanupTimer: ReturnType<typeof setInterval> | undefined;
 if (backgroundRunnersEnabled) {
   void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Initial device credential cleanup failed", error));
   void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Initial device command ledger cleanup failed", error));
+  void drainQueuedAgentRuns().catch((error) => logOperationalError("Initial background agent queue drain failed", error));
+  queuedRunDrainTimer = setInterval(() => {
+    void drainQueuedAgentRuns().catch((error) => logOperationalError("Background agent queue drain failed", error));
+  }, 5_000);
   credentialCleanupTimer = setInterval(() => {
     void purgeExpiredDeviceCredentials().catch((error) => logOperationalError("Scheduled device credential cleanup failed", error));
     void purgeExpiredDeviceCommandLedger().catch((error) => logOperationalError("Scheduled device command ledger cleanup failed", error));
@@ -149,6 +194,7 @@ let shuttingDown = false;
  */
 export async function closeApi() {
   if (credentialCleanupTimer) clearInterval(credentialCleanupTimer);
+  if (queuedRunDrainTimer) clearInterval(queuedRunDrainTimer);
   try {
     shutdownRealtime();
     await server.stop(true);
@@ -2332,10 +2378,10 @@ const server = Bun.serve<RealtimeSocketData>({
       if (userId !== configuredUserId) return Response.json({ error: "Agent runs are not available for this user." }, { status: 403 });
 
       const requested = (url.searchParams.get("status") ?? "all").trim();
-      const allowed = ["running", "waiting_approval", "completed", "failed", "cancelled", "all"];
+      const allowed = ["queued", "running", "waiting_approval", "completed", "failed", "cancelled", "all"];
       if (!allowed.includes(requested)) {
         return Response.json(
-          { error: "status must be one of running, waiting_approval, completed, failed, cancelled, all" },
+          { error: "status must be one of queued, running, waiting_approval, completed, failed, cancelled, all" },
           { status: 400 },
         );
       }
@@ -2346,7 +2392,7 @@ const server = Bun.serve<RealtimeSocketData>({
       // Counts come from the whole set, so the console can show what exists
       // while displaying only one status.
       const all = await agentRunStore.list({ userId, status: "all", limit: 200 });
-      const counts = { running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 };
+      const counts = { queued: 0, running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 };
       for (const run of all) counts[run.status] += 1;
 
       const runs = (requested === "all" ? all : all.filter((run) => run.status === requested)).slice(0, limit);
@@ -2364,7 +2410,7 @@ const server = Bun.serve<RealtimeSocketData>({
       if (!cancelled) {
         const current = await agentRunStore.get(runId);
         if (!current || current.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
-        return Response.json({ error: "Only running or approval-waiting agent runs can be cancelled.", run: current }, { status: 409 });
+        return Response.json({ error: "Only queued, running, or approval-waiting agent runs can be cancelled.", run: current }, { status: 409 });
       }
       // Persist first, then interrupt any provider request in this process. The
       // store's terminal-write guard also covers providers that race this abort.
@@ -2390,7 +2436,7 @@ const server = Bun.serve<RealtimeSocketData>({
       try {
         const created = await startAgentRunInBackground({
           goal: source.goal,
-          message: source.goal,
+          message: source.message ?? source.goal,
           mode: source.mode === "loop" ? "loop" : "session",
           userId,
           conversationId: source.conversationId,
@@ -2520,9 +2566,10 @@ const server = Bun.serve<RealtimeSocketData>({
           created = wasCreated;
         };
         const run = mode === "loop"
-          ? await codingLoop.start({ goal, userId: configuredUserId, conversationId, idempotencyKey, onRunCreated })
+          ? await codingLoop.start({ goal, message, userId: configuredUserId, conversationId, idempotencyKey, onRunCreated })
           : await codingSessions.start({
               goal,
+              message,
               userId: configuredUserId,
               conversationId,
               idempotencyKey,

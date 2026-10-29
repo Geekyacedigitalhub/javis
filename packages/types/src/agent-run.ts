@@ -1,6 +1,6 @@
 import type { FroshToolCall } from "./javis";
 
-export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type FroshRunStatus = "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
 export type FroshAgentRunMode = "session" | "loop";
 
 export const FROSH_AGENT_RUN_TIMEOUT_ERROR = "Agent run execution timed out";
@@ -45,6 +45,8 @@ export interface FroshAgentRun {
   userId: string;
   conversationId?: string;
   goal: string;
+  /** Original user message for queued session work; legacy runs use `goal`. */
+  message?: string;
   /** A retry preserves this execution strategy but never reuses provider/tool state. */
   mode: FroshAgentRunMode;
   status: FroshRunStatus;
@@ -80,7 +82,7 @@ export interface FroshAgentRunEvent {
   id: string;
   runId: string;
   userId: string;
-  type: "created" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+  type: "created" | "queued" | "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
   status: FroshRunStatus;
   message: string;
   createdAt: string;
@@ -126,7 +128,10 @@ export interface FroshAgentRunStore {
   listEvents(runId: string, userId?: string, limit?: number): Promise<FroshAgentRunEvent[]>;
   /** Compact, append-only task state snapshots; no provider prompts or secrets. */
   listCheckpoints(runId: string, userId?: string, limit?: number): Promise<FroshAgentRunCheckpoint[]>;
-  /** Atomically marks only a live/waiting run cancelled. */
+  /** Atomically claims one queued run for provider execution, respecting the
+   * owner concurrency bound across API instances. */
+  claimQueued(id: string, userId?: string): Promise<FroshAgentRun | null>;
+  /** Atomically marks only queued, live, or approval-waiting work cancelled. */
   cancel(id: string, userId?: string): Promise<FroshAgentRun | null>;
   /** Atomically fails only work that is still actively executing after its
    * execution budget expires. */

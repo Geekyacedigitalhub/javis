@@ -38,6 +38,7 @@ const POLL_MS = 8_000;
 
 const TABS: Array<{ key: View; label: string }> = [
   { key: "all", label: "All" },
+  { key: "queued", label: "Queued" },
   { key: "running", label: "Running" },
   { key: "waiting_approval", label: "Waiting" },
   { key: "completed", label: "Completed" },
@@ -48,7 +49,7 @@ const TABS: Array<{ key: View; label: string }> = [
 export default function RunsPage() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
-  const [counts, setCounts] = useState<Counts>({ running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
+  const [counts, setCounts] = useState<Counts>({ queued: 0, running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
   const [view, setView] = useState<View>("all");
   const [status, setStatus] = useState("");
   const [loaded, setLoaded] = useState(false);
@@ -67,7 +68,7 @@ export default function RunsPage() {
       if (!response.ok) throw new Error("Request failed with status " + response.status);
       const body = await response.json();
       setRuns(Array.isArray(body.runs) ? body.runs : []);
-      setCounts(body.counts ?? { running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
+      setCounts(body.counts ?? { queued: 0, running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
       setStatus("");
       setLoaded(true);
     } catch (error) {
@@ -101,7 +102,7 @@ export default function RunsPage() {
     return () => clearInterval(timer);
   }, [load, userId, view]);
 
-  const total = counts.running + counts.waiting_approval + counts.completed + counts.failed + counts.cancelled;
+  const total = counts.queued + counts.running + counts.waiting_approval + counts.completed + counts.failed + counts.cancelled;
 
   const toggleRunDetails = async (runId: string) => {
     if (!userId) return;
@@ -263,6 +264,10 @@ export default function RunsPage() {
                 )}
               </div>
 
+              {run.status === "queued" ? (
+                <div className="run-queued">Queued safely. FROSH has not sent this run to a provider or tool yet.</div>
+              ) : null}
+
               {run.status === "waiting_approval" ? (
                 <div className="run-waiting">
                   Waiting on a decision. <Link href="/approvals">Open the approval center →</Link>
@@ -273,7 +278,7 @@ export default function RunsPage() {
                 <div className="run-cancelled">Stopped by you. No later provider result can reopen this run.</div>
               ) : null}
 
-              {run.status === "running" || run.status === "waiting_approval" ? (
+              {run.status === "queued" || run.status === "running" || run.status === "waiting_approval" ? (
                 <div className="run-actions">
                   <button type="button" className="run-stop" disabled={stopping === run.id} onClick={() => void stopRun(run)}>
                     {stopping === run.id ? "Stopping…" : "Stop run"}
