@@ -343,10 +343,10 @@ either knowing about the other.
 
 ```
 POST /v1/agent-runs        { goal, mode: "loop" }                    -> 201, final run
-POST /v1/agent-runs        { goal, mode: "loop", background: true }  -> 202, durable running run
+POST /v1/agent-runs        { goal, mode: "loop", background: true }  -> 202, durable queued run
 POST /v1/agent-runs        Idempotency-Key: <8-128 chars>            -> retry-safe original run (no duplicate execution)
 GET  /v1/agent-runs/users/:userId/:runId                             -> run plus its pending approval
-POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop a live run
+POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop queued, live, or approval-waiting work
 POST /v1/agent-runs/users/:userId/:runId/retry                       -> fresh background retry of failed/cancelled work
 GET  /v1/agent-runs/users/:userId/:runId/events                       -> append-only status audit history
 GET  /v1/agent-runs/users/:userId/:runId/checkpoints                  -> secret-free durable task checkpoints
@@ -440,8 +440,9 @@ complete, and once in `apps/web/app/runs/summary.ts` that decides what the page
 may claim. It lives in its own module precisely so it can be tested, because a
 console that rounded "a validation ran" up to "verified" would undo the promise
 in the one place a person actually looks. Approving a parked run is a link away:
-a run in `waiting_approval` points at `/approvals`. A live run also has a **Stop
-run** control. Stopping first writes a terminal `cancelled` state, then aborts
+a run in `waiting_approval` points at `/approvals`. Queued, live, and approval-
+waiting runs have a **Stop run** control. Stopping first writes a terminal
+`cancelled` state, then aborts
 any active model request; late provider output cannot turn it back into a
 completed or failed run. On startup, FROSH marks any interrupted `running` run
 as failed rather than replaying unknown provider or tool side effects; approval
@@ -449,17 +450,23 @@ waits remain resumable. Each active model phase also has a bounded execution
 budget (`FROSH_AGENT_RUN_TIMEOUT_MS`, ten minutes by default); expiry aborts the
 provider call and records a failure rather than replaying work. FROSH also
 limits each account to two active or approval-waiting runs by default
-(`FROSH_AGENT_MAX_ACTIVE_RUNS`, bounded to 1–5). A full queue receives an honest
-`429` response rather than starting unbounded parallel provider or tool work;
-cancelling or completing a run immediately frees its slot. Failed and cancelled
-runs have a **Retry as fresh work** control: it starts a new background run with
+(`FROSH_AGENT_MAX_ACTIVE_RUNS`, bounded to 1–5). A `background: true` request
+is saved first as **queued** — retaining its original user instruction but with
+no provider or tool dispatch — and returns `202` immediately. A worker
+atomically claims it to `running` only when an owner slot is available; a full
+owner capacity leaves the row visibly queued rather than pretending it started.
+Queued work is discovered again after a process restart, while previously
+`running` work still fails conservatively and is never replayed. A queued run
+can be stopped before dispatch; cancelling or completing a live run frees a
+slot for the next durable queue item. Failed and cancelled runs have a **Retry
+as fresh work** control: it starts a new background run with
 the same goal and mode, while deliberately dropping prior provider continuation,
 tool calls, approvals, and uncertain external-action state. A retry is therefore
 never an automatic replay; `Idempotency-Key` can make a retry click retry-safe.
 
 ```
 GET /v1/agent-runs/users/:userId?status=&limit=
-  -> { runs, counts: { running, waiting_approval, completed, failed, cancelled } }
+  -> { runs, counts: { queued, running, waiting_approval, completed, failed, cancelled } }
 ```
 
 Counts describe the whole set so the tabs stay honest while one status is shown.

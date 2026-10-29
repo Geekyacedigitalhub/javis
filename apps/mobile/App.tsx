@@ -360,7 +360,7 @@ export default function App() {
   }
 
   async function stopTask() {
-    if (!run || (run.status !== "running" && run.status !== "waiting_approval") || busyRef.current) return;
+    if (!run || (run.status !== "queued" && run.status !== "running" && run.status !== "waiting_approval") || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     try {
@@ -572,10 +572,13 @@ export default function App() {
           <Text style={styles.reply}>
             {run ? `${run.status.toUpperCase()} • ${run.goal}` : "No active agent run."}
           </Text>
+          {run?.status === "queued" ? (
+            <Text style={styles.muted}>Queued safely — no provider or tool action has started yet.</Text>
+          ) : null}
           {run?.pendingApprovalId ? (
             <Text style={styles.warning}>Approval required: {run.pendingApprovalId}</Text>
           ) : null}
-          {run && (run.status === "running" || run.status === "waiting_approval") ? (
+          {run && (run.status === "queued" || run.status === "running" || run.status === "waiting_approval") ? (
             <Pressable style={styles.secondary} onPress={stopTask} disabled={busy}>
               <Text style={styles.secondaryText}>{busy ? "STOPPING…" : "STOP TASK"}</Text>
             </Pressable>

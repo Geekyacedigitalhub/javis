@@ -24,9 +24,10 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
 
   private eventFor(run: FroshAgentRun, previous?: FroshAgentRun): FroshAgentRunEvent | null {
     if (previous && previous.status === run.status) return null;
-    const type = previous ? run.status : "created";
+    const type = previous ? run.status : (run.status === "queued" ? "queued" : "created");
     const message =
-      type === "created" ? "Agent run created." :
+      type === "created" ? (run.status === "queued" ? "Run queued for durable background execution." : "Agent run created.") :
+      type === "queued" ? "Run queued for durable background execution." :
       type === "waiting_approval" ? "FROSH is waiting for approval." :
       type === "cancelled" ? "Run cancelled by the user." :
       type === "failed" ? run.error || "Agent run failed." :
@@ -56,7 +57,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
               : "running";
     const latestTool = toolCallsChanged ? run.toolCalls.at(-1) : undefined;
     const message =
-      kind === "created" ? "Checkpoint created before FROSH began work."
+      kind === "created" ? (run.status === "queued" ? "Checkpoint saved while background work is queued." : "Checkpoint created before FROSH began work.")
       : kind === "awaiting_approval" ? "Checkpoint saved while FROSH waits for approval."
       : kind === "approval_resumed" ? "Checkpoint saved after approval; execution resumed."
       : kind === "tool_evidence" && latestTool ? `Checkpoint saved after ${latestTool.name} (${latestTool.status}).`
@@ -89,7 +90,10 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     const userId = input.userId?.trim() || "default-user";
     if (input.status === "running" || input.status === "waiting_approval") this.ensureCapacity(userId);
     const now = new Date().toISOString();
-    const run: FroshAgentRun = { ...input, mode: input.mode ?? "session", userId, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+    const run: FroshAgentRun = {
+      ...input, mode: input.mode ?? "session", message: input.message?.trim() || input.goal,
+      userId, id: crypto.randomUUID(), createdAt: now, updatedAt: now,
+    };
     this.save(run);
     return run;
   }
@@ -196,10 +200,24 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     return updated;
   }
 
+  async claimQueued(id: string, userId?: string) {
+    const current = this.runs.get(id);
+    if (!current || current.status !== "queued" || (userId && current.userId !== userId)) return null;
+    try {
+      this.ensureCapacity(current.userId);
+    } catch (error) {
+      if (error instanceof FroshAgentRunConcurrencyError) return null;
+      throw error;
+    }
+    const claimed: FroshAgentRun = { ...current, status: "running", updatedAt: new Date().toISOString() };
+    this.save(claimed, current);
+    return claimed;
+  }
+
   async cancel(id: string, userId?: string) {
     const current = this.runs.get(id);
     if (!current || (userId && current.userId !== userId)) return null;
-    if (current.status !== "running" && current.status !== "waiting_approval") return null;
+    if (current.status !== "queued" && current.status !== "running" && current.status !== "waiting_approval") return null;
     const updated: FroshAgentRun = {
       ...current,
       status: "cancelled",

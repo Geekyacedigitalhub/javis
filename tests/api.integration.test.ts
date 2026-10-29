@@ -478,14 +478,25 @@ describe("coding loop", () => {
     expect(body.toolCalls).toEqual([]);
   });
 
-  test("background starts return a durable id before the run finishes", async () => {
+  test("background starts return a durable queued id before provider work", async () => {
     const created = await call("/v1/agent-runs", {
       method: "POST",
       body: JSON.stringify({ goal: "Work in the background", background: true }),
     });
     expect(created.status).toBe(202);
-    expect(created.body.status).toBe("running");
+    expect(created.body.status).toBe("queued");
     expect(created.body.userId).toBe(USER);
+
+    // The queue worker claims after durable creation; the offline provider
+    // finishes quickly, so prove this is an executable queue rather than a
+    // status label with no worker behind it.
+    let observed = "queued";
+    for (let attempt = 0; attempt < 25 && observed === "queued"; attempt += 1) {
+      await Bun.sleep(20);
+      const current = await call(`/v1/agent-runs/users/${USER}/${created.body.id}`);
+      observed = current.body.run.status;
+    }
+    expect(["running", "completed"]).toContain(observed);
   });
 
   test("a loop run can be read back by id", async () => {

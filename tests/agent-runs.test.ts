@@ -55,6 +55,9 @@ beforeAll(async () => {
       FROSH_WEB_TOKEN: TOKEN,
       FROSH_DEVICE_ENROLLMENT_TOKEN: "runs-enroll",
       FROSH_USER_ID: USER,
+      // Keep API background work dormant so queue lifecycle assertions are
+      // deterministic; direct/synchronous compatibility paths still execute.
+      FROSH_DISABLE_BACKGROUND_RUNNERS: "1",
     },
     stdout: "pipe",
     stderr: "pipe",
@@ -89,7 +92,7 @@ describe("reading runs back", () => {
     const { status, body } = await call(`/v1/agent-runs/users/${USER}`);
     expect(status).toBe(200);
     expect(body.runs).toEqual([]);
-    expect(body.counts).toEqual({ running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
+    expect(body.counts).toEqual({ queued: 0, running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 });
   });
 
   test("a loop run that could not prove its work is listed as failed", async () => {
@@ -151,10 +154,42 @@ describe("reading runs back", () => {
     expect(body.error).toContain("status must be one of");
   });
 
+  test("persists background work as queued and permits cancellation before dispatch", async () => {
+    const created = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({
+        goal: "Prepare a deployment plan",
+        message: "Prepare a deployment plan using the current repository state.",
+        background: true,
+      }),
+    });
+    expect(created.status).toBe(202);
+    expect(created.body.status).toBe("queued");
+    expect(created.body.message).toBe("Prepare a deployment plan using the current repository state.");
+
+    const queued = await call(`/v1/agent-runs/users/${USER}?status=queued`);
+    expect(queued.body.runs.some((run: any) => run.id === created.body.id)).toBe(true);
+    expect(queued.body.counts.queued).toBeGreaterThanOrEqual(1);
+
+    const events = await call(`/v1/agent-runs/users/${USER}/${created.body.id}/events`);
+    expect(events.body.events.map((event: any) => event.type)).toEqual(["queued"]);
+    const checkpoints = await call(`/v1/agent-runs/users/${USER}/${created.body.id}/checkpoints`);
+    expect(checkpoints.body.checkpoints[0]).toMatchObject({ kind: "created", status: "queued" });
+
+    const cancelled = await call(`/v1/agent-runs/users/${USER}/${created.body.id}/cancel`, { method: "POST" });
+    expect(cancelled.status).toBe(200);
+    expect(cancelled.body.run.status).toBe("cancelled");
+    expect(cancelled.body.run.toolCalls).toEqual([]);
+  });
+
   test("retries a stopped run as new background work without replaying its old state", async () => {
     const source = await call("/v1/agent-runs", {
       method: "POST",
-      body: JSON.stringify({ goal: "Retry this verified coding goal", mode: "loop" }),
+      body: JSON.stringify({
+        goal: "Retry this verified coding goal",
+        message: "Retry this verified coding goal after checking the recorded evidence.",
+        mode: "loop",
+      }),
     });
     expect(source.status).toBe(201);
     expect(source.body.status).toBe("failed");
@@ -167,6 +202,8 @@ describe("reading runs back", () => {
     expect(fresh.body.fresh).toBe(true);
     expect(fresh.body.run.id).not.toBe(source.body.id);
     expect(fresh.body.run.mode).toBe("loop");
+    expect(fresh.body.run.message).toBe("Retry this verified coding goal after checking the recorded evidence.");
+    expect(fresh.body.run.status).toBe("queued");
     expect(fresh.body.run.toolCalls).toEqual([]);
 
     const replay = await call(`/v1/agent-runs/users/${USER}/${source.body.id}/retry`, { method: "POST", headers });
@@ -301,6 +338,33 @@ describe("InMemoryAgentRunStore.list", () => {
     expect(replay.created).toBe(false);
     expect(replay.run.id).toBe(first.run.id);
     expect(otherOwner.run.id).not.toBe(first.run.id);
+  });
+
+  test("claims queued work only when an owner has capacity, and emits truthful queue history", async () => {
+    const store = new InMemoryAgentRunStore(1);
+    const active = await store.create(run({ status: "running", userId: "owner-a" }));
+    const queued = await store.create(run({
+      status: "queued", userId: "owner-a", goal: "deferred", message: "Original deferred instruction",
+    }));
+
+    // A queued row is durable but has not crossed a provider/tool boundary.
+    expect(await store.claimQueued(queued.id, "owner-a")).toBeNull();
+    expect((await store.get(queued.id))?.status).toBe("queued");
+    expect((await store.listEvents(queued.id, "owner-a")).map((event) => event.type)).toEqual(["queued"]);
+
+    await store.cancel(active.id, "owner-a");
+    const claimed = await store.claimQueued(queued.id, "owner-a");
+    expect(claimed).toMatchObject({ id: queued.id, status: "running", message: "Original deferred instruction" });
+    expect((await store.listEvents(queued.id, "owner-a")).map((event) => event.type)).toEqual(["queued", "running"]);
+  });
+
+  test("preserves queued work through interrupted-run recovery", async () => {
+    const store = new InMemoryAgentRunStore();
+    const queued = await store.create(run({ status: "queued", userId: "owner-a" }));
+    await store.create(run({ status: "running", userId: "owner-a" }));
+
+    expect(await store.recoverInterrupted("owner-a")).toBe(1);
+    expect((await store.get(queued.id))?.status).toBe("queued");
   });
 
   test("bounds active runs per owner and frees capacity on a terminal state", async () => {
