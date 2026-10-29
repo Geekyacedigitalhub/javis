@@ -347,6 +347,7 @@ POST /v1/agent-runs        { goal, mode: "loop", background: true }  -> 202, dur
 POST /v1/agent-runs        Idempotency-Key: <8-128 chars>            -> retry-safe original run (no duplicate execution)
 GET  /v1/agent-runs/users/:userId/:runId                             -> run plus its pending approval
 POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomically stop a live run
+POST /v1/agent-runs/users/:userId/:runId/retry                       -> fresh background retry of failed/cancelled work
 GET  /v1/agent-runs/users/:userId/:runId/events                       -> append-only status audit history
 GET  /v1/agent-runs/users/:userId/:runId/checkpoints                  -> secret-free durable task checkpoints
 ```
@@ -450,7 +451,11 @@ provider call and records a failure rather than replaying work. FROSH also
 limits each account to two active or approval-waiting runs by default
 (`FROSH_AGENT_MAX_ACTIVE_RUNS`, bounded to 1–5). A full queue receives an honest
 `429` response rather than starting unbounded parallel provider or tool work;
-cancelling or completing a run immediately frees its slot.
+cancelling or completing a run immediately frees its slot. Failed and cancelled
+runs have a **Retry as fresh work** control: it starts a new background run with
+the same goal and mode, while deliberately dropping prior provider continuation,
+tool calls, approvals, and uncertain external-action state. A retry is therefore
+never an automatic replay; `Idempotency-Key` can make a retry click retry-safe.
 
 ```
 GET /v1/agent-runs/users/:userId?status=&limit=

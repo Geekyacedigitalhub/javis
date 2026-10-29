@@ -44,7 +44,8 @@
 .run-cancelled { margin-top: 12px; font-size: 13px; color: #cbd5e1; }
 .run-actions { display: flex; justify-content: flex-end; margin-top: 13px; }
 .run-stop { border: 1px solid #9f3030; background: #351414; color: #fecaca; border-radius: 8px; padding: 8px 11px; font-weight: 800; font-size: 12px; }
-.run-stop:disabled { opacity: .55; cursor: wait; }
+.run-retry { border: 1px solid #2d7b57; background: #103324; color: #bbf7d0; border-radius: 8px; padding: 8px 11px; font-weight: 800; font-size: 12px; }
+.run-stop:disabled, .run-retry:disabled { opacity: .55; cursor: wait; }
 
 .run-result { margin-top: 12px; color: #a7c4b3; font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 .run-error { margin-top: 10px; color: #fca5a5; font-size: 12px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }

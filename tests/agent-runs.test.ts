@@ -151,6 +151,33 @@ describe("reading runs back", () => {
     expect(body.error).toContain("status must be one of");
   });
 
+  test("retries a stopped run as new background work without replaying its old state", async () => {
+    const source = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Retry this verified coding goal", mode: "loop" }),
+    });
+    expect(source.status).toBe(201);
+    expect(source.body.status).toBe("failed");
+    expect(source.body.mode).toBe("loop");
+
+    const headers = { "idempotency-key": "fresh-retry-run-0001" };
+    const fresh = await call(`/v1/agent-runs/users/${USER}/${source.body.id}/retry`, { method: "POST", headers });
+    expect(fresh.status).toBe(202);
+    expect(fresh.body.sourceRunId).toBe(source.body.id);
+    expect(fresh.body.fresh).toBe(true);
+    expect(fresh.body.run.id).not.toBe(source.body.id);
+    expect(fresh.body.run.mode).toBe("loop");
+    expect(fresh.body.run.toolCalls).toEqual([]);
+
+    const replay = await call(`/v1/agent-runs/users/${USER}/${source.body.id}/retry`, { method: "POST", headers });
+    expect(replay.status).toBe(200);
+    expect(replay.headers.get("idempotent-replay")).toBe("true");
+    expect(replay.body.run.id).toBe(fresh.body.run.id);
+
+    const hidden = await call(`/v1/agent-runs/users/not-${USER}/${source.body.id}/retry`, { method: "POST" });
+    expect(hidden.status).toBe(404);
+  });
+
   test("returns an owner-scoped append-only event history", async () => {
     const created = await call("/v1/agent-runs", {
       method: "POST",
@@ -213,7 +240,7 @@ describe("agent-run concurrency limit", () => {
 
 describe("InMemoryAgentRunStore.list", () => {
   function run(overrides: Record<string, unknown> = {}) {
-    return { goal: "goal", status: "completed" as const, toolCalls: [], ...overrides };
+    return { goal: "goal", mode: "session" as const, status: "completed" as const, toolCalls: [], ...overrides };
   }
 
   test("returns the newest run first", async () => {

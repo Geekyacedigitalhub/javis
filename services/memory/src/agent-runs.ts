@@ -14,7 +14,7 @@ type Sql = ReturnType<typeof postgres>;
 type CreateInput = FroshAgentRunCreateInput;
 
 const COLUMNS =
-  'id, user_id AS "userId", conversation_id AS "conversationId", goal, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error';
+  'id, user_id AS "userId", conversation_id AS "conversationId", goal, mode, status, tool_calls AS "toolCalls", pending_approval_id AS "pendingApprovalId", provider_continuation AS "providerContinuation", created_at AS "createdAt", updated_at AS "updatedAt", result, error';
 
 /** Durable agent-run history. All mutations keep cancellation terminal, so a
  * slow provider cannot turn a user-stopped run into a completed/failed run. */
@@ -31,6 +31,7 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
       input.userId?.trim() || "default-user",
       input.conversationId ?? null,
       input.goal,
+      input.mode,
       input.status,
       JSON.stringify(input.toolCalls),
       input.pendingApprovalId ?? null,
@@ -54,11 +55,11 @@ export class PostgresAgentRunStore implements FroshAgentRunStore {
       `WITH owner_lock AS MATERIALIZED (
          SELECT 1 AS guard FROM (SELECT pg_advisory_xact_lock(hashtext($2::text))) AS acquired
        )
-       INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
-       SELECT $1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11
+       INSERT INTO frosh_agent_runs (id, user_id, conversation_id, goal, mode, status, tool_calls, pending_approval_id, provider_continuation, result, error, idempotency_key)
+       SELECT $1,$2,$3,$4,$5,$6,$7::jsonb,$8,$9::jsonb,$10,$11,$12
        FROM owner_lock
-       WHERE $5::text NOT IN ('running', 'waiting_approval')
-          OR (SELECT COUNT(*) FROM frosh_agent_runs WHERE user_id=$2 AND status IN ('running', 'waiting_approval') AND owner_lock.guard=1) < $12
+       WHERE $6::text NOT IN ('running', 'waiting_approval')
+          OR (SELECT COUNT(*) FROM frosh_agent_runs WHERE user_id=$2 AND status IN ('running', 'waiting_approval') AND owner_lock.guard=1) < $13
        ${conflict}
        RETURNING ${COLUMNS}`,
       values,

@@ -1,6 +1,7 @@
 import type { FroshToolCall } from "./javis";
 
 export type FroshRunStatus = "running" | "waiting_approval" | "completed" | "failed" | "cancelled";
+export type FroshAgentRunMode = "session" | "loop";
 
 export const FROSH_AGENT_RUN_TIMEOUT_ERROR = "Agent run execution timed out";
 export const FROSH_AGENT_RUN_TIMEOUT_RESULT =
@@ -44,6 +45,8 @@ export interface FroshAgentRun {
   userId: string;
   conversationId?: string;
   goal: string;
+  /** A retry preserves this execution strategy but never reuses provider/tool state. */
+  mode: FroshAgentRunMode;
   status: FroshRunStatus;
   toolCalls: FroshToolCall[];
   pendingApprovalId?: string;

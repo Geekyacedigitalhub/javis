@@ -11,7 +11,7 @@ import { closeTaskStore, getTaskStore } from "../../productivity/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import { closeFroshDatabaseClient } from "../../database/src";
-import { FroshAgentRunConcurrencyError } from "../../../packages/types/src/agent-run";
+import { FroshAgentRunConcurrencyError, type FroshAgentRunMode } from "../../../packages/types/src/agent-run";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -26,6 +26,46 @@ const googleIntegration = new GoogleIntegrationService(getGoogleIntegrationStore
 // The autonomous loop executes tools itself and verifies with real output, so it
 // is a separate driver from the single-shot session manager above.
 const codingLoop = new CodingLoop(createProvider());
+
+type BackgroundAgentRun = { run: Awaited<ReturnType<typeof agentRunStore.create>>; created: boolean };
+
+/** Start only a fresh durable run in the background. A retry passes only the
+ * original goal and mode; it never inherits a continuation, tool calls, or an
+ * uncertain external action from the stopped run. */
+async function startAgentRunInBackground(input: {
+  goal: string;
+  message: string;
+  mode: FroshAgentRunMode;
+  userId: string;
+  conversationId?: string;
+  idempotencyKey?: string;
+}): Promise<BackgroundAgentRun> {
+  let resolveCreated: ((created: BackgroundAgentRun) => void) | undefined;
+  let rejectCreated: ((error: unknown) => void) | undefined;
+  const created = new Promise<BackgroundAgentRun>((resolve, reject) => {
+    resolveCreated = resolve;
+    rejectCreated = reject;
+  });
+  const onRunCreated = async (run: Awaited<ReturnType<typeof agentRunStore.create>>, wasCreated: boolean) => {
+    resolveCreated?.({ run, created: wasCreated });
+  };
+  const execution = input.mode === "loop"
+    ? codingLoop.start({
+        goal: input.goal, userId: input.userId, conversationId: input.conversationId,
+        idempotencyKey: input.idempotencyKey, onRunCreated,
+      })
+    : codingSessions.start({
+        goal: input.goal, userId: input.userId, conversationId: input.conversationId,
+        idempotencyKey: input.idempotencyKey,
+        messages: [{ role: "user", content: input.message }], onRunCreated,
+      });
+  void execution.catch((error) => {
+    rejectCreated?.(error);
+    logOperationalError("Background agent run failed", error);
+  });
+  return created;
+}
+
 // A Control Center container can run a colocated API sidecar on a private
 // loopback port. Render supplies PORT for the public Next server in that
 // deployment, so use an explicit API-port override when present.
@@ -2332,6 +2372,49 @@ const server = Bun.serve<RealtimeSocketData>({
       return Response.json({ run: cancelled });
     }
 
+    const agentRunRetryMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/retry$/);
+    if (agentRunRetryMatch && request.method === "POST") {
+      const userId = decodeBoundedUserId(agentRunRetryMatch[1]);
+      const runId = decodeBoundedResourceId(agentRunRetryMatch[2]);
+      if (!userId || !runId) return Response.json({ error: "Invalid agent run identifier" }, { status: 400 });
+      if (userId !== configuredUserId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      const source = await agentRunStore.get(runId);
+      if (!source || source.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      if (source.status !== "failed" && source.status !== "cancelled") {
+        return Response.json({ error: "Only failed or cancelled runs can be retried as fresh work." }, { status: 409 });
+      }
+      const idempotencyKey = request.headers.get("idempotency-key")?.trim();
+      if (idempotencyKey !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$/.test(idempotencyKey)) {
+        return Response.json({ error: "Idempotency-Key must be 8-128 URL-safe characters." }, { status: 400 });
+      }
+      try {
+        const created = await startAgentRunInBackground({
+          goal: source.goal,
+          message: source.goal,
+          mode: source.mode === "loop" ? "loop" : "session",
+          userId,
+          conversationId: source.conversationId,
+          idempotencyKey,
+        });
+        return Response.json(
+          { sourceRunId: source.id, run: created.run, fresh: true },
+          {
+            status: created.created ? 202 : 200,
+            headers: created.created ? undefined : { "Idempotent-Replay": "true" },
+          },
+        );
+      } catch (error) {
+        if (error instanceof FroshAgentRunConcurrencyError) {
+          return Response.json(
+            { error: error.message, limit: error.limit, retryable: true },
+            { status: 429, headers: { "Retry-After": "30" } },
+          );
+        }
+        logOperationalError("Fresh agent-run retry failed", error);
+        return Response.json({ error: "Could not start a fresh retry." }, { status: 500 });
+      }
+    }
+
     const agentRunEventsMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/events$/);
     if (agentRunEventsMatch && request.method === "GET") {
       const userId = decodeBoundedUserId(agentRunEventsMatch[1]);
@@ -2391,6 +2474,11 @@ const server = Bun.serve<RealtimeSocketData>({
         if (!goal) {
           return Response.json({ error: "goal is required" }, { status: 400 });
         }
+        const requestedMode = body?.mode;
+        if (requestedMode !== undefined && requestedMode !== "session" && requestedMode !== "loop") {
+          return Response.json({ error: "mode must be session or loop" }, { status: 400 });
+        }
+        const mode: FroshAgentRunMode = requestedMode === "loop" ? "loop" : "session";
 
         const conversationId =
           typeof body?.conversationId === "string" ? body.conversationId : undefined;
@@ -2416,31 +2504,9 @@ const server = Bun.serve<RealtimeSocketData>({
         }
 
         if (background) {
-          type CreatedRun = { run: Awaited<ReturnType<typeof agentRunStore.create>>; created: boolean };
-          let resolveCreated: ((run: CreatedRun) => void) | undefined;
-          let rejectCreated: ((error: unknown) => void) | undefined;
-          const created = new Promise<CreatedRun>((resolve, reject) => {
-            resolveCreated = resolve;
-            rejectCreated = reject;
+          const createdRun = await startAgentRunInBackground({
+            goal, message, mode, userId: configuredUserId, conversationId, idempotencyKey,
           });
-          const onRunCreated = async (run: Awaited<ReturnType<typeof agentRunStore.create>>, wasCreated: boolean) => {
-            resolveCreated?.({ run, created: wasCreated });
-          };
-          const execution = body?.mode === "loop"
-            ? codingLoop.start({ goal, userId: configuredUserId, conversationId, idempotencyKey, onRunCreated })
-            : codingSessions.start({
-                goal,
-                userId: configuredUserId,
-                conversationId,
-                idempotencyKey,
-                messages: [{ role: "user", content: message }],
-                onRunCreated,
-              });
-          void execution.catch((error) => {
-            rejectCreated?.(error);
-            logOperationalError("Background agent run failed", error);
-          });
-          const createdRun = await created;
           return Response.json(createdRun.run, {
             status: createdRun.created ? 202 : 200,
             headers: createdRun.created ? undefined : { "Idempotent-Replay": "true" },
@@ -2453,7 +2519,7 @@ const server = Bun.serve<RealtimeSocketData>({
         const onRunCreated = async (_run: Awaited<ReturnType<typeof agentRunStore.create>>, wasCreated: boolean) => {
           created = wasCreated;
         };
-        const run = body?.mode === "loop"
+        const run = mode === "loop"
           ? await codingLoop.start({ goal, userId: configuredUserId, conversationId, idempotencyKey, onRunCreated })
           : await codingSessions.start({
               goal,

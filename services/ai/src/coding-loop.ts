@@ -184,6 +184,7 @@ export class CodingLoop {
       userId: input.userId,
       conversationId: input.conversationId,
       goal,
+      mode: "loop" as const,
       status: "running" as const,
       toolCalls: [],
     };

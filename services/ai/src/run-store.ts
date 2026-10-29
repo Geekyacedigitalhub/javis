@@ -89,7 +89,7 @@ export class InMemoryAgentRunStore implements FroshAgentRunStore {
     const userId = input.userId?.trim() || "default-user";
     if (input.status === "running" || input.status === "waiting_approval") this.ensureCapacity(userId);
     const now = new Date().toISOString();
-    const run: FroshAgentRun = { ...input, userId, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
+    const run: FroshAgentRun = { ...input, mode: input.mode ?? "session", userId, id: crypto.randomUUID(), createdAt: now, updatedAt: now };
     this.save(run);
     return run;
   }
