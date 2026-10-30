@@ -78,6 +78,15 @@ bun run migrate:verify # fail if anything is pending or a checksum drifted
 bun run build:web      # production build of the control center
 ```
 
+### Personal task assistance
+
+**Tasks** are durable and owner-scoped. A configured live assistant can safely
+list and read the authenticated user's tasks, with bounded task notes treated as
+untrusted reference data. Creating, updating (including completing or
+cancelling), and permanently deleting tasks use the approval flow, so a model
+cannot silently alter the task list. As with notes, task ownership is
+server-supplied execution context rather than a tool argument.
+
 ### Personal knowledge notes
 
 **Notes** in the Control Center are a durable, owner-scoped personal knowledge
@@ -118,6 +127,7 @@ scheduled probes.
 | `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
 | `tests/notes.test.ts` | Owner scope, validation, tags, search, pinning, task linkage, and deletion behavior for personal notes |
 | `tests/personal-knowledge-tools.test.ts` | Authenticated assistant note search/list/read, owner-context propagation, bounded pinned context, and prompt-injection resistance |
+| `tests/task-tools.test.ts` | Authenticated assistant task reads, bounded content, owner isolation, validation, and approval-gated task mutations |
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, the coding loop, 404 |
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |

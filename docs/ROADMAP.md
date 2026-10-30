@@ -290,7 +290,7 @@ Android → FROSH API → authenticated Windows Agent → PC
 
 ## Phase 13 — Personal Productivity
 
-- tasks
+- tasks — **implemented** (durable owner-scoped task API and Control Center workflow, plus authenticated assistant list/read tools and approval-gated mutations)
 - reminders
 - calendar
 - notes — **implemented** (durable owner-scoped notes, tags, search, pinning, task links, API, Control Center workflow, and authenticated assistant retrieval tools)
