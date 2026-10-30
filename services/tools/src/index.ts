@@ -18,4 +18,5 @@ import "./contact-tools";
 
 import "./memory-tools";
 import "./note-tools";
+import "./task-tools";
 import "./messaging-tools";
