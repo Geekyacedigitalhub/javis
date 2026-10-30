@@ -129,6 +129,14 @@ deleting an automation always requires approval because it changes what FROSH
 will do later. Tool validation rejects unsafe schedules—including one-time jobs
 in the past—before an approval can be created.
 
+### Assistant preference control
+
+A configured assistant can read the authenticated user's operating preferences
+and, after approval, update response style, mode, technical depth, autonomy
+preference, notification style, or spoken language for future turns. The tools
+never accept a model-supplied owner and cannot weaken tool permissions or the
+approval boundary.
+
 ### Test suite
 
 | File | Covers |
@@ -138,6 +146,7 @@ in the past—before an approval can be created.
 | `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
 | `tests/automation-tools.test.ts` | Authenticated assistant automation reads, bounded prompts, approval-gated mutations, schedule validation, and owner isolation |
+| `tests/preference-tools.test.ts` | Authenticated assistant preference reads, approval-gated changes, validation, and owner isolation |
 | `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
 | `tests/monitor-tools.test.ts` | Authenticated assistant monitor reads/events, approvals, immediate bounded probes, SSRF validation, and owner isolation |
 | `tests/notes.test.ts` | Owner scope, validation, tags, search, pinning, task linkage, and deletion behavior for personal notes |
