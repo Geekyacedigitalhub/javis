@@ -350,6 +350,7 @@ POST /v1/agent-runs/users/:userId/:runId/cancel                      -> atomical
 POST /v1/agent-runs/users/:userId/:runId/retry                       -> fresh background retry of failed/cancelled work
 GET  /v1/agent-runs/users/:userId/:runId/events                       -> append-only status audit history
 GET  /v1/agent-runs/users/:userId/:runId/checkpoints                  -> secret-free durable task checkpoints
+GET  /v1/agent-runs/users/:userId/:runId/stream                       -> owner-scoped live durable-status SSE
 ```
 
 Without `mode: "loop"` the endpoint behaves exactly as before. With no live
@@ -470,6 +471,11 @@ GET /v1/agent-runs/users/:userId?status=&limit=
 ```
 
 Counts describe the whole set so the tabs stay honest while one status is shown.
+
+A paired Android client also opens an authenticated owner-scoped SSE stream for
+its active queued/running task. The stream reads the durable run record, so it
+works even when the worker is on another API instance, sends only changed status
+snapshots plus heartbeats, and closes when the task reaches a terminal state.
 
 Every new durable run also has an append-only status history and compact,
 secret-free task checkpoints. The run console's **Show run activity** view reads

@@ -227,6 +227,84 @@ export async function streamMessage(
   if (!completed) throw new Error("FROSH live response ended before completion.");
 }
 
+export type FroshAgentRunStreamEvent =
+  | { type: "run.updated"; run: FroshAgentRun }
+  | { type: "heartbeat" };
+
+function isAgentRunStreamEvent(value: unknown): value is FroshAgentRunStreamEvent {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const event = value as Record<string, unknown>;
+  if (event.type === "heartbeat") return true;
+  return event.type === "run.updated" && Boolean(event.run) && typeof event.run === "object";
+}
+
+/** Read owner-scoped durable task updates over SSE. The server derives the
+ * account id from the paired-device credential; no client-selected owner can
+ * subscribe to somebody else's run. */
+export async function streamAgentRun(
+  id: string,
+  onEvent: (event: FroshAgentRunStreamEvent) => void,
+  signal?: AbortSignal,
+) {
+  if (credential && Date.parse(credential.expiresAt) <= Date.now()) {
+    credential = null;
+    authenticatedUserId = null;
+    await clearDeviceCredential().catch(() => undefined);
+    throw new Error("Device credential has expired. Re-pair this phone.");
+  }
+  const userId = await currentUserId();
+  if (!id || id.length > 200) throw new Error("Invalid agent run ID");
+  const requestCredential = credential;
+  const response = await expoFetch(`${FROSH_API_URL}/v1/agent-runs/users/${encodeURIComponent(userId)}/${encodeURIComponent(id)}/stream`, {
+    method: "GET",
+    headers: {
+      Accept: "text/event-stream",
+      ...(requestCredential ? {
+        "x-frosh-device-id": requestCredential.deviceId,
+        "x-frosh-device-token": requestCredential.token,
+      } : {}),
+    },
+    signal,
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({})) as { error?: unknown };
+    if (response.status === 401 && requestCredential && credential?.deviceId === requestCredential.deviceId && credential.token === requestCredential.token) {
+      credential = null;
+      authenticatedUserId = null;
+      await clearDeviceCredential().catch(() => undefined);
+    }
+    throw new Error(typeof body.error === "string" ? body.error : `Request failed: ${response.status}`);
+  }
+  if (!response.body) throw new Error("This FROSH app build cannot monitor the task live. Update the app and try again.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffered = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done || signal?.aborted) break;
+      buffered += decoder.decode(value, { stream: true });
+      const extracted = takeSseFrames(buffered);
+      buffered = extracted.remainder;
+      for (const frame of extracted.frames) {
+        const data = sseData(frame);
+        if (!data) continue;
+        let parsed: unknown;
+        try { parsed = JSON.parse(data); } catch { throw new Error("FROSH returned an invalid task update."); }
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed) && (parsed as Record<string, unknown>).type === "error") {
+          const message = (parsed as Record<string, unknown>).message;
+          throw new Error(typeof message === "string" ? message : "FROSH task monitoring failed.");
+        }
+        if (!isAgentRunStreamEvent(parsed)) throw new Error("FROSH returned an invalid task update.");
+        onEvent(parsed);
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export function startAgentRun(goal: string) {
   return request<FroshAgentRun>("/v1/agent-runs", {
     method: "POST",

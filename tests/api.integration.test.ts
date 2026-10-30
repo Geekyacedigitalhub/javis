@@ -499,6 +499,28 @@ describe("coding loop", () => {
     expect(["running", "completed"]).toContain(observed);
   });
 
+  test("agent-run streaming returns owner-scoped durable updates and closes at a terminal state", async () => {
+    const created = await call("/v1/agent-runs", {
+      method: "POST",
+      body: JSON.stringify({ goal: "Stream this background task", background: true }),
+    });
+    expect(created.status).toBe(202);
+
+    const response = await fetch(`${BASE}/v1/agent-runs/users/${USER}/${created.body.id}/stream`, {
+      headers: auth,
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/event-stream");
+    const text = await response.text();
+    const events = text.split("\n\n")
+      .filter((frame) => frame.startsWith("data: "))
+      .map((frame) => JSON.parse(frame.slice("data: ".length)));
+    expect(events.at(-1)).toMatchObject({ type: "run.updated", run: { id: created.body.id, status: "completed" } });
+
+    const hidden = await call(`/v1/agent-runs/users/not-${USER}/${created.body.id}/stream`);
+    expect(hidden.status).toBe(404);
+  });
+
   test("a loop run can be read back by id", async () => {
     const created = await call("/v1/agent-runs", {
       method: "POST",
