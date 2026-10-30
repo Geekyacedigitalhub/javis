@@ -15,6 +15,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - `services/ai` — model orchestration and agent loop
 - `services/memory` — persistent memory layer
 - `services/productivity` — durable personal tasks and daily briefing layer
+- `services/monitoring` — durable public-HTTPS monitors, state transitions, and proactive health history
 - `services/preferences` — persistent modes, personality, autonomy, and response settings
 - `services/google` — encrypted Gmail and Google Calendar OAuth integration
 - `services/tools` — permissioned tools/actions
@@ -27,6 +28,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - Model-provider boundary with Gemini and OpenAI adapters, plus a truthful offline test fallback
 - Persistent conversation context, user preferences, and memory-candidate review
 - Permissioned tools, an approval center, agent runs, mission/automation records, and audit trails
+- Proactive public-HTTPS health monitoring with bounded probes, durable state transitions, and a command-center history
 - Web Control Center, Android companion source, and an opt-in desktop-device agent
 - Browser speech controls, Android spoken replies, visual analysis of an explicitly captured Android photo, and device/native capability bridges where the host grants permission
 
@@ -75,6 +77,23 @@ bun run migrate:verify # fail if anything is pending or a checksum drifted
 bun run build:web      # production build of the control center
 ```
 
+### Proactive service monitoring
+
+**Monitors** in the control center can check a user-authorized public HTTPS
+endpoint every 5 minutes to 24 hours. Each probe validates the initial URL and
+every redirect, rejects local/private destinations, resolves DNS before egress,
+uses `HEAD` first (with a one-byte `GET` fallback only when a server rejects
+`HEAD`), and has a 12-second bound. This is real endpoint monitoring, not a
+simulated dashboard status.
+
+Monitor state and transition history are durable when `DATABASE_URL` is set.
+The runner leases due rows so multiple API instances do not perform the same
+check; local in-memory mode intentionally supports only explicit **Check now**
+requests and does not pretend to provide restart-safe schedules. Current
+degraded/down monitors also appear in **Today**. Set
+`FROSH_MONITORING_ENABLED=0` to leave the monitor API available while disabling
+scheduled probes.
+
 ### Test suite
 
 | File | Covers |
@@ -83,6 +102,7 @@ bun run build:web      # production build of the control center
 | `tests/missions.test.ts` | Mission lifecycle, leases, quota fence, event ownership |
 | `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
+| `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, the coding loop, 404 |
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |

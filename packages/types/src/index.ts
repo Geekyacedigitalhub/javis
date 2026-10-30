@@ -13,3 +13,4 @@ export * from "./conversation-memory";
 export * from "./productivity";
 export * from "./preferences";
 export * from "./google";
+export * from "./monitoring";

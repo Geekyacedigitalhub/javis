@@ -415,7 +415,7 @@ Support:
 - system events
 - deployment events
 - notification events
-- monitoring events
+- monitoring events — **implemented for public HTTPS endpoint checks** (durable schedules, leases, redirect/private-network defenses, transition history, and command-center controls)
 
 Example:
 

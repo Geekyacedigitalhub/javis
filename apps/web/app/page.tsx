@@ -248,6 +248,7 @@ export default function Home() {
           <Link href="/devices">Devices</Link>
           <Link href="/messages">Messages</Link>
           <Link href="/automations">Automations</Link>
+          <Link href="/monitors">Monitors</Link>
           <Link href="/missions">Missions</Link>
           <Link href="/runs">Runs</Link>
           <Link href="/approvals">Approvals</Link>

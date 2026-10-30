@@ -8,10 +8,12 @@ import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
 import { closeTaskStore, getTaskStore } from "../../productivity/src";
+import { checkMonitorNow, closeMonitorStore, getMonitorStore, startMonitorRunner, stopMonitorRunner } from "../../monitoring/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import { closeFroshDatabaseClient } from "../../database/src";
 import { FroshAgentRunConcurrencyError, type FroshAgentRunMode, type FroshRunStatus } from "../../../packages/types/src/agent-run";
+import type { FroshHttpMonitorCreateInput, FroshHttpMonitorPatch } from "../../../packages/types/src/monitoring";
 import { publicAgentRun } from "./public-agent-run";
 import type {
   FroshMission,
@@ -225,6 +227,7 @@ import { startMissionRunner } from "../../missions/src";
 if (backgroundRunnersEnabled) {
   startAutomationRunner();
   startMissionRunner();
+  startMonitorRunner();
 }
 
 async function recoverMissionsOnStartup(){
@@ -293,6 +296,12 @@ export async function closeApi() {
     await closeTaskStore();
   } catch (error) {
     logOperationalError("FROSH task store shutdown failed", error);
+  }
+  try {
+    await stopMonitorRunner();
+    await closeMonitorStore();
+  } catch (error) {
+    logOperationalError("FROSH monitor store shutdown failed", error);
   }
   try {
     await closeUserPreferenceStore();
@@ -882,12 +891,17 @@ const server = Bun.serve<RealtimeSocketData>({
       const missions = await getMissionStore().list(userId);
       const activeMissions = missions.filter((mission) => !["completed", "failed", "cancelled"].includes(mission.status));
       const approvals = await approvalStore.list({ status: "pending", limit: 50 });
+      const monitors = await getMonitorStore().list(userId, 100);
+      const monitorAttention = monitors.filter((monitor) => monitor.health === "down" || monitor.health === "degraded");
       return Response.json({
         generatedAt: now.toISOString(),
-        headline: overdue.length ? `${overdue.length} task${overdue.length === 1 ? " is" : "s are"} overdue.` : dueToday.length ? `${dueToday.length} task${dueToday.length === 1 ? " is" : "s are"} due today.` : "Your task list is clear for today.",
+        headline: monitorAttention.some((monitor) => monitor.health === "down")
+          ? `${monitorAttention.filter((monitor) => monitor.health === "down").length} monitored service${monitorAttention.filter((monitor) => monitor.health === "down").length === 1 ? " is" : "s are"} down.`
+          : overdue.length ? `${overdue.length} task${overdue.length === 1 ? " is" : "s are"} overdue.` : dueToday.length ? `${dueToday.length} task${dueToday.length === 1 ? " is" : "s are"} due today.` : "Your task list is clear for today.",
         tasks: { open: activeTasks.length, overdue, dueToday, completedToday: tasks.filter((task) => task.completedAt && Date.parse(task.completedAt) >= new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) },
         missions: activeMissions,
         approvals,
+        monitors: { attention: monitorAttention },
       });
     }
 
@@ -1229,6 +1243,90 @@ const server = Bun.serve<RealtimeSocketData>({
       return device
         ? Response.json(device)
         : Response.json({ error: "Device not found" }, { status: 404 });
+    }
+
+    // ------------------------------------------------------------------
+    // Proactive HTTP monitors
+    // ------------------------------------------------------------------
+    const monitorUsersMatch = url.pathname.match(/^\/v1\/monitors\/users\/([^/]+)$/);
+    if (monitorUsersMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(monitorUsersMatch[1]);
+      if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+      const limit = Number(url.searchParams.get("limit") ?? "100");
+      return Response.json({ monitors: await getMonitorStore().list(userId, Number.isFinite(limit) ? limit : 100) });
+    }
+    if (monitorUsersMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(monitorUsersMatch[1]);
+        if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+        const body = await parseBoundedJson(request);
+        const monitor = await getMonitorStore().create({
+          userId,
+          name: body?.name,
+          url: body?.url,
+          intervalMinutes: body?.intervalMinutes,
+        } as FroshHttpMonitorCreateInput);
+        return Response.json({ monitor }, { status: 201 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Invalid monitor" }, { status: 400 });
+      }
+    }
+
+    const monitorEventsMatch = url.pathname.match(/^\/v1\/monitors\/users\/([^/]+)\/([^/]+)\/events$/);
+    if (monitorEventsMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(monitorEventsMatch[1]);
+      const monitorId = decodeBoundedResourceId(monitorEventsMatch[2]);
+      if (!userId || !monitorId) return Response.json({ error: "Invalid monitor identifier" }, { status: 400 });
+      const monitor = await getMonitorStore().get(monitorId, userId);
+      if (!monitor) return Response.json({ error: "Monitor not found" }, { status: 404 });
+      const limit = Number(url.searchParams.get("limit") ?? "50");
+      return Response.json({ events: await getMonitorStore().listEvents(monitorId, userId, Number.isFinite(limit) ? limit : 50) });
+    }
+
+    const monitorCheckMatch = url.pathname.match(/^\/v1\/monitors\/users\/([^/]+)\/([^/]+)\/check$/);
+    if (monitorCheckMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(monitorCheckMatch[1]);
+        const monitorId = decodeBoundedResourceId(monitorCheckMatch[2]);
+        if (!userId || !monitorId) return Response.json({ error: "Invalid monitor identifier" }, { status: 400 });
+        const monitor = await checkMonitorNow(monitorId, userId);
+        if (!monitor) return Response.json({ error: "Monitor is unavailable, paused, or already checking" }, { status: 409 });
+        return Response.json({ monitor });
+      } catch (error) {
+        logOperationalError("FROSH manual monitor check failed", error);
+        return Response.json({ error: "Monitor check failed" }, { status: 502 });
+      }
+    }
+
+    const monitorMatch = url.pathname.match(/^\/v1\/monitors\/users\/([^/]+)\/([^/]+)$/);
+    if (monitorMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeBoundedUserId(monitorMatch[1]);
+        const monitorId = decodeBoundedResourceId(monitorMatch[2]);
+        if (!userId || !monitorId) return Response.json({ error: "Invalid monitor identifier" }, { status: 400 });
+        const body = await parseBoundedJson(request);
+        const monitor = await getMonitorStore().update(monitorId, userId, {
+          ...(Object.hasOwn(body ?? {}, "name") ? { name: body?.name } : {}),
+          ...(Object.hasOwn(body ?? {}, "intervalMinutes") ? { intervalMinutes: body?.intervalMinutes } : {}),
+          ...(Object.hasOwn(body ?? {}, "status") ? { status: body?.status } : {}),
+        } as FroshHttpMonitorPatch);
+        if (!monitor) return Response.json({ error: "Monitor not found" }, { status: 404 });
+        return Response.json({ monitor });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Invalid monitor update" }, { status: 400 });
+      }
+    }
+    if (monitorMatch && request.method === "DELETE") {
+      try {
+        const userId = decodeBoundedUserId(monitorMatch[1]);
+        const monitorId = decodeBoundedResourceId(monitorMatch[2]);
+        if (!userId || !monitorId) return Response.json({ error: "Invalid monitor identifier" }, { status: 400 });
+        const deleted = await getMonitorStore().delete(monitorId, userId);
+        if (!deleted) return Response.json({ error: "Monitor not found or currently checking" }, { status: 409 });
+        return Response.json({ ok: true });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Monitor could not be deleted" }, { status: 400 });
+      }
     }
 
     const automationUsers = url.pathname.match(/^\/v1\/automations\/users\/([^/]+)$/);
