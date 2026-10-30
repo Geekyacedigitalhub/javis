@@ -8,12 +8,14 @@ import { getUserMemoryStore } from "../../memory/src/user-memory-factory";
 import { listUserMemoryCandidates, resolveUserMemoryCandidate } from "../../memory/src/memory-candidates";
 import { fetchResearchSource, ResearchRequestError } from "../../research/src/fetch";
 import { closeTaskStore, getTaskStore } from "../../productivity/src";
+import { closeNoteStore, getNoteStore } from "../../notes/src";
 import { checkMonitorNow, closeMonitorStore, getMonitorStore, startMonitorRunner, stopMonitorRunner } from "../../monitoring/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import { closeFroshDatabaseClient } from "../../database/src";
 import { FroshAgentRunConcurrencyError, type FroshAgentRunMode, type FroshRunStatus } from "../../../packages/types/src/agent-run";
 import type { FroshHttpMonitorCreateInput, FroshHttpMonitorPatch } from "../../../packages/types/src/monitoring";
+import type { FroshNoteCreateInput, FroshNotePatch } from "../../../packages/types/src/note";
 import { publicAgentRun } from "./public-agent-run";
 import type {
   FroshMission,
@@ -296,6 +298,11 @@ export async function closeApi() {
     await closeTaskStore();
   } catch (error) {
     logOperationalError("FROSH task store shutdown failed", error);
+  }
+  try {
+    await closeNoteStore();
+  } catch (error) {
+    logOperationalError("FROSH note store shutdown failed", error);
   }
   try {
     await stopMonitorRunner();
@@ -877,6 +884,91 @@ const server = Bun.serve<RealtimeSocketData>({
       return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Task not found" }, { status: 404 });
     }
 
+    // ------------------------------------------------------------------
+    // Personal knowledge notes
+    // ------------------------------------------------------------------
+    const noteUsersMatch = url.pathname.match(/^\/v1\/notes\/users\/([^/]+)$/);
+    if (noteUsersMatch && request.method === "GET") {
+      try {
+        const userId = decodeBoundedUserId(noteUsersMatch[1]);
+        if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+        const pinnedRaw = url.searchParams.get("pinned");
+        if (pinnedRaw !== null && pinnedRaw !== "true" && pinnedRaw !== "false") return Response.json({ error: "pinned must be true or false" }, { status: 400 });
+        const limit = Number(url.searchParams.get("limit") ?? "100");
+        const notes = await getNoteStore().list(userId, {
+          query: url.searchParams.get("q") ?? undefined,
+          tag: url.searchParams.get("tag") ?? undefined,
+          pinned: pinnedRaw === null ? undefined : pinnedRaw === "true",
+          limit: Number.isFinite(limit) ? limit : 100,
+        });
+        return Response.json({ notes });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Invalid note query" }, { status: 400 });
+      }
+    }
+    if (noteUsersMatch && request.method === "POST") {
+      try {
+        const userId = decodeBoundedUserId(noteUsersMatch[1]);
+        if (!userId) return Response.json({ error: "Invalid user ID" }, { status: 400 });
+        const body = await parseBoundedJson(request);
+        if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "Note body must be an object" }, { status: 400 });
+        const input = body as Record<string, unknown>;
+        if (typeof input.taskId === "string" && !(await getTaskStore().get(input.taskId, userId))) {
+          return Response.json({ error: "Linked task not found" }, { status: 400 });
+        }
+        const note = await getNoteStore().create({
+          userId,
+          title: input.title,
+          content: input.content,
+          tags: input.tags,
+          pinned: input.pinned,
+          taskId: input.taskId,
+        } as FroshNoteCreateInput);
+        return Response.json({ note }, { status: 201 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Note creation failed" }, { status: 400 });
+      }
+    }
+
+    const noteMatch = url.pathname.match(/^\/v1\/notes\/users\/([^/]+)\/([^/]+)$/);
+    if (noteMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(noteMatch[1]);
+      const noteId = decodeBoundedResourceId(noteMatch[2]);
+      if (!userId || !noteId) return Response.json({ error: "Invalid note identifier" }, { status: 400 });
+      const note = await getNoteStore().get(noteId, userId);
+      return note ? Response.json({ note }) : Response.json({ error: "Note not found" }, { status: 404 });
+    }
+    if (noteMatch && request.method === "PATCH") {
+      try {
+        const userId = decodeBoundedUserId(noteMatch[1]);
+        const noteId = decodeBoundedResourceId(noteMatch[2]);
+        if (!userId || !noteId) return Response.json({ error: "Invalid note identifier" }, { status: 400 });
+        const body = await parseBoundedJson(request);
+        if (!body || typeof body !== "object" || Array.isArray(body)) return Response.json({ error: "Note body must be an object" }, { status: 400 });
+        const input = body as Record<string, unknown>;
+        if (Object.hasOwn(input, "taskId") && typeof input.taskId === "string" && !(await getTaskStore().get(input.taskId, userId))) {
+          return Response.json({ error: "Linked task not found" }, { status: 400 });
+        }
+        const note = await getNoteStore().update(noteId, userId, {
+          ...(Object.hasOwn(input, "title") ? { title: input.title } : {}),
+          ...(Object.hasOwn(input, "content") ? { content: input.content } : {}),
+          ...(Object.hasOwn(input, "tags") ? { tags: input.tags } : {}),
+          ...(Object.hasOwn(input, "pinned") ? { pinned: input.pinned } : {}),
+          ...(Object.hasOwn(input, "taskId") ? { taskId: input.taskId } : {}),
+        } as FroshNotePatch);
+        return note ? Response.json({ note }) : Response.json({ error: "Note not found" }, { status: 404 });
+      } catch (error) {
+        return Response.json({ error: error instanceof Error ? error.message : "Note update failed" }, { status: 400 });
+      }
+    }
+    if (noteMatch && request.method === "DELETE") {
+      const userId = decodeBoundedUserId(noteMatch[1]);
+      const noteId = decodeBoundedResourceId(noteMatch[2]);
+      if (!userId || !noteId) return Response.json({ error: "Invalid note identifier" }, { status: 400 });
+      const deleted = await getNoteStore().delete(noteId, userId);
+      return deleted ? Response.json({ deleted: true }) : Response.json({ error: "Note not found" }, { status: 404 });
+    }
+
     const briefingMatch = url.pathname.match(/^\/v1\/briefing\/users\/([^/]+)$/);
     if (briefingMatch && request.method === "GET") {
       const userId = decodeBoundedUserId(briefingMatch[1]);
@@ -891,6 +983,7 @@ const server = Bun.serve<RealtimeSocketData>({
       const missions = await getMissionStore().list(userId);
       const activeMissions = missions.filter((mission) => !["completed", "failed", "cancelled"].includes(mission.status));
       const approvals = await approvalStore.list({ status: "pending", limit: 50 });
+      const notes = await getNoteStore().list(userId, { pinned: true, limit: 5 });
       const monitors = await getMonitorStore().list(userId, 100);
       const monitorAttention = monitors.filter((monitor) => monitor.health === "down" || monitor.health === "degraded");
       return Response.json({
@@ -901,6 +994,7 @@ const server = Bun.serve<RealtimeSocketData>({
         tasks: { open: activeTasks.length, overdue, dueToday, completedToday: tasks.filter((task) => task.completedAt && Date.parse(task.completedAt) >= new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()) },
         missions: activeMissions,
         approvals,
+        notes: { pinned: notes },
         monitors: { attention: monitorAttention },
       });
     }

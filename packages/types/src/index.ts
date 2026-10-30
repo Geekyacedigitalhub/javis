@@ -14,3 +14,4 @@ export * from "./productivity";
 export * from "./preferences";
 export * from "./google";
 export * from "./monitoring";
+export * from "./note";

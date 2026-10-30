@@ -15,6 +15,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 - `services/ai` — model orchestration and agent loop
 - `services/memory` — persistent memory layer
 - `services/productivity` — durable personal tasks and daily briefing layer
+- `services/notes` — durable owner-scoped personal notes, tags, search, pinning, and task context links
 - `services/monitoring` — durable public-HTTPS monitors, state transitions, and proactive health history
 - `services/preferences` — persistent modes, personality, autonomy, and response settings
 - `services/google` — encrypted Gmail and Google Calendar OAuth integration
@@ -26,7 +27,7 @@ FROSH is designed as a multi-device personal agent with a central AI orchestrati
 ## Implemented foundation
 
 - Model-provider boundary with Gemini and OpenAI adapters, plus a truthful offline test fallback
-- Persistent conversation context, user preferences, and memory-candidate review
+- Persistent conversation context, user preferences, personal notes, and memory-candidate review
 - Permissioned tools, an approval center, agent runs, mission/automation records, and audit trails
 - Proactive public-HTTPS health monitoring with bounded probes, durable state transitions, and a command-center history
 - Web Control Center, Android companion source, and an opt-in desktop-device agent
@@ -77,6 +78,14 @@ bun run migrate:verify # fail if anything is pending or a checksum drifted
 bun run build:web      # production build of the control center
 ```
 
+### Personal knowledge notes
+
+**Notes** in the Control Center are a durable, owner-scoped personal knowledge
+base. Notes have bounded titles/content/tags, keyword and exact-tag search,
+pinning for the daily briefing, and an optional link to an existing task. The
+API rejects a linked task that does not belong to the active user; deleting a
+task never silently deletes the note that records its context.
+
 ### Proactive service monitoring
 
 **Monitors** in the control center can check a user-authorized public HTTPS
@@ -103,6 +112,7 @@ scheduled probes.
 | `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
 | `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
+| `tests/notes.test.ts` | Owner scope, validation, tags, search, pinning, task linkage, and deletion behavior for personal notes |
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, the coding loop, 404 |
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |
