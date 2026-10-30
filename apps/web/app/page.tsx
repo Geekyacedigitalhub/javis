@@ -244,6 +244,7 @@ export default function Home() {
           <Link className="nav-active" href="/">Chat</Link>
           <Link href="/today">Today</Link>
           <Link href="/memory">Memory</Link>
+          <Link href="/notes">Notes</Link>
           <Link href="/research">Research</Link>
           <Link href="/devices">Devices</Link>
           <Link href="/messages">Messages</Link>

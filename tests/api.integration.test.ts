@@ -340,6 +340,52 @@ describe("personal productivity", () => {
     expect(typeof briefing.body.headline).toBe("string");
     expect(briefing.body.tasks.completedToday.some((task: { id: string }) => task.id === created.body.task.id)).toBe(true);
     expect(Array.isArray(briefing.body.monitors.attention)).toBe(true);
+    expect(Array.isArray(briefing.body.notes.pinned)).toBe(true);
+  });
+});
+
+describe("personal notes", () => {
+  test("notes are owner-scoped, searchable, pin-able, and can link an owned task", async () => {
+    const task = await call(`/v1/tasks/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Ship the notes batch", priority: "high" }),
+    });
+    expect(task.status).toBe(201);
+
+    const created = await call(`/v1/notes/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({
+        title: "Deployment runbook",
+        content: "Deploy the API before checking the service monitor.",
+        tags: ["deploy", "runbook", "DEPLOY"],
+        pinned: true,
+        taskId: task.body.task.id,
+      }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.note).toMatchObject({ title: "Deployment runbook", pinned: true, taskId: task.body.task.id });
+    expect(created.body.note.tags).toEqual(["deploy", "runbook"]);
+
+    const searched = await call(`/v1/notes/users/${USER}?q=service%20monitor&tag=DEPLOY&pinned=true`);
+    expect(searched.status).toBe(200);
+    expect(searched.body.notes.map((note: { id: string }) => note.id)).toEqual([created.body.note.id]);
+
+    const unlinked = await call(`/v1/notes/users/${USER}/${created.body.note.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ pinned: false, taskId: null }),
+    });
+    expect(unlinked.status).toBe(200);
+    expect(unlinked.body.note).toMatchObject({ pinned: false });
+    expect(unlinked.body.note).not.toHaveProperty("taskId");
+
+    const rejectedLink = await call(`/v1/notes/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({ title: "Bad link", content: "No task should be invented.", tags: [], pinned: false, taskId: "missing-task" }),
+    });
+    expect(rejectedLink.status).toBe(400);
+
+    const deleted = await call(`/v1/notes/users/${USER}/${created.body.note.id}`, { method: "DELETE" });
+    expect(deleted.status).toBe(200);
   });
 });
 
