@@ -408,8 +408,7 @@ Agents can pass structured results to one another while the coordinator controls
 
 Support:
 
-- scheduled jobs
-- recurring jobs
+- scheduled and recurring jobs — **implemented** (durable owner-scoped schedules, idle leases, failure-safe rescheduling, Control Center workflow, and authenticated assistant tools with approval-gated mutations)
 - conditional triggers
 - webhooks
 - system events
