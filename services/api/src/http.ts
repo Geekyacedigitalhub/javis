@@ -12,6 +12,7 @@ import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferen
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import { closeFroshDatabaseClient } from "../../database/src";
 import { FroshAgentRunConcurrencyError, type FroshAgentRunMode, type FroshRunStatus } from "../../../packages/types/src/agent-run";
+import { publicAgentRun } from "./public-agent-run";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -111,7 +112,7 @@ function streamAgentRun(runId: string, userId: string, signal: AbortSignal) {
           const fingerprint = [run.status, run.updatedAt, run.toolCalls.length, run.pendingApprovalId ?? "", run.result ?? "", run.error ?? ""].join("\u0000");
           if (fingerprint !== lastFingerprint) {
             lastFingerprint = fingerprint;
-            send({ type: "run.updated", run });
+            send({ type: "run.updated", run: publicAgentRun(run) });
           }
           if (isTerminalAgentRun(run.status)) close();
         } catch (error) {
@@ -2240,7 +2241,7 @@ const server = Bun.serve<RealtimeSocketData>({
               leaseUntil:undefined,
               leaseOwner:undefined
             });
-            return Response.json({mission:publicMissionResponse(paused),run,budgetExceeded:true});
+            return Response.json({mission:publicMissionResponse(paused),run:publicAgentRun(run),budgetExceeded:true});
           }
 
           const continuationStatus=run.status==="failed"
@@ -2264,12 +2265,12 @@ const server = Bun.serve<RealtimeSocketData>({
           });
           if(updated.status==="waiting_approval"){
             await emit("mission.approval.required","Another approval is required to continue the mission.",run.id,{toolCallsUsed,executionDurationMs});
-            return Response.json({mission:publicMissionResponse(updated),run});
+            return Response.json({mission:publicMissionResponse(updated),run:publicAgentRun(run)});
           }
           if(updated.status==="running"){
             return fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
           }
-          return Response.json({mission:publicMissionResponse(updated),run});
+          return Response.json({mission:publicMissionResponse(updated),run:publicAgentRun(run)});
         }
         const response=await fetch(new URL("/v1/missions/users/"+encodeURIComponent(userId)+"/"+encodeURIComponent(id),request.url),{method:"POST",headers:request.headers});
         return response;
@@ -2399,7 +2400,7 @@ const server = Bun.serve<RealtimeSocketData>({
             const stopped = run.providerContinuation
               ? await codingSessions.reject(approvalId)
               : await codingLoop.reject(approvalId);
-            return Response.json({ approval: await approvalStore.get(approvalId), run: stopped });
+            return Response.json({ approval: await approvalStore.get(approvalId), run: publicAgentRun(stopped) });
           }
         }
         try {
@@ -2423,7 +2424,7 @@ const server = Bun.serve<RealtimeSocketData>({
             const resumed = run.providerContinuation
               ? await codingSessions.approveAndResume(approvalId)
               : await codingLoop.resumeAfterApproval(run.id, approvalId);
-            return Response.json({ approval: await approvalStore.get(approvalId), run: resumed });
+            return Response.json({ approval: await approvalStore.get(approvalId), run: publicAgentRun(resumed) });
           } catch (error) {
             return Response.json(
               {
@@ -2477,7 +2478,9 @@ const server = Bun.serve<RealtimeSocketData>({
       const counts = { queued: 0, running: 0, waiting_approval: 0, completed: 0, failed: 0, cancelled: 0 };
       for (const run of all) counts[run.status] += 1;
 
-      const runs = (requested === "all" ? all : all.filter((run) => run.status === requested)).slice(0, limit);
+      const runs = (requested === "all" ? all : all.filter((run) => run.status === requested))
+        .slice(0, limit)
+        .map(publicAgentRun);
       return Response.json({ runs, counts });
     }
 
@@ -2492,12 +2495,12 @@ const server = Bun.serve<RealtimeSocketData>({
       if (!cancelled) {
         const current = await agentRunStore.get(runId);
         if (!current || current.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
-        return Response.json({ error: "Only queued, running, or approval-waiting agent runs can be cancelled.", run: current }, { status: 409 });
+        return Response.json({ error: "Only queued, running, or approval-waiting agent runs can be cancelled.", run: publicAgentRun(current) }, { status: 409 });
       }
       // Persist first, then interrupt any provider request in this process. The
       // store's terminal-write guard also covers providers that race this abort.
       abortActiveAgentRun(cancelled.id);
-      return Response.json({ run: cancelled });
+      return Response.json({ run: publicAgentRun(cancelled) });
     }
 
     const agentRunRetryMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/retry$/);
@@ -2525,7 +2528,7 @@ const server = Bun.serve<RealtimeSocketData>({
           idempotencyKey,
         });
         return Response.json(
-          { sourceRunId: source.id, run: created.run, fresh: true },
+          { sourceRunId: source.id, run: publicAgentRun(created.run), fresh: true },
           {
             status: created.created ? 202 : 200,
             headers: created.created ? undefined : { "Idempotent-Replay": "true" },
@@ -2592,7 +2595,7 @@ const server = Bun.serve<RealtimeSocketData>({
       if (!run || run.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
 
       const pendingApproval = run.pendingApprovalId ? await approvalStore.get(run.pendingApprovalId) : null;
-      return Response.json({ run, pendingApproval });
+      return Response.json({ run: publicAgentRun(run), pendingApproval });
     }
 
     if (request.method === "POST" && url.pathname === "/v1/agent-runs") {
@@ -2639,14 +2642,14 @@ const server = Bun.serve<RealtimeSocketData>({
         // atomically for races across processes.
         if (idempotencyKey) {
           const prior = await agentRunStore.findByIdempotencyKey(configuredUserId, idempotencyKey);
-          if (prior) return Response.json(prior, { headers: { "Idempotent-Replay": "true" } });
+          if (prior) return Response.json(publicAgentRun(prior), { headers: { "Idempotent-Replay": "true" } });
         }
 
         if (background) {
           const createdRun = await startAgentRunInBackground({
             goal, message, mode, userId: configuredUserId, conversationId, idempotencyKey,
           });
-          return Response.json(createdRun.run, {
+          return Response.json(publicAgentRun(createdRun.run), {
             status: createdRun.created ? 202 : 200,
             headers: createdRun.created ? undefined : { "Idempotent-Replay": "true" },
           });
@@ -2670,7 +2673,7 @@ const server = Bun.serve<RealtimeSocketData>({
               onRunCreated,
             });
 
-        return Response.json(run, {
+        return Response.json(publicAgentRun(run), {
           status: created ? 201 : 200,
           headers: created ? undefined : { "Idempotent-Replay": "true" },
         });
