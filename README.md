@@ -114,7 +114,11 @@ check; local in-memory mode intentionally supports only explicit **Check now**
 requests and does not pretend to provide restart-safe schedules. Current
 degraded/down monitors also appear in **Today**. Set
 `FROSH_MONITORING_ENABLED=0` to leave the monitor API available while disabling
-scheduled probes.
+scheduled probes. A configured live assistant can list/read monitor state and
+transition events. Creating, changing, checking, or deleting a monitor always
+uses an approval because those operations enable, alter, or trigger outbound
+network probes; every monitor is selected through server-authenticated owner
+context rather than a model-supplied user ID.
 
 ### Test suite
 
@@ -125,6 +129,7 @@ scheduled probes.
 | `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
 | `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
+| `tests/monitor-tools.test.ts` | Authenticated assistant monitor reads/events, approvals, immediate bounded probes, SSRF validation, and owner isolation |
 | `tests/notes.test.ts` | Owner scope, validation, tags, search, pinning, task linkage, and deletion behavior for personal notes |
 | `tests/personal-knowledge-tools.test.ts` | Authenticated assistant note search/list/read, owner-context propagation, bounded pinned context, and prompt-injection resistance |
 | `tests/task-tools.test.ts` | Authenticated assistant task reads, bounded content, owner isolation, validation, and approval-gated task mutations |
