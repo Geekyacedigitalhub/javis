@@ -113,7 +113,7 @@ export class CodingSessionManager {
       result = await this.generateForRun(
         runId,
         { system: CODING_SYSTEM, messages, tools: listTools() },
-        { continuation: run.providerContinuation ? { continuation: run.providerContinuation } : undefined },
+        { continuation: run.providerContinuation ? { continuation: run.providerContinuation } : undefined, userId: run.userId },
       );
     } catch (error) {
       const current = await agentRunStore.get(runId);
@@ -193,7 +193,7 @@ export class CodingSessionManager {
 
     let resolved: Awaited<ReturnType<typeof resolveApproval>>;
     try {
-      resolved = await resolveApproval(approvalId, "approved");
+      resolved = await resolveApproval(approvalId, "approved", { runId: run.id, userId: run.userId });
     } catch (error) {
       const latestApproval = await approvalStore.get(approvalId);
       if (latestApproval?.status === "approved") {
@@ -248,6 +248,7 @@ export class CodingSessionManager {
               output: JSON.stringify(resolved.result),
             },
           },
+          userId: run.userId,
         },
       );
     } catch (error) {

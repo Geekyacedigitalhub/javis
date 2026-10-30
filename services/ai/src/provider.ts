@@ -36,6 +36,9 @@ export function throwIfProviderAborted(signal?: AbortSignal) {
 
 export interface ProviderGenerateOptions {
   runId?: string;
+  /** Authenticated owner for owner-scoped tool calls. This stays server-side
+   * and is never included in the model request payload. */
+  userId?: string;
   continuation?: ProviderContinuationInput;
   /** Caller-owned request lifetime. Providers must stop before emitting a
    * completed response when it is aborted, so callers never persist a turn the

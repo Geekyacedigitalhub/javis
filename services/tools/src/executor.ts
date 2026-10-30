@@ -1,11 +1,11 @@
 import { getTool } from "./registry";
-import type { FroshToolCall } from "../../../packages/types/src/javis";
+import type { FroshToolCall, FroshToolExecutionContext } from "../../../packages/types/src/javis";
 import type { FroshApprovalStore } from "../../../packages/types/src/approval";
 import { createApprovalStore } from "./approval-store-factory";
 
 export const approvalStore: FroshApprovalStore = createApprovalStore();
 
-export async function executeToolCall(call: FroshToolCall, options: { runId?: string } = {}) {
+export async function executeToolCall(call: FroshToolCall, options: FroshToolExecutionContext = {}) {
   const tool = getTool(call.name);
 
   if (!tool) {
@@ -45,7 +45,7 @@ export async function executeToolCall(call: FroshToolCall, options: { runId?: st
   }
 
   try {
-    const result = await tool.execute(call.arguments);
+    const result = await tool.execute(call.arguments, { userId: options.userId, runId: options.runId });
     return { ...call, status: "completed" as const, result };
   } catch (error) {
     return {
@@ -56,7 +56,7 @@ export async function executeToolCall(call: FroshToolCall, options: { runId?: st
   }
 }
 
-export async function resolveApproval(id: string, status: "approved" | "rejected") {
+export async function resolveApproval(id: string, status: "approved" | "rejected", context: FroshToolExecutionContext = {}) {
   const approval = await approvalStore.resolve(id, status);
   if (status === "rejected") return { approval, result: null };
 
@@ -64,6 +64,6 @@ export async function resolveApproval(id: string, status: "approved" | "rejected
   if (!tool) throw new Error("Approved tool no longer exists");
   if (tool.permission === "safe") throw new Error("Safe tools do not require approval");
 
-  const result = await tool.execute(approval.arguments);
+  const result = await tool.execute(approval.arguments, context);
   return { approval, result };
 }

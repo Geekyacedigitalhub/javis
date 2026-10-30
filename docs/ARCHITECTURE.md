@@ -35,6 +35,7 @@ Every tool has:
 - timeout/failure handling
 - audit event
 - user-facing result
+- server-supplied execution context for authenticated owner and durable run IDs; these identifiers never come from model tool arguments
 
 ## Agent system
 

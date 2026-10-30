@@ -628,11 +628,13 @@ const server = Bun.serve<RealtimeSocketData>({
         if (!message) return Response.json({ error: "message is required" }, { status: 400 });
 
         const requestedUserId = typeof body?.userId === "string" ? body.userId : undefined;
-        if (!webAuthenticated && requestedUserId && requestedUserId !== configuredUserId) {
-          return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
+        if (requestedUserId && requestedUserId !== configuredUserId) {
+          return Response.json({ error: "Chat is not available for another user." }, { status: 403 });
         }
 
-        const userId = webAuthenticated ? requestedUserId : configuredUserId;
+        // This deployment's web/device credentials map to one configured owner.
+        // A client body must never become an owner selector for model tools.
+        const userId = configuredUserId;
         const conversationId = typeof body?.conversationId === "string" ? body.conversationId : undefined;
         const encoder = new TextEncoder();
         const stream = new ReadableStream({
@@ -680,16 +682,15 @@ const server = Bun.serve<RealtimeSocketData>({
           body && typeof body === "object" && !Array.isArray(body)
             ? { ...(body as Record<string, unknown>) }
             : body;
-        if (!webAuthenticated && deviceId && chatBody && typeof chatBody === "object") {
+        if (chatBody && typeof chatBody === "object") {
           const requestedUserId = typeof (chatBody as Record<string, unknown>).userId === "string"
             ? (chatBody as Record<string, unknown>).userId
             : undefined;
           if (requestedUserId && requestedUserId !== configuredUserId) {
-            return Response.json({ error: "Device credential cannot access another configured user." }, { status: 403 });
+            return Response.json({ error: "Chat is not available for another user." }, { status: 403 });
           }
-          (chatBody as Record<string, unknown>).userId = configuredUserId;
         }
-        return Response.json(await postChat(chatBody));
+        return Response.json(await postChat(chatBody, configuredUserId));
       } catch (error) {
         const message = error instanceof Error && error.message ? error.message : "Request failed";
         return Response.json(
@@ -2632,7 +2633,7 @@ const server = Bun.serve<RealtimeSocketData>({
       // Orphan approval: nothing is waiting on it, so approving means performing
       // the action it described, exactly once.
       try {
-        const resolved = await resolveApproval(approvalId, "approved");
+        const resolved = await resolveApproval(approvalId, "approved", { userId: configuredUserId, runId: approval.runId });
         return Response.json({ approval: resolved.approval, result: resolved.result });
       } catch (error) {
         const latest = await approvalStore.get(approvalId);

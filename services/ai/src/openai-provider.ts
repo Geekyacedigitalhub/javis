@@ -21,9 +21,9 @@ type GenerateOptions = ProviderGenerateOptions;
 
 type StreamOptions = GenerateOptions;
 
-async function executeTimedToolCall(call:FroshToolCall, runId?:string){
+async function executeTimedToolCall(call:FroshToolCall, runId?:string, userId?:string){
   const startedAt=Date.now();
-  const result=await executeToolCall(call,{runId});
+  const result=await executeToolCall(call,{runId,userId});
   return {...result,durationMs:Math.max(0,Date.now()-startedAt)};
 }
 
@@ -153,7 +153,7 @@ export class OpenAIProvider {
           continue;
         }
 
-        const result = await executeTimedToolCall(planned, options.runId);
+        const result = await executeTimedToolCall(planned, options.runId, options.userId);
         throwIfProviderAborted(options.signal);
         executedCalls.push(result);
 
@@ -335,7 +335,7 @@ export class OpenAIProvider {
         }
 
         throwIfProviderAborted(options.signal);
-        const result = await executeTimedToolCall(planned, options.runId);
+        const result = await executeTimedToolCall(planned, options.runId, options.userId);
         throwIfProviderAborted(options.signal);
         executedCalls.push(result);
 

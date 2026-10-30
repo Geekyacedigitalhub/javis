@@ -17,4 +17,5 @@ import "./media-tools";
 import "./contact-tools";
 
 import "./memory-tools";
+import "./note-tools";
 import "./messaging-tools";

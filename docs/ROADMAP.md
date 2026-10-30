@@ -293,7 +293,7 @@ Android → FROSH API → authenticated Windows Agent → PC
 - tasks
 - reminders
 - calendar
-- notes — **implemented** (durable owner-scoped notes, tags, search, pinning, task links, API, and Control Center workflow)
+- notes — **implemented** (durable owner-scoped notes, tags, search, pinning, task links, API, Control Center workflow, and authenticated assistant retrieval tools)
 - document organization
 - daily planning
 - meeting preparation

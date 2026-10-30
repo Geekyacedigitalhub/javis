@@ -1,16 +1,23 @@
+import type { FroshToolExecutionContext } from "../../../packages/types/src/javis";
 import { registerTool } from "./registry";
 import { getConversationMemoryStore } from "../../memory/src/conversation-memory-factory";
 import { removeMemoryFact } from "../../memory/src/conversation-memory";
-import { listMemoryCandidates, listUserMemoryCandidates } from "../../memory/src/memory-candidates";
+import { listUserMemoryCandidates } from "../../memory/src/memory-candidates";
+
+function owner(context?: FroshToolExecutionContext): string {
+  const userId = context?.userId?.trim();
+  if (!userId) throw new Error("Personal memory is available only in an authenticated FROSH session.");
+  return userId;
+}
 
 registerTool({
   name: "list_memory_candidates",
-  description: "List pending FROSH memory candidates for user review. Read-only.",
+  description: "List the authenticated user's pending FROSH memory candidates for review. Read-only.",
   permission: "safe",
   parameters: { type: "object", properties: {}, additionalProperties: false },
-  async execute() {
-    return listMemoryCandidates("pending");
-  }
+  async execute(_args, context) {
+    return listUserMemoryCandidates(owner(context));
+  },
 });
 
 registerTool({
@@ -21,10 +28,10 @@ registerTool({
     type: "object",
     properties: {
       memoryId: { type: "string" },
-      fact: { type: "string", description: "Optional exact fact to remove instead of deleting the whole memory record." }
+      fact: { type: "string", description: "Optional exact fact to remove instead of deleting the whole memory record." },
     },
     required: ["memoryId"],
-    additionalProperties: false
+    additionalProperties: false,
   },
   async execute(args) {
     const memoryId = typeof args.memoryId === "string" ? args.memoryId.trim() : "";
@@ -46,69 +53,56 @@ registerTool({
     }
     await store.upsert(updated);
     return { accepted: true, message: "Memory fact removed.", memory: updated };
-  }
+  },
 });
-
 
 registerTool({
   name: "get_my_memory",
-  description: "Show the approved long-term memories FROSH has stored for the current user.",
+  description: "Show the approved long-term memories FROSH has stored for the authenticated user.",
   permission: "safe",
   parameters: {
     type: "object",
-    properties: {
-      userId: { type: "string" },
-      limit: { type: "number" }
-    },
-    required: ["userId"],
-    additionalProperties: false
+    properties: { limit: { type: "integer", minimum: 1, maximum: 100 } },
+    additionalProperties: false,
   },
-  async execute(args) {
-    const userId = typeof args.userId === "string" ? args.userId.trim() : "";
+  validate(args) {
+    if (args.limit !== undefined && (!Number.isInteger(args.limit) || (args.limit as number) < 1 || (args.limit as number) > 100)) {
+      return "limit must be an integer between 1 and 100.";
+    }
+    return null;
+  },
+  async execute(args, context) {
     const limit = typeof args.limit === "number" ? args.limit : 50;
-    if (!userId) return { accepted: false, message: "A user ID is required." };
     const { getUserMemoryStore } = await import("../../memory/src/user-memory-factory");
-    return getUserMemoryStore().list(userId, limit);
-  }
+    return getUserMemoryStore().list(owner(context), limit);
+  },
 });
 
 registerTool({
   name: "forget_my_memory",
-  description: "Delete one approved long-term memory belonging to the current user.",
+  description: "Delete one approved long-term memory belonging to the authenticated user.",
   permission: "confirm",
   parameters: {
     type: "object",
-    properties: {
-      userId: { type: "string" },
-      memoryId: { type: "string" }
-    },
-    required: ["userId", "memoryId"],
-    additionalProperties: false
+    properties: { memoryId: { type: "string" } },
+    required: ["memoryId"],
+    additionalProperties: false,
   },
-  async execute(args) {
-    const userId = typeof args.userId === "string" ? args.userId.trim() : "";
+  async execute(args, context) {
     const memoryId = typeof args.memoryId === "string" ? args.memoryId.trim() : "";
-    if (!userId || !memoryId) return { accepted: false, message: "User ID and memory ID are required." };
+    if (!memoryId) return { accepted: false, message: "A memory ID is required." };
     const { getUserMemoryStore } = await import("../../memory/src/user-memory-factory");
-    const deleted = await getUserMemoryStore().delete(memoryId, userId);
+    const deleted = await getUserMemoryStore().delete(memoryId, owner(context));
     return { accepted: deleted, message: deleted ? "Long-term memory deleted." : "Memory not found for this user." };
-  }
+  },
 });
-
 
 registerTool({
   name: "list_my_memory_candidates",
-  description: "List pending memory candidates belonging only to the current user.",
+  description: "List pending memory candidates belonging only to the authenticated user.",
   permission: "safe",
-  parameters: {
-    type: "object",
-    properties: { userId: { type: "string" } },
-    required: ["userId"],
-    additionalProperties: false
+  parameters: { type: "object", properties: {}, additionalProperties: false },
+  async execute(_args, context) {
+    return listUserMemoryCandidates(owner(context));
   },
-  async execute(args) {
-    const userId = typeof args.userId === "string" ? args.userId.trim() : "";
-    if (!userId) return { accepted: false, message: "A user ID is required." };
-    return listUserMemoryCandidates(userId);
-  }
 });

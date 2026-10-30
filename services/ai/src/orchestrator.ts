@@ -12,7 +12,7 @@ export class FroshOrchestrator {
 
     for (const call of result.toolCalls ?? []) {
       throwIfProviderAborted(options.signal);
-      const completed = call.status === "planned" ? await executeToolCall(call) : call;
+      const completed = call.status === "planned" ? await executeToolCall(call, { userId: options.userId, runId: options.runId }) : call;
       throwIfProviderAborted(options.signal);
       toolCalls.push(completed);
     }
