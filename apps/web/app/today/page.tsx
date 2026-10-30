@@ -13,6 +13,7 @@ type Briefing = {
   tasks: { open: number; overdue: Task[]; dueToday: Task[]; completedToday: Task[] };
   missions: Array<{ id: string; goal: string; status: string }>;
   approvals: Array<{ id: string; toolName: string; reason: string }>;
+  monitors: { attention: Array<{ id: string; name: string; health: "degraded" | "down"; lastError?: string }> };
 };
 
 const API = "/api/frosh";
@@ -110,6 +111,7 @@ export default function TodayPage() {
         <article><strong>{briefing?.tasks.dueToday.length ?? 0}</strong><span>due today</span></article>
         <article><strong>{briefing?.tasks.overdue.length ?? 0}</strong><span>overdue</span></article>
         <article><strong>{briefing?.approvals.length ?? 0}</strong><span>pending approvals</span></article>
+        <article><strong>{briefing?.monitors.attention.length ?? 0}</strong><span>service alerts</span></article>
       </section>
 
       <form className="task-create" onSubmit={createTask}>
@@ -138,8 +140,9 @@ export default function TodayPage() {
           {briefing?.tasks.overdue.map((task) => <p key={task.id}>⚠ <strong>{task.title}</strong> is overdue.</p>)}
           {briefing?.tasks.dueToday.map((task) => <p key={task.id}>◷ <strong>{task.title}</strong> is due today.</p>)}
           {briefing?.approvals.map((approval) => <p key={approval.id}>✓ <Link href="/approvals">{approval.toolName}</Link> needs approval.</p>)}
+          {briefing?.monitors.attention.map((monitor) => <p key={monitor.id}>⚠ <Link href="/monitors">{monitor.name}</Link> is {monitor.health}.{monitor.lastError ? ` ${monitor.lastError}` : ""}</p>)}
           {briefing?.missions.map((mission) => <p key={mission.id}>◈ <Link href={`/missions/${mission.id}`}>{mission.goal}</Link> · {mission.status.replace("_", " ")}</p>)}
-          {!briefing?.tasks.overdue.length && !briefing?.tasks.dueToday.length && !briefing?.approvals.length && !briefing?.missions.length && <p className="empty">Nothing urgent right now.</p>}
+          {!briefing?.tasks.overdue.length && !briefing?.tasks.dueToday.length && !briefing?.approvals.length && !briefing?.monitors.attention.length && !briefing?.missions.length && <p className="empty">Nothing urgent right now.</p>}
         </aside>
       </section>
     </main>

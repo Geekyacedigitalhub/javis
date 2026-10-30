@@ -85,10 +85,10 @@ export function validateResearchUrl(rawUrl: string): URL {
   return url;
 }
 
-async function assertPublicHost(url: URL): Promise<void> {
+async function assertPublicHost(url: URL, enforceResearchAllowlist = true): Promise<void> {
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
   const allowlist = configuredHosts();
-  if (allowlist.length && !allowlist.includes(host)) {
+  if (enforceResearchAllowlist && allowlist.length && !allowlist.includes(host)) {
     throw new ResearchRequestError("This research host is not in FROSH_RESEARCH_ALLOWED_HOSTS.");
   }
 
@@ -106,6 +106,11 @@ async function assertPublicHost(url: URL): Promise<void> {
   if (!addresses.length || addresses.some(({ address }) => isPrivateAddress(address))) {
     throw new ResearchRequestError("The research host resolves to a private or unsafe address.");
   }
+}
+
+/** Internal shared guard for non-research public HTTPS egress such as monitors. */
+export async function assertPublicProbeUrl(url: URL): Promise<void> {
+  return assertPublicHost(url, false);
 }
 
 function decodeCodePoint(value: string, radix: number, original: string): string {

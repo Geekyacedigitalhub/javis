@@ -339,6 +339,7 @@ describe("personal productivity", () => {
     expect(briefing.status).toBe(200);
     expect(typeof briefing.body.headline).toBe("string");
     expect(briefing.body.tasks.completedToday.some((task: { id: string }) => task.id === created.body.task.id)).toBe(true);
+    expect(Array.isArray(briefing.body.monitors.attention)).toBe(true);
   });
 });
 
@@ -459,6 +460,42 @@ describe("research", () => {
     });
     expect(status).toBe(400);
     expect(body.error).toContain("Private network");
+  });
+});
+
+describe("proactive monitors", () => {
+  test("creates, lists, pauses, and removes an owner-scoped public HTTPS monitor", async () => {
+    const refused = await call(`/v1/monitors/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({ name: "Private", url: "https://127.0.0.1/status", intervalMinutes: 5 }),
+    });
+    expect(refused.status).toBe(400);
+
+    const created = await call(`/v1/monitors/users/${USER}`, {
+      method: "POST",
+      body: JSON.stringify({ name: "FROSH API", url: "https://example.com/status", intervalMinutes: 5 }),
+    });
+    expect(created.status).toBe(201);
+    expect(created.body.monitor).toMatchObject({ name: "FROSH API", status: "active", health: "unknown" });
+    expect(created.body.monitor).not.toHaveProperty("leaseOwner");
+
+    const listed = await call(`/v1/monitors/users/${USER}`);
+    expect(listed.status).toBe(200);
+    expect(listed.body.monitors.some((monitor: { id: string }) => monitor.id === created.body.monitor.id)).toBe(true);
+
+    const paused = await call(`/v1/monitors/users/${USER}/${created.body.monitor.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "paused" }),
+    });
+    expect(paused.status).toBe(200);
+    expect(paused.body.monitor.status).toBe("paused");
+
+    const events = await call(`/v1/monitors/users/${USER}/${created.body.monitor.id}/events`);
+    expect(events.status).toBe(200);
+    expect(events.body.events).toEqual([]);
+
+    const removed = await call(`/v1/monitors/users/${USER}/${created.body.monitor.id}`, { method: "DELETE" });
+    expect(removed.status).toBe(200);
   });
 });
 
