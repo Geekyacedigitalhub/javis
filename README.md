@@ -120,6 +120,15 @@ uses an approval because those operations enable, alter, or trigger outbound
 network probes; every monitor is selected through server-authenticated owner
 context rather than a model-supplied user ID.
 
+### Scheduled automation assistance
+
+**Automations** are durable, owner-scoped future FROSH instructions. A configured
+live assistant can list and inspect them, but automation prompts are displayed
+as bounded untrusted reference data. Creating, editing, pausing/resuming, or
+deleting an automation always requires approval because it changes what FROSH
+will do later. Tool validation rejects unsafe schedules—including one-time jobs
+in the past—before an approval can be created.
+
 ### Test suite
 
 | File | Covers |
@@ -128,6 +137,7 @@ context rather than a model-supplied user ID.
 | `tests/missions.test.ts` | Mission lifecycle, leases, quota fence, event ownership |
 | `tests/validation.test.ts` | Identifier and multi-line text guards (regression) |
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
+| `tests/automation-tools.test.ts` | Authenticated assistant automation reads, bounded prompts, approval-gated mutations, schedule validation, and owner isolation |
 | `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
 | `tests/monitor-tools.test.ts` | Authenticated assistant monitor reads/events, approvals, immediate bounded probes, SSRF validation, and owner isolation |
 | `tests/notes.test.ts` | Owner scope, validation, tags, search, pinning, task linkage, and deletion behavior for personal notes |

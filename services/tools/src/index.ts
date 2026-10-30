@@ -20,4 +20,5 @@ import "./memory-tools";
 import "./note-tools";
 import "./task-tools";
 import "./monitor-tools";
+import "./automation-tools";
 import "./messaging-tools";
