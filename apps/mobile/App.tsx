@@ -5,7 +5,7 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import * as Speech from "expo-speech";
 import type { FroshDevice } from "../../packages/types/src/device";
 import type { FroshAgentRun } from "../../packages/types/src/agent-run";
-import { analyzeVision, cancelAgentRun, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, setDeviceCredential, startAgentRun, streamMessage, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
+import { analyzeVision, cancelAgentRun, getAssistantStatus, getConversation, listConversations, listDevices, registerDevice, resolveApproval, setDeviceCredential, startAgentRun, streamAgentRun, streamMessage, type FroshAssistantStatus, type FroshConversationMessage, type FroshConversationSummary } from "./src/api";
 import { connectFroshRealtime } from "./src/realtime";
 import type { FroshApprovalRequest } from "../../packages/types/src/approval";
 import type { FroshNotification } from "../../packages/types/src/notifications";
@@ -59,6 +59,7 @@ export default function App() {
   const cameraRef = useRef<CameraView>(null);
   const busyRef = useRef(false);
   const chatAbortRef = useRef<AbortController | null>(null);
+  const taskStreamAbortRef = useRef<AbortController | null>(null);
 
   function refreshAssistantStatus() {
     return getAssistantStatus().then((result) => setAssistantStatus(result.assistant)).catch(() => setAssistantStatus(null));
@@ -127,6 +128,24 @@ export default function App() {
       if (event.type === "approval.created") setApproval(event.approval);
     }, setRealtimeStatus);
   }, [paired]);
+
+  useEffect(() => {
+    if (!paired || !run || ["completed", "failed", "cancelled"].includes(run.status)) return;
+    const controller = new AbortController();
+    taskStreamAbortRef.current = controller;
+    void streamAgentRun(run.id, (event) => {
+      if (event.type !== "run.updated") return;
+      // A late event for a task the user replaced must not overwrite the newer
+      // task card. Terminal stream closure is normal and needs no UI error.
+      setRun((current) => current?.id === event.run.id ? event.run : current);
+    }, controller.signal).catch((error) => {
+      if (!controller.signal.aborted) setReply(error instanceof Error ? error.message : "Live task monitoring stopped.");
+    });
+    return () => {
+      controller.abort();
+      if (taskStreamAbortRef.current === controller) taskStreamAbortRef.current = null;
+    };
+  }, [paired, run?.id, run?.status]);
 
   useEffect(() => {
     try {

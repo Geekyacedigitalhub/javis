@@ -11,7 +11,7 @@ import { closeTaskStore, getTaskStore } from "../../productivity/src";
 import { closeUserPreferenceStore, getUserPreferenceStore } from "../../preferences/src";
 import { closeGoogleIntegrationStore, getGoogleIntegrationStore, GoogleIntegrationError, GoogleIntegrationService } from "../../google/src";
 import { closeFroshDatabaseClient } from "../../database/src";
-import { FroshAgentRunConcurrencyError, type FroshAgentRunMode } from "../../../packages/types/src/agent-run";
+import { FroshAgentRunConcurrencyError, type FroshAgentRunMode, type FroshRunStatus } from "../../../packages/types/src/agent-run";
 import type {
   FroshMission,
   FroshMissionEvent,
@@ -58,6 +58,88 @@ async function startAgentRunInBackground(input: {
 
 const queuedRunWorkers = new Set<string>();
 let queuedRunDrainTimer: ReturnType<typeof setInterval> | undefined;
+const AGENT_RUN_STREAM_POLL_MS = 1_000;
+const AGENT_RUN_STREAM_HEARTBEAT_MS = 20_000;
+const AGENT_RUN_STREAM_MAX_MS = 15 * 60 * 1_000;
+
+function isTerminalAgentRun(status: FroshRunStatus) {
+  return status === "completed" || status === "failed" || status === "cancelled";
+}
+
+/**
+ * Durable run monitoring does not depend on this API instance owning work.
+ * Polling the owner-scoped store means a reconnect can observe a worker on a
+ * different instance, while only the owner-scoped run record reaches the SSE
+ * client. The stream closes at a terminal state or its bounded lifetime.
+ */
+function streamAgentRun(runId: string, userId: string, signal: AbortSignal) {
+  const encoder = new TextEncoder();
+  let stop: () => void = () => {};
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
+      let polling = false;
+      let lastFingerprint = "";
+      let pollTimer: ReturnType<typeof setInterval> | undefined;
+      let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+      let lifetimeTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        if (pollTimer) clearInterval(pollTimer);
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
+        if (lifetimeTimer) clearTimeout(lifetimeTimer);
+        signal.removeEventListener("abort", close);
+        try { controller.close(); } catch { /* client already disconnected */ }
+      };
+      stop = close;
+      const send = (event: unknown) => {
+        if (closed || signal.aborted) return;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+      const poll = async () => {
+        if (closed || polling) return;
+        polling = true;
+        try {
+          const run = await agentRunStore.get(runId);
+          if (!run || run.userId !== userId) {
+            send({ type: "error", message: "Agent run not found" });
+            close();
+            return;
+          }
+          const fingerprint = [run.status, run.updatedAt, run.toolCalls.length, run.pendingApprovalId ?? "", run.result ?? "", run.error ?? ""].join("\u0000");
+          if (fingerprint !== lastFingerprint) {
+            lastFingerprint = fingerprint;
+            send({ type: "run.updated", run });
+          }
+          if (isTerminalAgentRun(run.status)) close();
+        } catch (error) {
+          logOperationalError("Agent-run stream poll failed", error);
+          send({ type: "error", message: "Agent-run monitoring failed" });
+          close();
+        } finally {
+          polling = false;
+        }
+      };
+
+      signal.addEventListener("abort", close, { once: true });
+      await poll();
+      if (closed) return;
+      pollTimer = setInterval(() => void poll(), AGENT_RUN_STREAM_POLL_MS);
+      heartbeatTimer = setInterval(() => send({ type: "heartbeat" }), AGENT_RUN_STREAM_HEARTBEAT_MS);
+      lifetimeTimer = setTimeout(close, AGENT_RUN_STREAM_MAX_MS);
+    },
+    cancel() { stop(); },
+  });
+  return new Response(stream, {
+    headers: {
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
+      "connection": "keep-alive",
+    },
+  });
+}
 
 function scheduleQueuedAgentRun(runId: string, userId: string) {
   if (queuedRunWorkers.has(runId)) return;
@@ -2459,6 +2541,17 @@ const server = Bun.serve<RealtimeSocketData>({
         logOperationalError("Fresh agent-run retry failed", error);
         return Response.json({ error: "Could not start a fresh retry." }, { status: 500 });
       }
+    }
+
+    const agentRunStreamMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/stream$/);
+    if (agentRunStreamMatch && request.method === "GET") {
+      const userId = decodeBoundedUserId(agentRunStreamMatch[1]);
+      const runId = decodeBoundedResourceId(agentRunStreamMatch[2]);
+      if (!userId || !runId) return Response.json({ error: "Invalid agent run identifier" }, { status: 400 });
+      if (userId !== configuredUserId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      const run = await agentRunStore.get(runId);
+      if (!run || run.userId !== userId) return Response.json({ error: "Agent run not found" }, { status: 404 });
+      return streamAgentRun(runId, userId, request.signal);
     }
 
     const agentRunEventsMatch = url.pathname.match(/^\/v1\/agent-runs\/users\/([^/]+)\/([^/]+)\/events$/);
