@@ -205,9 +205,9 @@ function ensureContinuationSize(contents: GeminiContent[]): Array<Record<string,
   return persisted;
 }
 
-async function executeTimedToolCall(call: FroshToolCall, runId?: string) {
+async function executeTimedToolCall(call: FroshToolCall, runId?: string, userId?: string) {
   const startedAt = Date.now();
-  const result = await executeToolCall(call, { runId });
+  const result = await executeToolCall(call, { runId, userId });
   return { ...result, durationMs: Math.max(0, Date.now() - startedAt) };
 }
 
@@ -437,7 +437,7 @@ export class GeminiProvider {
         };
         throwIfAborted(options.signal);
         yield { type: "tool", name: planned.name, status: "planned", toolCallId: planned.id };
-        const result = await executeTimedToolCall(planned, options.runId);
+        const result = await executeTimedToolCall(planned, options.runId, options.userId);
         throwIfAborted(options.signal);
         executedCalls.push(result);
         yield {
@@ -519,7 +519,7 @@ export class GeminiProvider {
           status: "planned",
         };
         throwIfAborted(options.signal);
-        const result = await executeTimedToolCall(planned, options.runId);
+        const result = await executeTimedToolCall(planned, options.runId, options.userId);
         throwIfAborted(options.signal);
         executedCalls.push(result);
 

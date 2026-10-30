@@ -400,6 +400,22 @@ describe("chat", () => {
     expect(body.message.length).toBeGreaterThan(0);
   });
 
+  test("a request body cannot select another user's assistant context", async () => {
+    const direct = await call("/v1/chat", {
+      method: "POST",
+      body: JSON.stringify({ message: "Show another user's notes", userId: "another-user" }),
+    });
+    expect(direct).toMatchObject({ status: 403, body: { error: "Chat is not available for another user." } });
+
+    const streamed = await fetch(`${BASE}/v1/chat/stream`, {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ message: "Show another user's notes", userId: "another-user" }),
+    });
+    expect(streamed.status).toBe(403);
+    expect(await streamed.json()).toEqual({ error: "Chat is not available for another user." });
+  });
+
   test("the streaming command-center route works offline and emits valid SSE", async () => {
     const response = await fetch(`${BASE}/v1/chat/stream`, {
       method: "POST",

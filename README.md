@@ -82,9 +82,13 @@ bun run build:web      # production build of the control center
 
 **Notes** in the Control Center are a durable, owner-scoped personal knowledge
 base. Notes have bounded titles/content/tags, keyword and exact-tag search,
-pinning for the daily briefing, and an optional link to an existing task. The
-API rejects a linked task that does not belong to the active user; deleting a
-task never silently deletes the note that records its context.
+pinning for the daily briefing, and an optional link to an existing task. Up to
+five pinned notes are also added to each authenticated assistant turn as
+bounded, explicitly untrusted reference data. The assistant can safely search,
+list, and read the authenticated owner's notes through owner-scoped tools; the
+owner ID is server context, never a model-supplied tool argument. The API
+rejects a linked task that does not belong to the active user; deleting a task
+never silently deletes the note that records its context.
 
 ### Proactive service monitoring
 
@@ -113,6 +117,7 @@ scheduled probes.
 | `tests/automation.test.ts` | Schedule validation bounds and next-run arithmetic |
 | `tests/monitoring.test.ts` | Public HTTPS monitor validation, lease behavior, SSRF rejection, and bounded probe behavior |
 | `tests/notes.test.ts` | Owner scope, validation, tags, search, pinning, task linkage, and deletion behavior for personal notes |
+| `tests/personal-knowledge-tools.test.ts` | Authenticated assistant note search/list/read, owner-context propagation, bounded pinned context, and prompt-injection resistance |
 | `tests/migrations.test.ts` | Migration discovery, ordering, integrity, column coverage |
 | `tests/api.integration.test.ts` | Boots the API and exercises auth, missions, automations, chat, the coding loop, 404 |
 | `tests/android-modules.test.ts` | Native-module layout, autolinking opt-in, Kotlin escape sequences |

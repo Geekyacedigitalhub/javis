@@ -1,9 +1,12 @@
 import { getGoogleIntegrationStore } from "../../google/src";
 import { GoogleIntegrationService } from "../../google/src/service";
 import { registerTool } from "./registry";
+import type { FroshToolExecutionContext } from "../../../packages/types/src/javis";
 
-function userId(): string {
-  return process.env.FROSH_USER_ID?.trim() || "default-user";
+function userId(context?: FroshToolExecutionContext): string {
+  const owner = context?.userId?.trim();
+  if (!owner) throw new Error("Google data is available only in an authenticated FROSH session.");
+  return owner;
 }
 
 function google(): GoogleIntegrationService {
@@ -30,8 +33,8 @@ registerTool({
     }
     return null;
   },
-  async execute(args) {
-    return { messages: await google().listUnreadGmail(userId(), args.limit as number | undefined) };
+  async execute(args, context) {
+    return { messages: await google().listUnreadGmail(userId(context), args.limit as number | undefined) };
   },
 });
 
@@ -57,8 +60,8 @@ registerTool({
     }
     return null;
   },
-  async execute(args) {
-    return { events: await google().listCalendarEvents(userId(), args) };
+  async execute(args, context) {
+    return { events: await google().listCalendarEvents(userId(context), args) };
   },
 });
 
@@ -88,7 +91,7 @@ registerTool({
     if (args.location !== undefined && typeof args.location !== "string") return "location must be text.";
     return null;
   },
-  async execute(args) {
-    return { event: await google().createCalendarEvent(userId(), args) };
+  async execute(args, context) {
+    return { event: await google().createCalendarEvent(userId(context), args) };
   },
 });

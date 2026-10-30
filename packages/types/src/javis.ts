@@ -26,6 +26,13 @@ export interface FroshToolCall {
 }
 export type JavisToolCall = FroshToolCall;
 
+export interface FroshToolExecutionContext {
+  /** Authenticated owner, supplied only by the server — never by model output. */
+  userId?: string;
+  /** Durable run binding when the tool was requested by an agent run. */
+  runId?: string;
+}
+
 export interface FroshToolDefinition {
   name: string;
   description: string;
@@ -37,7 +44,9 @@ export interface FroshToolDefinition {
    * cannot be honoured however the user answers it.
    */
   validate?: (args: Record<string, unknown>) => string | null;
-  execute: (args: Record<string, unknown>) => Promise<unknown>;
+  /** Context comes from the authenticated server request, never the model's
+   * JSON arguments. Existing tools may ignore it. */
+  execute: (args: Record<string, unknown>, context?: FroshToolExecutionContext) => Promise<unknown>;
 }
 export type JavisToolDefinition = FroshToolDefinition;
 

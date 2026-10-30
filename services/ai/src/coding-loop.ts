@@ -146,7 +146,7 @@ export class CodingLoop {
     private readonly options: { maxSteps?: number; maxCorrections?: number; runTimeoutMs?: number } = {},
   ) {}
 
-  private async generateForRun(runId: string, input: Parameters<ProviderClient["generate"]>[0]) {
+  private async generateForRun(runId: string, input: Parameters<ProviderClient["generate"]>[0], userId?: string) {
     const controller = new AbortController();
     const unregister = registerAgentRunAbortController(runId, controller);
     const timeout = setTimeout(() => {
@@ -155,7 +155,7 @@ export class CodingLoop {
         .catch(() => undefined);
     }, agentRunTimeoutMs(this.options.runTimeoutMs));
     try {
-      return await this.model.generate(input, { runId, signal: controller.signal });
+      return await this.model.generate(input, { runId, userId, signal: controller.signal });
     } finally {
       clearTimeout(timeout);
       unregister();
@@ -233,7 +233,7 @@ export class CodingLoop {
 
     let result: unknown;
     try {
-      result = (await resolveApproval(approvalId, "approved")).result;
+      result = (await resolveApproval(approvalId, "approved", { runId, userId: run.userId })).result;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Approved action failed";
       await agentRunStore.update(runId, {
@@ -322,7 +322,7 @@ export class CodingLoop {
             },
           ],
           tools: listTools(),
-        });
+        }, run.userId);
       } catch (error) {
         const current = await agentRunStore.get(runId);
         if (error instanceof FroshProviderAbortError || current?.status === "cancelled" || isAgentRunTimedOut(current)) return current ?? run;
@@ -344,7 +344,7 @@ export class CodingLoop {
       for (const call of requested) {
         const current = await agentRunStore.get(runId);
         if (!current || current.status === "cancelled") return current ?? run;
-        const outcome = await executeToolCall(call, { runId });
+        const outcome = await executeToolCall(call, { runId, userId: run.userId });
         const afterTool = await agentRunStore.get(runId);
         if (!afterTool || afterTool.status === "cancelled") return afterTool ?? run;
         const outcomeResult = resultRecord(outcome);

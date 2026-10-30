@@ -11,7 +11,7 @@ export interface CodingTaskResult {
 export class CodingAgent {
   constructor(private readonly model: ProviderClient) {}
 
-  async run(messages: FroshMessage[]): Promise<CodingTaskResult> {
+  async run(messages: FroshMessage[], options: { userId?: string; runId?: string } = {}): Promise<CodingTaskResult> {
     const input = {
       system: [
         "You are FROSH's coding agent.",
@@ -25,12 +25,12 @@ export class CodingAgent {
       tools: listTools(),
     };
 
-    const result = await this.model.generate(input);
+    const result = await this.model.generate(input, options);
     const toolCalls: FroshToolCall[] = [];
     let requiresApproval = false;
 
     for (const call of result.toolCalls ?? []) {
-      const executed = await executeToolCall(call);
+      const executed = await executeToolCall(call, options);
       toolCalls.push(executed);
 
       const resultValue = executed.result;
