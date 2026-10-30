@@ -353,6 +353,11 @@ GET  /v1/agent-runs/users/:userId/:runId/checkpoints                  -> secret-
 GET  /v1/agent-runs/users/:userId/:runId/stream                       -> owner-scoped live durable-status SSE
 ```
 
+Every response above that includes a run — including `run.updated` SSE events
+and approval/mission continuation results — uses a public run projection.
+Server-only `providerContinuation` replay state is retained only in durable
+storage for a provider resume and is never serialized to HTTP or SSE clients.
+
 Without `mode: "loop"` the endpoint behaves exactly as before. With no live
 model key the development provider never calls a tool, so a loop run
 deterministically ends `failed` with the unproven-claim message — which is the
